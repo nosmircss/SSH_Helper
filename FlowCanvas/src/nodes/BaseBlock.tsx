@@ -35,6 +35,16 @@ function formatDuration(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
+// Maps a runtime branch scope-key (matching edge.data.branchPath) to a short badge label.
+function deriveBranchLabel(key: string): string {
+  if (key === 'then' || key === 'else' || key === 'default') return key;
+  const elif = key.match(/^elif\/(\d+)/);
+  if (elif) return `elif #${Number(elif[1]) + 1}`;
+  const c = key.match(/^cases\/(\d+)/);
+  if (c) return `case #${Number(c[1]) + 1}`;
+  return key;
+}
+
 // Live elapsed ticker: while a block runs, formats `now - start` via requestAnimationFrame,
 // re-rendering only when the formatted text changes. Returns null when not running, under reduced
 // motion, or before `start` is known — the badge then falls back to the settled duration.
@@ -77,6 +87,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     s.blockTimings.forEach((t) => { if (t.duration && t.duration > max) max = t.duration; });
     return max;
   });
+  const loopIteration = useFlowStore((s) => s.loopIterations.get(id));
+  const branchTakenKey = useFlowStore((s) => s.branchTaken.get(id));
 
   const handleBreakpointToggle = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -235,6 +247,30 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           marginLeft: 2,
         }}>
           {badgeText}
+        </span>
+      )}
+      {loopIteration != null && (
+        <span data-testid="exec-loop-badge" style={{
+          fontSize: 8,
+          color: 'var(--fc-text-secondary)',
+          background: 'var(--fc-surface-0)',
+          padding: '1px 4px',
+          borderRadius: 3,
+          marginLeft: 2,
+        }}>
+          ×{loopIteration}
+        </span>
+      )}
+      {branchTakenKey && (
+        <span data-testid="exec-branch-badge" style={{
+          fontSize: 8,
+          color: 'var(--fc-text-secondary)',
+          background: 'var(--fc-surface-0)',
+          padding: '1px 4px',
+          borderRadius: 3,
+          marginLeft: 2,
+        }}>
+          {deriveBranchLabel(branchTakenKey)}
         </span>
       )}
     </span>
