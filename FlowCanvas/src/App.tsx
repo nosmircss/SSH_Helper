@@ -27,6 +27,7 @@ import HostBar from './panels/HostBar';
 import VariableInspector from './panels/VariableInspector';
 import OutputPreview from './panels/OutputPreview';
 import DebugPanel from './panels/DebugPanel';
+import ProblemsPanel from './panels/ProblemsPanel';
 import SearchOverlay from './panels/SearchOverlay';
 import { sendLayoutAutosave } from './utils/layoutAutosave';
 import TimelinePanel from './panels/TimelinePanel';
@@ -387,6 +388,7 @@ function FlowCanvasInner() {
           {panelsVisible.timeline && <TimelinePanel />}
         </RightPanel>
         <DebugPanel />
+        <ProblemsPanel />
       </div>
     </div>
   );

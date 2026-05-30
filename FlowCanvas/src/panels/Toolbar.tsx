@@ -22,6 +22,9 @@ export default function Toolbar() {
   const toggleReducedMotion = useFlowStore((s) => s.toggleReducedMotion);
   const heatmapEnabled = useFlowStore((s) => s.heatmapEnabled);
   const toggleHeatmap = useFlowStore((s) => s.toggleHeatmap);
+  const problemsVisible = useFlowStore((s) => s.panelsVisible.problems);
+  const diagnostics = useFlowStore((s) => s.diagnostics);
+  const errorCount = diagnostics.filter((d) => d.severity === 'error').length;
   const toggleSearch = useFlowStore((s) => s.toggleSearch);
   const searchVisible = useFlowStore((s) => s.searchVisible);
 
@@ -223,6 +226,26 @@ export default function Toolbar() {
         title="Toggle run heatmap (color blocks by duration)"
       >
         🔥 Heatmap
+      </button>
+      <button
+        onClick={() => togglePanel('problems')}
+        style={btnStyle(problemsVisible ? 'var(--fc-accent)' : 'var(--fc-text-muted)', true)}
+        title="Toggle Problems panel (click a row to jump to the block)"
+      >
+        ⚠ Problems
+        {errorCount > 0 && (
+          <span style={{
+            marginLeft: 4,
+            padding: '0 5px',
+            borderRadius: 8,
+            background: 'var(--fc-diag-error)',
+            color: 'var(--fc-on-accent)',
+            fontSize: 10,
+            fontWeight: 700,
+          }}>
+            {errorCount}
+          </span>
+        )}
       </button>
       <div style={{ flex: 1 }} />
       <span style={{ color: labelColor, fontSize: 11 }}>Flow Canvas v2</span>

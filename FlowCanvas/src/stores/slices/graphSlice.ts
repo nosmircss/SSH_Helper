@@ -6,13 +6,14 @@ import { blockDefMap } from '../../blockDefs/registry';
 
 export const START_NODE_ID = '__start__';
 
-function clearedExportStatusState(): Pick<FlowStore, 'exportStatus'> {
+function clearedExportStatusState(): Pick<FlowStore, 'exportStatus' | 'diagnostics'> {
   return {
     exportStatus: {
       hasErrors: false,
       errors: [],
       warnings: [],
     },
+    diagnostics: [],
   };
 }
 

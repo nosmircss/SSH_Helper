@@ -9,6 +9,12 @@ export interface PanelSizes {
   outputHeight: number;
 }
 
+export interface NodeDiagnostic {
+  nodeId?: string;
+  severity: 'error' | 'warning';
+  message: string;
+}
+
 export const DEFAULT_PANEL_SIZES: PanelSizes = {
   rightPanelWidth: 600,
   outputHeight: 200,
@@ -31,6 +37,7 @@ export interface UISlice {
     debug: boolean;
     output: boolean;
     timeline: boolean;
+    problems: boolean;
   };
   panelSizes: PanelSizes;
   exportStatus: {
@@ -38,6 +45,7 @@ export interface UISlice {
     errors: string[];
     warnings: string[];
   };
+  diagnostics: NodeDiagnostic[];
 
   setTheme: (theme: 'dark' | 'light') => void;
   toggleTheme: () => void;
@@ -61,6 +69,7 @@ export interface UISlice {
   restorePanelSizes: (sizes: Partial<PanelSizes>) => void;
   setExportStatus: (status: UISlice['exportStatus']) => void;
   clearExportStatus: () => void;
+  setDiagnostics: (d: NodeDiagnostic[]) => void;
 }
 
 export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get) => ({
@@ -80,6 +89,7 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     debug: false,
     output: true,
     timeline: false,
+    problems: false,
   },
   panelSizes: { ...DEFAULT_PANEL_SIZES },
   exportStatus: {
@@ -87,6 +97,7 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     errors: [],
     warnings: [],
   },
+  diagnostics: [],
 
   setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
@@ -198,6 +209,9 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
         errors: [],
         warnings: [],
       },
+      diagnostics: [],
     });
   },
+
+  setDiagnostics: (d) => set({ diagnostics: d }),
 });

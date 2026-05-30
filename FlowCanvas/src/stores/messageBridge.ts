@@ -7,6 +7,7 @@ import { useFlowStore } from './useFlowStore';
 import type { Node, Edge } from '@xyflow/react';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import type { BlockExecState } from './slices/executionSlice';
+import type { NodeDiagnostic } from './slices/uiSlice';
 
 interface FlowCanvasTestHooks {
   onOutgoingMessage?: (msg: unknown) => void;
@@ -139,6 +140,14 @@ export function initMessageBridge(): () => void {
         errors,
         warnings,
       });
+
+      const rawDiag = Array.isArray(msg.diagnostics) ? msg.diagnostics : [];
+      const parsed: NodeDiagnostic[] = rawDiag.map((d: any) => ({
+        nodeId: d.nodeId != null ? String(d.nodeId) : undefined,
+        severity: d.severity === 'error' ? 'error' : 'warning',
+        message: String(d.message ?? ''),
+      }));
+      store.getState().setDiagnostics(parsed);
 
       if (!success && errors.length > 0) {
         messageBus.send({ type: 'show-error', message: `Flow Canvas export failed:\n\n${errors.join('\n')}` });
