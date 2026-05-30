@@ -13576,6 +13576,8 @@ namespace SSH_Helper
                 stepId = nodeId,
                 state = e.Skipped ? "skipped" : (e.Success == true ? "success" : "error"),
                 duration = e.DurationMs,
+                iterationCount = e.IterationCount,
+                branchTaken = e.BranchTaken,
                 variables
             });
 
