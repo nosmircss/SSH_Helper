@@ -111,7 +111,7 @@ test.describe('Flow Canvas Node Redesign', () => {
   test('exec-state precedence + heat ring unregressed (rail is a child, not the shadow)', async ({ page }) => {
     await loadGraphFixture(page, createSshBlockFixture());
     const container = page.locator('.react-flow__node[data-id="node-ssh"] > div').first();
-    // running → exec-pulse animation present on the first-child card (the rail is a separate child).
+    // running → breathing-halo (fc-exec-running) animation present on the first-child card (the rail is a separate child).
     await postHostMessage(page, { type: 'execution-update', stepId: 'node-ssh', state: 'running' });
     await expect
       .poll(() =>

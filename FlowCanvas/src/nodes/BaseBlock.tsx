@@ -5,6 +5,7 @@ import { useFlowStore } from '../stores/useFlowStore';
 import { mix } from '../utils/tokens';
 import { BlockIcon } from './BlockIcon';
 import './baseblock.css';
+import './execution-cinematics.css';
 
 export interface BlockNodeData {
   blockType: string;
@@ -17,14 +18,6 @@ export interface BlockNodeData {
   breakpoint?: boolean;
   [key: string]: unknown;
 }
-
-const execGlowColors: Record<string, string> = {
-  running: 'var(--fc-glow-running)',
-  success: 'var(--fc-glow-success)',
-  error: 'var(--fc-glow-error)',
-  skipped: 'var(--fc-glow-skipped)',
-  disabled: 'var(--fc-glow-disabled)',
-};
 
 // Token-driven heat ramp (Decision #4: no inline hex). cold→mid→hot interpolated
 // in OKLCH via color-mix so blocks tint by their relative run duration.
@@ -42,6 +35,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const toggleBreakpoint = useFlowStore((s) => s.toggleBreakpoint);
   const blockTimings = useFlowStore((s) => s.blockTimings);
   const heatmapEnabled = useFlowStore((s) => s.heatmapEnabled);
+  const reducedMotion = useFlowStore((s) => s.reducedMotion);
   const maxDuration = useFlowStore((s) => {
     // Heatmap off → skip the whole-map scan. heatTint (the only consumer) is gated on
     // heatmapEnabled too, so 0 is never observed while the heatmap is on. Returning a
@@ -91,11 +85,15 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       ? String(blockData.props['_preview'])
       : null;
 
-  const existingBoxShadow = execState !== 'idle' && execState !== 'disabled'
-    ? `0 0 16px ${execGlowColors[execState] || 'none'}`
-    : selected
-      ? '0 0 12px var(--fc-glow-selected)'
-      : 'none';
+  // running + error are class-driven: the fc-exec-running / fc-exec-error animations own the
+  // box-shadow via the cascade (CSS animations outrank inline styles), so no inline glow here.
+  // success settles to a soft static glow on the INLINE path so the heat ring still stacks;
+  // skipped keeps its glow; selection / idle unchanged.
+  const existingBoxShadow =
+    execState === 'success' ? '0 0 10px var(--fc-glow-success)'
+      : execState === 'skipped' ? '0 0 16px var(--fc-glow-skipped)'
+        : selected ? '0 0 12px var(--fc-glow-selected)'
+          : 'none';
 
   const containerStyle: CSSProperties = {
     background: isDisabled ? 'var(--fc-surface-disabled)' : 'var(--fc-node-surface)',
@@ -110,10 +108,11 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     position: 'relative',
   };
 
-  // Running pulse animation via inline keyframes
-  if (execState === 'running') {
-    containerStyle.animation = 'exec-pulse 1.5s ease-in-out infinite';
-  }
+  // running + error get a state class whose CSS animation owns the card's box-shadow/transform
+  // (breathing glow / shake+ripple). success + skipped stay on the inline box-shadow path.
+  const stateClass = execState === 'running' ? 'fc-exec-running'
+    : execState === 'error' ? 'fc-exec-error'
+      : undefined;
 
   // Accent rail: an absolutely-positioned child (NOT a CSS border) so it never participates in the
   // exec/heat boxShadow stack and survives crisp at low zoom. Category identity lives here + the icon.
@@ -179,7 +178,6 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         : 'var(--fc-state-error)',
       fontWeight: 600,
     }}>
-      {execState === 'running' && <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>◌</span>}
       {execState === 'running' ? 'RUNNING'
         : execState === 'success' ? '✓ DONE'
         : execState === 'skipped' ? '— SKIP'
@@ -204,9 +202,16 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   ) : null;
 
   return (
-    <div style={containerStyle}>
+    <div className={stateClass} style={containerStyle}>
       {/* Accent rail (category identity; absolutely positioned, out of the boxShadow stack) */}
       <span style={railStyle} data-testid="node-rail" />
+
+      {/* Running comet halo: a sweeping conic ring on the card edge. Render-only and gated by
+          reduced motion (no comet, no churn when motion is off). inset:0 keeps it inside the
+          border-box so it never grows the node or gets clipped. */}
+      {execState === 'running' && !reducedMotion && (
+        <span className="fc-run-halo" aria-hidden="true" />
+      )}
 
       {/* Input handle (top) */}
       <Handle
