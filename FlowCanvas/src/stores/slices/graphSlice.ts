@@ -128,7 +128,7 @@ function getBranchVisual(
   style: Record<string, unknown>;
   labelStyle?: Record<string, unknown>;
 } {
-  const defaultVisual = { style: { stroke: '#666' } };
+  const defaultVisual = { style: { stroke: 'var(--fc-edge-idle)' } };
   if (!blockType) return defaultVisual;
 
   const branchPath = metadata.branchPath;
@@ -140,30 +140,30 @@ function getBranchVisual(
     if (branchPath === 'else') {
       return {
         label: 'else',
-        style: { stroke: '#e74c3c', ...dashed },
-        labelStyle: { fill: '#e74c3c', fontSize: 11, fontWeight: 600 },
+        style: { stroke: 'var(--fc-state-error)', ...dashed },
+        labelStyle: { fill: 'var(--fc-state-error)', fontSize: 11, fontWeight: 600 },
       };
     }
     if (branchPath.startsWith('elif/')) {
       const condition = (metadata.condition ?? '').trim();
       return {
         label: condition ? `elif: ${condition}` : 'elif',
-        style: { stroke: '#f0c040', ...dashed },
-        labelStyle: { fill: '#f0c040', fontSize: 11, fontWeight: 600 },
+        style: { stroke: 'var(--fc-state-warning)', ...dashed },
+        labelStyle: { fill: 'var(--fc-state-warning)', fontSize: 11, fontWeight: 600 },
       };
     }
     return {
       label: 'then',
-      style: { stroke: '#2ecc71', ...dashed },
-      labelStyle: { fill: '#2ecc71', fontSize: 11, fontWeight: 600 },
+      style: { stroke: 'var(--fc-state-success)', ...dashed },
+      labelStyle: { fill: 'var(--fc-state-success)', fontSize: 11, fontWeight: 600 },
     };
   }
 
   if (blockType === 'foreach' || blockType === 'while') {
     return {
       label: 'do',
-      style: { stroke: '#f0c040', ...dashed },
-      labelStyle: { fill: '#f0c040', fontSize: 11, fontWeight: 600 },
+      style: { stroke: 'var(--fc-state-warning)', ...dashed },
+      labelStyle: { fill: 'var(--fc-state-warning)', fontSize: 11, fontWeight: 600 },
     };
   }
 
@@ -171,21 +171,21 @@ function getBranchVisual(
     if (branchPath === 'catch') {
       return {
         label: 'catch',
-        style: { stroke: '#e74c3c', ...dashed },
-        labelStyle: { fill: '#e74c3c', fontSize: 11, fontWeight: 600 },
+        style: { stroke: 'var(--fc-state-error)', ...dashed },
+        labelStyle: { fill: 'var(--fc-state-error)', fontSize: 11, fontWeight: 600 },
       };
     }
     if (branchPath === 'finally') {
       return {
         label: 'finally',
-        style: { stroke: '#4a9eff', ...dashed },
-        labelStyle: { fill: '#4a9eff', fontSize: 11, fontWeight: 600 },
+        style: { stroke: 'var(--fc-accent)', ...dashed },
+        labelStyle: { fill: 'var(--fc-accent)', fontSize: 11, fontWeight: 600 },
       };
     }
     return {
       label: 'do',
-      style: { stroke: '#2ecc71', ...dashed },
-      labelStyle: { fill: '#2ecc71', fontSize: 11, fontWeight: 600 },
+      style: { stroke: 'var(--fc-state-success)', ...dashed },
+      labelStyle: { fill: 'var(--fc-state-success)', fontSize: 11, fontWeight: 600 },
     };
   }
 
@@ -193,15 +193,15 @@ function getBranchVisual(
     if (branchPath === 'default' || branchPath === 'else') {
       return {
         label: 'default',
-        style: { stroke: '#e74c3c', ...dashed },
-        labelStyle: { fill: '#e74c3c', fontSize: 11, fontWeight: 600 },
+        style: { stroke: 'var(--fc-state-error)', ...dashed },
+        labelStyle: { fill: 'var(--fc-state-error)', fontSize: 11, fontWeight: 600 },
       };
     }
     const caseValue = (metadata.caseValue ?? '').trim();
     return {
       label: caseValue ? `case: ${caseValue}` : 'case',
-      style: { stroke: '#f0c040', ...dashed },
-      labelStyle: { fill: '#f0c040', fontSize: 11, fontWeight: 600 },
+      style: { stroke: 'var(--fc-state-warning)', ...dashed },
+      labelStyle: { fill: 'var(--fc-state-warning)', fontSize: 11, fontWeight: 600 },
     };
   }
 
@@ -210,8 +210,8 @@ function getBranchVisual(
     const branchLabel = index === null ? 'branch' : `branch ${index + 1}`;
     return {
       label: branchLabel,
-      style: { stroke: '#1abc9c', ...dashed },
-      labelStyle: { fill: '#1abc9c', fontSize: 11, fontWeight: 600 },
+      style: { stroke: 'var(--fc-cat-network-border)', ...dashed },
+      labelStyle: { fill: 'var(--fc-cat-network-border)', fontSize: 11, fontWeight: 600 },
     };
   }
 
@@ -317,14 +317,14 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
 
       if (isContinuation) {
         // Continuation edges get explicit styling — bypass getBranchVisual
-        edgeProps.style = { stroke: '#4a9eff' };
+        edgeProps.style = { stroke: 'var(--fc-accent)' };
         edgeProps.label = 'next';
-        edgeProps.labelStyle = { fill: '#4a9eff', fontSize: 9, fontWeight: 600 };
+        edgeProps.labelStyle = { fill: 'var(--fc-accent)', fontSize: 9, fontWeight: 600 };
         // No data assignment — continuation edges carry no branch metadata
       } else {
         const branchVisual = isContainer
           ? getBranchVisual(blockType, branchMetadata)
-          : { style: { stroke: '#666' } };
+          : { style: { stroke: 'var(--fc-edge-idle)' } };
         edgeProps.style = branchVisual.style;
         if (branchVisual.label) edgeProps.label = branchVisual.label;
         if (branchVisual.labelStyle) edgeProps.labelStyle = branchVisual.labelStyle;

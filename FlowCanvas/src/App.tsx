@@ -33,6 +33,7 @@ import TimelinePanel from './panels/TimelinePanel';
 import BlockContextMenu from './panels/BlockContextMenu';
 import EdgeContextMenu from './panels/EdgeContextMenu';
 import { blockDefMap, categoryColors } from './blockDefs/registry';
+import { resolveCssVar } from './utils/tokens';
 
 // Register custom node types
 const nodeTypes = {
@@ -277,17 +278,29 @@ function FlowCanvasInner() {
     ].filter(Boolean).join(' ') || undefined,
   }));
 
-  // Theme-dependent colors
-  const isDark = theme === 'dark';
-  const canvasBg = isDark ? '#1a1a2e' : '#f5f5f8';
-  const controlsBg = isDark ? '#222244' : '#e8e8f0';
-  const controlsBorder = isDark ? '#2a2a4a' : '#d0d0d8';
-  const minimapBg = isDark ? '#12122a' : '#e0e0e8';
-  const minimapMask = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.6)';
-  const dotColor = isDark ? '#2a2a4a' : '#c0c0c8';
+  // Canvas ships dark-only; values come from the token layer (styles/tokens.css).
+  const canvasBg = 'var(--fc-canvas-bg)';
+  const controlsBg = 'var(--fc-surface-1)';
+  const controlsBorder = 'var(--fc-border)';
+  const minimapBg = 'var(--fc-surface-0)';
+  const minimapMask = 'var(--fc-overlay-scrim)';
+  const dotColor = 'var(--fc-grid-dot)';
+  const selectedStroke = 'var(--fc-accent)';
+
+  // SVG presentation attributes in WebView2 may not accept var(), so resolve the minimap's
+  // mask/background/node colors to concrete strings once. CSS contexts (Background/Controls)
+  // keep the var() strings above.
+  const minimapColors = useMemo(() => ({
+    mask: resolveCssVar('var(--fc-overlay-scrim)', 'rgba(0,0,0,0.6)'),
+    bg: resolveCssVar('var(--fc-surface-0)', '#12122a'),
+    fallback: resolveCssVar('var(--fc-accent)', '#4a9eff'),
+    byCategory: Object.fromEntries(
+      (Object.keys(categoryColors) as Array<keyof typeof categoryColors>)
+        .map((k) => [k, resolveCssVar(categoryColors[k].border, '#4a9eff')]),
+    ),
+  }), []);
 
   // Build enhanced edges with animated type when running + selection highlight
-  const selectedStroke = isDark ? '#4a9eff' : '#2563eb';
   const displayEdges = edges.map((e) => ({
     ...e,
     ...(isRunning ? { type: 'animated' } : {}),
@@ -334,7 +347,7 @@ function FlowCanvasInner() {
               fitViewOptions={{ maxZoom: 0.85, padding: 0.15 }}
               proOptions={{ hideAttribution: true }}
               style={{ background: canvasBg }}
-              defaultEdgeOptions={{ type: 'smoothstep', style: { stroke: isDark ? '#555' : '#aaa' } }}
+              defaultEdgeOptions={{ type: 'smoothstep', style: { stroke: 'var(--fc-edge-idle)' } }}
             >
               <Controls
                 style={{ background: controlsBg, borderColor: controlsBorder, borderRadius: '6px' }}
@@ -344,9 +357,9 @@ function FlowCanvasInner() {
                 nodeColor={(node) => {
                   const bt = (node.data as any)?.blockType;
                   const def = bt ? blockDefMap.get(bt) : null;
-                  return def ? categoryColors[def.category].border : '#4a9eff';
+                  return def ? minimapColors.byCategory[def.category] ?? minimapColors.fallback : minimapColors.fallback;
                 }}
-                maskColor={minimapMask}
+                maskColor={minimapColors.mask}
               />
               <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={dotColor} />
             </ReactFlow>
