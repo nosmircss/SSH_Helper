@@ -21,6 +21,7 @@ import BaseBlock from './nodes/BaseBlock';
 import CommentNode from './nodes/CommentNode';
 import StartNode from './nodes/StartNode';
 import AnimatedEdge from './nodes/AnimatedEdge';
+import { EdgeMarkers } from './nodes/EdgeMarkers';
 import BranchBandsLayer from './nodes/BranchBandsLayer';
 import Palette from './panels/Palette';
 import Properties from './panels/Properties';
@@ -362,6 +363,7 @@ function FlowCanvasInner() {
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <EdgeMarkers />
       <Toolbar />
       <HostBar />
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
