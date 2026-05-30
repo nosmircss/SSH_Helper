@@ -251,7 +251,9 @@ namespace SSH_Helper.UI
                         break;
 
                     case "layout-save":
-                        SavePanelSizes(msg["panelSizes"] as JObject);
+                        // Pass the whole message so both panel sizes and the heatmap toggle
+                        // (which arrives without a panelSizes object) are visible.
+                        SavePanelSizes(msg);
                         break;
 
                     case "pref-save":
@@ -359,25 +361,30 @@ namespace SSH_Helper.UI
             if (ws.FlowCanvasOutputHeight > 0)
                 panelSizes["outputHeight"] = ws.FlowCanvasOutputHeight;
 
-            if (panelSizes.Count > 0)
-                SendMessage(new { type = "layout-restore", panelSizes });
+            if (panelSizes.Count > 0 || ws.FlowCanvasHeatmapEnabled.HasValue)
+                SendMessage(new { type = "layout-restore", panelSizes, heatmapEnabled = ws.FlowCanvasHeatmapEnabled ?? false });
 
             var rm = ws.FlowCanvasReducedMotion;
             if (rm.HasValue) SendMessage(new { type = "pref-restore", reducedMotion = rm.Value });
         }
 
-        private void SavePanelSizes(JObject? panelSizes)
+        private void SavePanelSizes(JObject? msg)
         {
-            if (_configService == null || panelSizes == null) return;
+            if (_configService == null || msg == null) return;
 
-            var rightWidth = panelSizes["rightPanelWidth"]?.Value<int>();
-            var outputHeight = panelSizes["outputHeight"]?.Value<int>();
+            var panelSizes = msg["panelSizes"] as JObject;
+            var rightWidth = panelSizes?["rightPanelWidth"]?.Value<int>();
+            var outputHeight = panelSizes?["outputHeight"]?.Value<int>();
+            // The heatmap toggle reuses the layout-save channel but carries no panelSizes object.
+            var heatmap = msg["heatmapEnabled"]?.Value<bool>();
+            if (rightWidth == null && outputHeight == null && heatmap == null) return;
 
             _configService.Update(c =>
             {
                 c.WindowState ??= new Models.WindowState();
                 if (rightWidth > 0) c.WindowState.FlowCanvasRightPanelWidth = rightWidth;
                 if (outputHeight > 0) c.WindowState.FlowCanvasOutputHeight = outputHeight;
+                if (heatmap.HasValue) c.WindowState.FlowCanvasHeatmapEnabled = heatmap.Value;
             });
         }
 

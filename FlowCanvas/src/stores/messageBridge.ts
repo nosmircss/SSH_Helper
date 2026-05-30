@@ -334,6 +334,9 @@ export function initMessageBridge(): () => void {
         }
         store.getState().restorePanelSizes(sizes);
       }
+      if (typeof msg.heatmapEnabled === 'boolean') {
+        store.getState().restoreHeatmapEnabled(msg.heatmapEnabled);
+      }
     }),
 
     // Restore UI prefs from WinForms persisted settings (no echo back to host)

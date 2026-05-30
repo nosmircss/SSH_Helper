@@ -20,6 +20,8 @@ export default function Toolbar() {
   const toggleSnapToGrid = useFlowStore((s) => s.toggleSnapToGrid);
   const reducedMotion = useFlowStore((s) => s.reducedMotion);
   const toggleReducedMotion = useFlowStore((s) => s.toggleReducedMotion);
+  const heatmapEnabled = useFlowStore((s) => s.heatmapEnabled);
+  const toggleHeatmap = useFlowStore((s) => s.toggleHeatmap);
   const toggleSearch = useFlowStore((s) => s.toggleSearch);
   const searchVisible = useFlowStore((s) => s.searchVisible);
 
@@ -214,6 +216,13 @@ export default function Toolbar() {
         title="Toggle execution timeline"
       >
         ⏱ Timeline
+      </button>
+      <button
+        onClick={toggleHeatmap}
+        style={btnStyle(heatmapEnabled ? 'var(--fc-accent)' : 'var(--fc-text-muted)', true)}
+        title="Toggle run heatmap (color blocks by duration)"
+      >
+        🔥 Heatmap
       </button>
       <div style={{ flex: 1 }} />
       <span style={{ color: labelColor, fontSize: 11 }}>Flow Canvas v2</span>

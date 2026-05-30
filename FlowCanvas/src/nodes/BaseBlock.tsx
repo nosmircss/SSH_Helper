@@ -24,11 +24,27 @@ const execGlowColors: Record<string, string> = {
   disabled: 'var(--fc-glow-disabled)',
 };
 
+// Token-driven heat ramp (Decision #4: no inline hex). cold→mid→hot interpolated
+// in OKLCH via color-mix so blocks tint by their relative run duration.
+function heatColor(ratio: number): string {
+  const r = Math.max(0, Math.min(1, ratio));
+  const from = r < 0.5 ? 'var(--fc-heat-cold)' : 'var(--fc-heat-mid)';
+  const to = r < 0.5 ? 'var(--fc-heat-mid)' : 'var(--fc-heat-hot)';
+  const pct = Math.round((r < 0.5 ? r * 2 : (r - 0.5) * 2) * 100);
+  return `color-mix(in oklch, ${to} ${pct}%, ${from})`;
+}
+
 function BaseBlock({ data, selected, id }: NodeProps) {
   const blockData = data as BlockNodeData;
   const def = blockDefMap.get(blockData.blockType);
   const toggleBreakpoint = useFlowStore((s) => s.toggleBreakpoint);
   const blockTimings = useFlowStore((s) => s.blockTimings);
+  const heatmapEnabled = useFlowStore((s) => s.heatmapEnabled);
+  const maxDuration = useFlowStore((s) => {
+    let max = 0;
+    s.blockTimings.forEach((t) => { if (t.duration && t.duration > max) max = t.duration; });
+    return max;
+  });
 
   const handleBreakpointToggle = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -51,6 +67,14 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     ? durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`
     : null;
 
+  // Run-heatmap tint: only on idle/success blocks so it never overrides the
+  // running pulse or the error glow (precedence). Render-time only — never
+  // written onto node.data, so the graph snapshot/export stays unchanged.
+  const heatTint = (heatmapEnabled && durationMs != null && maxDuration > 0
+    && (execState === 'idle' || execState === 'success'))
+    ? heatColor(durationMs / maxDuration)
+    : undefined;
+
   // Preview text should follow live editable props for this block type.
   // _preview is importer metadata and can become stale after local edits.
   const previewText = def.previewKey
@@ -61,6 +85,12 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       ? String(blockData.props['_preview'])
       : null;
 
+  const existingBoxShadow = execState !== 'idle' && execState !== 'disabled'
+    ? `0 0 16px ${execGlowColors[execState] || 'none'}`
+    : selected
+      ? '0 0 12px var(--fc-glow-selected)'
+      : 'none';
+
   const containerStyle: CSSProperties = {
     background: isDisabled ? 'var(--fc-surface-disabled)' : colors.bg,
     border: `2px solid ${selected ? 'var(--fc-border-selected)' : isDisabled ? 'var(--fc-border-muted)' : colors.border}`,
@@ -69,11 +99,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     maxWidth: isChild ? 260 : 280,
     overflow: 'hidden',
     opacity: isDisabled ? 0.5 : isChild ? 0.95 : 1,
-    boxShadow: execState !== 'idle' && execState !== 'disabled'
-      ? `0 0 16px ${execGlowColors[execState] || 'none'}`
-      : selected
-        ? '0 0 12px var(--fc-glow-selected)'
-        : 'none',
+    boxShadow: heatTint ? `0 0 0 3px ${heatTint}, ${existingBoxShadow}` : existingBoxShadow,
     transition: 'box-shadow 0.2s, border-color 0.2s, opacity 0.2s',
     position: 'relative',
   };

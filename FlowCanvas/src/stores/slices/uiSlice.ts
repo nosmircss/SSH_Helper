@@ -17,6 +17,7 @@ export const DEFAULT_PANEL_SIZES: PanelSizes = {
 export interface UISlice {
   theme: 'dark' | 'light';
   reducedMotion: boolean;
+  heatmapEnabled: boolean;
   snapToGrid: boolean;
   gridSize: number;
   searchQuery: string;
@@ -43,6 +44,8 @@ export interface UISlice {
   setReducedMotion: (value: boolean) => void;
   toggleReducedMotion: () => void;
   restoreReducedMotion: (value: boolean) => void;
+  toggleHeatmap: () => void;
+  restoreHeatmapEnabled: (enabled: boolean) => void;
   toggleSnapToGrid: () => void;
   setSearchQuery: (query: string) => void;
   nextSearchResult: () => void;
@@ -63,6 +66,7 @@ export interface UISlice {
 export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get) => ({
   theme: 'dark',
   reducedMotion: false,
+  heatmapEnabled: false,
   snapToGrid: false,
   gridSize: 20,
   searchQuery: '',
@@ -93,6 +97,15 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   },
   toggleReducedMotion: () => get().setReducedMotion(!get().reducedMotion),
   restoreReducedMotion: (value) => set({ reducedMotion: value }), // host-driven, no echo
+
+  // Reuses the existing layout-save channel so the host persists the toggle
+  // through WindowState (fewer message types). Restore is host-driven, no echo.
+  toggleHeatmap: () => set((s) => {
+    const next = !s.heatmapEnabled;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, heatmapEnabled: next });
+    return { heatmapEnabled: next };
+  }),
+  restoreHeatmapEnabled: (enabled) => set({ heatmapEnabled: enabled }),
 
   toggleSnapToGrid: () => set((s) => ({ snapToGrid: !s.snapToGrid })),
 
