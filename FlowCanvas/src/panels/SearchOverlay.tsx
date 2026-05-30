@@ -51,11 +51,11 @@ export default function SearchOverlay() {
         display: 'flex',
         alignItems: 'center',
         gap: 6,
-        background: '#12122a',
-        border: '1px solid #2a2a4a',
+        background: 'var(--fc-surface-0)',
+        border: '1px solid var(--fc-border)',
         borderRadius: 6,
         padding: '4px 8px',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+        boxShadow: 'var(--fc-shadow-sm)',
       }}
     >
       <input
@@ -68,10 +68,10 @@ export default function SearchOverlay() {
         style={{
           width: 180,
           padding: '4px 6px',
-          background: '#0d1117',
-          border: '1px solid #2a2a4a',
+          background: 'var(--fc-input-bg)',
+          border: '1px solid var(--fc-border)',
           borderRadius: 4,
-          color: '#ccc',
+          color: 'var(--fc-text)',
           fontSize: 12,
           outline: 'none',
         }}
@@ -80,7 +80,7 @@ export default function SearchOverlay() {
       <span
         style={{
           fontSize: 11,
-          color: total > 0 ? '#aaa' : '#666',
+          color: total > 0 ? 'var(--fc-text-secondary)' : 'var(--fc-text-faint)',
           whiteSpace: 'nowrap',
           minWidth: 48,
           textAlign: 'center',
@@ -95,9 +95,9 @@ export default function SearchOverlay() {
         title="Previous (Shift+Enter)"
         style={{
           background: 'none',
-          border: '1px solid #2a2a4a',
+          border: '1px solid var(--fc-border)',
           borderRadius: 3,
-          color: total > 0 ? '#ccc' : '#555',
+          color: total > 0 ? 'var(--fc-text)' : 'var(--fc-text-disabled)',
           cursor: total > 0 ? 'pointer' : 'default',
           padding: '2px 6px',
           fontSize: 12,
@@ -113,9 +113,9 @@ export default function SearchOverlay() {
         title="Next (Enter)"
         style={{
           background: 'none',
-          border: '1px solid #2a2a4a',
+          border: '1px solid var(--fc-border)',
           borderRadius: 3,
-          color: total > 0 ? '#ccc' : '#555',
+          color: total > 0 ? 'var(--fc-text)' : 'var(--fc-text-disabled)',
           cursor: total > 0 ? 'pointer' : 'default',
           padding: '2px 6px',
           fontSize: 12,
@@ -131,7 +131,7 @@ export default function SearchOverlay() {
         style={{
           background: 'none',
           border: 'none',
-          color: '#888',
+          color: 'var(--fc-text-muted)',
           cursor: 'pointer',
           padding: '2px 4px',
           fontSize: 14,

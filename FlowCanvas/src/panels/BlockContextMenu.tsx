@@ -106,12 +106,12 @@ export default function BlockContextMenu() {
         left: x,
         top: y,
         zIndex: 50,
-        background: '#12122a',
-        border: '1px solid #2a2a4a',
+        background: 'var(--fc-surface-0)',
+        border: '1px solid var(--fc-border)',
         borderRadius: 6,
         padding: '4px 0',
         minWidth: 180,
-        boxShadow: '0 6px 20px rgba(0, 0, 0, 0.5)',
+        boxShadow: 'var(--fc-shadow-sm)',
       }}
     >
       {menuItems.map((item, i) => {
@@ -121,7 +121,7 @@ export default function BlockContextMenu() {
               key={`sep-${i}`}
               style={{
                 height: 1,
-                background: '#2a2a4a',
+                background: 'var(--fc-border)',
                 margin: '4px 8px',
               }}
             />
@@ -140,14 +140,14 @@ export default function BlockContextMenu() {
               padding: '6px 12px',
               background: 'none',
               border: 'none',
-              color: item.label === 'Delete Block' ? '#e74c3c' : '#ccc',
+              color: item.label === 'Delete Block' ? 'var(--fc-state-error)' : 'var(--fc-text)',
               fontSize: 12,
               cursor: 'pointer',
               textAlign: 'left',
               transition: 'background 0.1s',
             }}
             onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.background = '#1e1e3a';
+              (e.currentTarget as HTMLElement).style.background = 'var(--fc-surface-2)';
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.background = 'none';

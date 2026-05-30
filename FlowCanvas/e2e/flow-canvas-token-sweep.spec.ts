@@ -71,9 +71,9 @@ test.describe('Flow Canvas Token Sweep', () => {
     expect(renderedBorder).toBe(tokenBorder);
   });
 
-  // The no-raw-hex sweep is incomplete until Task 5 finishes the panel sweep, so this CI gate
-  // stays disabled until Task 5 Step 4 un-skips it.
-  test.skip('no raw hex outside the token layer', async ({ page }) => {
+  // The panel sweep is complete (Task 5); this CI gate enforces Decision #4 — no raw hex in any
+  // resolved inline style except the one user-data comment color (DEFAULT_COMMENT_COLOR).
+  test('no raw hex outside the token layer', async ({ page }) => {
     await loadGraphFixture(page, createSshBlockFixture());
     await expect(page.locator('.react-flow__node[data-id="node-ssh"]')).toBeVisible();
 

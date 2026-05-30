@@ -52,8 +52,8 @@ export default function Palette() {
   return (
     <div style={{
       width: 180,
-      background: '#12122a',
-      borderRight: '1px solid #2a2a4a',
+      background: 'var(--fc-surface-0)',
+      borderRight: '1px solid var(--fc-border)',
       overflowY: 'auto',
       padding: '8px',
       display: 'flex',
@@ -64,7 +64,7 @@ export default function Palette() {
       <div style={{
         fontSize: 11,
         fontWeight: 600,
-        color: '#666',
+        color: 'var(--fc-text-faint)',
         textTransform: 'uppercase',
         letterSpacing: '1px',
         padding: '4px 0',
