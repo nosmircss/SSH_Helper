@@ -46,3 +46,17 @@ export type OutgoingCanvasMessage =
   (typeof CANVAS_HOST_MESSAGES)['outgoing'][keyof typeof CANVAS_HOST_MESSAGES['outgoing']];
 export type IncomingCanvasMessage =
   (typeof CANVAS_HOST_MESSAGES)['incoming'][keyof typeof CANVAS_HOST_MESSAGES['incoming']];
+
+/** Shape of an 'execution-update' host message (fields are validated loosely at parse time). */
+export interface ExecutionUpdateMessage {
+  type: 'execution-update';
+  stepId: string | number;
+  state: string;
+  duration?: number | null;
+  variables?: Record<string, unknown>;
+  changedKeys?: string[];
+  /** Loop body-execution count (foreach/while/repeat); number or null. */
+  iterationCount?: number | null;
+  /** Taken branch scope-key (if/switch), e.g. 'else', 'cases/2/do', 'elif/0/then'. */
+  branchTaken?: string | null;
+}

@@ -235,6 +235,18 @@ export function initMessageBridge(): () => void {
         const changedKeys = Array.isArray(msg.changedKeys) ? msg.changedKeys as string[] : undefined;
         state.setVariablesWithChanges(msg.variables as Record<string, unknown>, changedKeys);
       }
+
+      // Loop & branch instrumentation (final/summary; arrives with the completion message).
+      // Stored in transient executionSlice Maps — never written onto node.data, so export is unaffected.
+      if (msg.iterationCount != null) {
+        const n = Number(msg.iterationCount);
+        if (Number.isFinite(n) && n >= 0) {
+          state.setLoopIteration(stepId, n);
+        }
+      }
+      if (typeof msg.branchTaken === 'string' && msg.branchTaken.trim().length > 0) {
+        state.setBranchTaken(stepId, msg.branchTaken.trim());
+      }
     }),
 
     // Per-step output
