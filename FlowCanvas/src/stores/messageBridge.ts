@@ -8,12 +8,16 @@ import type { Node, Edge } from '@xyflow/react';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import type { BlockExecState } from './slices/executionSlice';
 import type { NodeDiagnostic } from './slices/uiSlice';
+import { isConnectionAllowed } from '../utils/connectionRules';
+import type { ConnectionVerdict } from '../utils/connectionRules';
+import type { Connection } from '@xyflow/react';
 
 interface FlowCanvasTestHooks {
   onOutgoingMessage?: (msg: unknown) => void;
   setGraphViaActions?: (graph: { nodes?: unknown[]; edges?: unknown[] }) => void;
   clearGraphViaActions?: () => void;
   getGraphSnapshot?: () => { nodes: unknown[]; edges: unknown[] };
+  isConnectionAllowed?: (conn: Connection, nodes: Node[], edges: Edge[]) => ConnectionVerdict;
 }
 
 function cloneForTest<T>(value: T): T {
@@ -97,6 +101,8 @@ function installFlowCanvasTestHooks(store: typeof useFlowStore): void {
       edges: state.edges,
     });
   };
+
+  hooks.isConnectionAllowed = (conn, nodes, edges) => isConnectionAllowed(conn, nodes, edges);
 
   globalWindow.__FLOWCANVAS_TEST_HOOKS__ = hooks;
 }
