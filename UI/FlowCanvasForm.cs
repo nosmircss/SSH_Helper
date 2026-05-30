@@ -254,6 +254,10 @@ namespace SSH_Helper.UI
                         SavePanelSizes(msg["panelSizes"] as JObject);
                         break;
 
+                    case "pref-save":
+                        SaveReducedMotionPref(msg);
+                        break;
+
                     case "layout-autosave":
                         OnLayoutAutosave?.Invoke(msg);
                         break;
@@ -357,6 +361,9 @@ namespace SSH_Helper.UI
 
             if (panelSizes.Count > 0)
                 SendMessage(new { type = "layout-restore", panelSizes });
+
+            var rm = ws.FlowCanvasReducedMotion;
+            if (rm.HasValue) SendMessage(new { type = "pref-restore", reducedMotion = rm.Value });
         }
 
         private void SavePanelSizes(JObject? panelSizes)
@@ -371,6 +378,18 @@ namespace SSH_Helper.UI
                 c.WindowState ??= new Models.WindowState();
                 if (rightWidth > 0) c.WindowState.FlowCanvasRightPanelWidth = rightWidth;
                 if (outputHeight > 0) c.WindowState.FlowCanvasOutputHeight = outputHeight;
+            });
+        }
+
+        private void SaveReducedMotionPref(JObject msg)
+        {
+            if (_configService == null) return;
+            var v = msg["reducedMotion"]?.Value<bool>();
+            if (v == null) return;
+            _configService.Update(c =>
+            {
+                c.WindowState ??= new Models.WindowState();
+                c.WindowState.FlowCanvasReducedMotion = v.Value;
             });
         }
 

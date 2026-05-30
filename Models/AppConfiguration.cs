@@ -502,6 +502,9 @@ namespace SSH_Helper.Models
         // Flow Canvas panel sizes (persisted from React UI)
         public int? FlowCanvasRightPanelWidth { get; set; }
         public int? FlowCanvasOutputHeight { get; set; }
+
+        // Flow Canvas reduced-motion pref (persisted from React UI; null = not yet set, defer to OS prefers-reduced-motion)
+        public bool? FlowCanvasReducedMotion { get; set; }
     }
 
     /// <summary>
