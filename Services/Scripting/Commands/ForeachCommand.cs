@@ -110,6 +110,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 saved[name] = (context.HasVariable(name), context.GetVariable(name));
 
             var evaluator = new ExpressionEvaluator(context);
+            int executed = 0;
 
             try
             {
@@ -128,13 +129,17 @@ namespace SSH_Helper.Services.Scripting.Commands
                     {
                         var whenCondition = context.SubstituteVariables(step.When);
                         if (!evaluator.Evaluate(whenCondition))
-                            continue; // Skip this item
+                            continue; // Skip this item (body not executed)
                     }
 
                     var result = await _executor.ExecuteStepsAsync(step.Do, context, cancellationToken, context.LoopDepth + 1);
+                    executed++;
 
                     if (result.ShouldExit || result.ShouldReturn)
+                    {
+                        result.IterationCount = executed;
                         return result;
+                    }
 
                     if (result.ShouldBreak)
                         break;
@@ -143,10 +148,13 @@ namespace SSH_Helper.Services.Scripting.Commands
                         continue;
 
                     if (!result.Success)
+                    {
+                        result.IterationCount = executed;
                         return result;
+                    }
                 }
 
-                return CommandResult.Ok();
+                return new CommandResult { Success = true, IterationCount = executed };
             }
             finally
             {
