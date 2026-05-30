@@ -47,15 +47,15 @@ function StartNode({ data, selected }: NodeProps) {
   if (importsCount > 0) activeBadges.push(`${importsCount} import${importsCount !== 1 ? 's' : ''}`);
 
   const containerStyle: CSSProperties = {
-    background: 'linear-gradient(135deg, #1a3a2a, #0d2a1a)',
-    border: `2px solid ${selected ? '#fff' : '#2ecc71'}`,
+    background: 'linear-gradient(135deg, var(--fc-start-grad-from), var(--fc-start-grad-to))',
+    border: `2px solid ${selected ? 'var(--fc-border-selected)' : 'var(--fc-start-accent)'}`,
     borderRadius: 8,
     minWidth: 260,
     maxWidth: 300,
     overflow: 'hidden',
     boxShadow: selected
-      ? '0 0 12px rgba(255,255,255,0.15)'
-      : '0 0 12px rgba(46, 204, 113, 0.15)',
+      ? '0 0 12px var(--fc-glow-selected)'
+      : '0 0 12px var(--fc-glow-start)',
     transition: 'box-shadow 0.2s, border-color 0.2s',
   };
 
@@ -63,14 +63,14 @@ function StartNode({ data, selected }: NodeProps) {
     <div style={containerStyle}>
       <div style={{
         padding: '6px 10px',
-        borderBottom: '1px solid rgba(46,204,113,0.2)',
+        borderBottom: '1px solid var(--fc-start-chip-border)',
         display: 'flex',
         alignItems: 'center',
         gap: 8,
       }}>
         <span style={{
-          background: '#2ecc71',
-          color: '#000',
+          background: 'var(--fc-start-accent)',
+          color: 'var(--fc-start-badge-text)',
           fontSize: 10,
           fontWeight: 700,
           padding: '2px 6px',
@@ -82,7 +82,7 @@ function StartNode({ data, selected }: NodeProps) {
           START
         </span>
         <span style={{
-          color: '#ccc',
+          color: 'var(--fc-text)',
           fontSize: 12,
           fontWeight: 600,
           overflow: 'hidden',
@@ -97,12 +97,12 @@ function StartNode({ data, selected }: NodeProps) {
         <div style={{ padding: '6px 10px', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {activeBadges.map((badge) => (
             <span key={badge} style={{
-              background: 'rgba(46,204,113,0.1)',
-              border: '1px solid rgba(46,204,113,0.25)',
+              background: 'var(--fc-start-chip-bg)',
+              border: '1px solid var(--fc-start-chip-border)',
               borderRadius: 3,
               padding: '1px 5px',
               fontSize: 9,
-              color: '#80d4a0',
+              color: 'var(--fc-start-chip-text)',
             }}>
               {badge}
             </span>
@@ -110,10 +110,11 @@ function StartNode({ data, selected }: NodeProps) {
         </div>
       )}
 
+      {/* Invariant: Start is source-only. Adding a target handle is caught by flow-canvas-connection-guards.spec.ts. */}
       <Handle
         type="source"
         position={Position.Bottom}
-        style={{ background: '#2ecc71', width: 8, height: 8, border: 'none' }}
+        style={{ background: 'var(--fc-start-accent)', width: 8, height: 8, border: 'none' }}
       />
     </div>
   );

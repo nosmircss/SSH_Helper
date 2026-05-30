@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { FlowStore } from '../useFlowStore';
 import { sendLayoutAutosave } from '../../utils/layoutAutosave';
+import { DEFAULT_COMMENT_COLOR } from '../../utils/tokens';
 
 export interface CommentSlice {
   addComment: (position: { x: number; y: number }, attachedToNodeId?: string) => void;
@@ -21,7 +22,7 @@ export const createCommentSlice: StateCreator<FlowStore, [], [], CommentSlice> =
       data: {
         commentId: id,
         text: '',
-        color: '#e0c040',
+        color: DEFAULT_COMMENT_COLOR,
         attachedToNodeId,
       },
       style: {

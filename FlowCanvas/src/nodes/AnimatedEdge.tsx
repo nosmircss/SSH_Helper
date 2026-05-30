@@ -3,9 +3,9 @@ import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
 import { useFlowStore } from '../stores/useFlowStore';
 
 const stateColors: Record<string, string> = {
-  success: '#2ecc71',
-  running: '#4a9eff',
-  error: '#e74c3c',
+  success: 'var(--fc-state-success)',
+  running: 'var(--fc-accent)',
+  error: 'var(--fc-state-error)',
 };
 
 function AnimatedEdge(props: EdgeProps) {
@@ -38,8 +38,8 @@ function AnimatedEdge(props: EdgeProps) {
   const sourceState = blockStates.get(source);
   const shouldAnimate = isRunning && (sourceState === 'success' || sourceState === 'running');
   const strokeColor = shouldAnimate
-    ? stateColors[sourceState!] || '#666'
-    : '#666';
+    ? stateColors[sourceState!] || 'var(--fc-edge-idle)'
+    : 'var(--fc-edge-idle)';
 
   if (shouldAnimate) {
     return (
@@ -87,7 +87,7 @@ function AnimatedEdge(props: EdgeProps) {
       markerEnd={markerEnd}
       style={{
         ...style,
-        stroke: '#666',
+        stroke: 'var(--fc-edge-idle)',
         strokeWidth: 2,
       }}
     />

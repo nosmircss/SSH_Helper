@@ -17,11 +17,11 @@ export interface BlockNodeData {
 }
 
 const execGlowColors: Record<string, string> = {
-  running: 'rgba(74, 158, 255, 0.4)',
-  success: 'rgba(46, 204, 113, 0.3)',
-  error: 'rgba(231, 76, 60, 0.3)',
-  skipped: 'rgba(150, 150, 150, 0.2)',
-  disabled: 'rgba(100, 100, 100, 0.2)',
+  running: 'var(--fc-glow-running)',
+  success: 'var(--fc-glow-success)',
+  error: 'var(--fc-glow-error)',
+  skipped: 'var(--fc-glow-skipped)',
+  disabled: 'var(--fc-glow-disabled)',
 };
 
 function BaseBlock({ data, selected, id }: NodeProps) {
@@ -36,7 +36,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     toggleBreakpoint(id);
   }, [id, toggleBreakpoint]);
 
-  if (!def) return <div style={{ color: '#e74c3c' }}>Unknown: {blockData.blockType}</div>;
+  if (!def) return <div style={{ color: 'var(--fc-state-error-text)' }}>Unknown: {blockData.blockType}</div>;
 
   const colors = categoryColors[def.category as BlockCategory];
   const execState = blockData.execState || 'idle';
@@ -62,8 +62,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       : null;
 
   const containerStyle: CSSProperties = {
-    background: isDisabled ? '#2a2a2a' : colors.bg,
-    border: `2px solid ${selected ? '#fff' : isDisabled ? '#555' : colors.border}`,
+    background: isDisabled ? 'var(--fc-surface-disabled)' : colors.bg,
+    border: `2px solid ${selected ? 'var(--fc-border-selected)' : isDisabled ? 'var(--fc-border-muted)' : colors.border}`,
     borderRadius: 8,
     minWidth: isChild ? 160 : 180,
     maxWidth: isChild ? 260 : 280,
@@ -72,7 +72,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     boxShadow: execState !== 'idle' && execState !== 'disabled'
       ? `0 0 16px ${execGlowColors[execState] || 'none'}`
       : selected
-        ? '0 0 12px rgba(255,255,255,0.15)'
+        ? '0 0 12px var(--fc-glow-selected)'
         : 'none',
     transition: 'box-shadow 0.2s, border-color 0.2s, opacity 0.2s',
     position: 'relative',
@@ -93,8 +93,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   };
 
   const badgeStyle: CSSProperties = {
-    background: isDisabled ? '#444' : colors.badge,
-    color: isDisabled ? '#888' : colors.badgeText,
+    background: isDisabled ? 'var(--fc-border-subtle)' : colors.badge,
+    color: isDisabled ? 'var(--fc-text-secondary)' : colors.badgeText,
     fontSize: 10,
     fontWeight: 700,
     padding: '2px 6px',
@@ -111,10 +111,10 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       display: 'flex',
       alignItems: 'center',
       gap: 3,
-      color: execState === 'running' ? '#4a9eff'
-        : execState === 'success' ? '#2ecc71'
-        : execState === 'skipped' ? '#888'
-        : '#e74c3c',
+      color: execState === 'running' ? 'var(--fc-accent)'
+        : execState === 'success' ? 'var(--fc-state-success)'
+        : execState === 'skipped' ? 'var(--fc-text-secondary)'
+        : 'var(--fc-state-error)',
       fontWeight: 600,
     }}>
       {execState === 'running' && <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>◌</span>}
@@ -125,8 +125,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       {durationText && (
         <span style={{
           fontSize: 8,
-          color: '#888',
-          background: '#1a1a2e',
+          color: 'var(--fc-text-secondary)',
+          background: 'var(--fc-surface-0)',
           padding: '1px 4px',
           borderRadius: 3,
           marginLeft: 2,
@@ -136,7 +136,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       )}
     </span>
   ) : isDisabled ? (
-    <span style={{ fontSize: 9, marginLeft: 'auto', color: '#666', fontWeight: 600 }}>
+    <span style={{ fontSize: 9, marginLeft: 'auto', color: 'var(--fc-text-faint)', fontWeight: 600 }}>
       ⏭ DISABLED
     </span>
   ) : null;
@@ -158,11 +158,11 @@ function BaseBlock({ data, selected, id }: NodeProps) {
             onClick={handleBreakpointToggle}
             style={{
               width: 10, height: 10, borderRadius: '50%',
-              background: hasBreakpoint ? '#e74c3c' : 'transparent',
-              border: hasBreakpoint ? 'none' : '1px solid #444',
+              background: hasBreakpoint ? 'var(--fc-state-error)' : 'transparent',
+              border: hasBreakpoint ? 'none' : '1px solid var(--fc-border-subtle)',
               flexShrink: 0,
               cursor: 'pointer',
-              boxShadow: hasBreakpoint ? '0 0 4px rgba(231,76,60,0.6)' : 'none',
+              boxShadow: hasBreakpoint ? '0 0 4px var(--fc-glow-error)' : 'none',
               transition: 'background 0.15s',
             }}
             title="Toggle breakpoint"
@@ -171,7 +171,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
 
         <span style={badgeStyle}>{def.type}</span>
         <span style={{
-          color: isDisabled ? '#666' : '#ccc',
+          color: isDisabled ? 'var(--fc-text-faint)' : 'var(--fc-text)',
           fontSize: 12,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -189,7 +189,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           padding: '4px 8px',
           fontFamily: 'monospace',
           fontSize: 11,
-          color: isDisabled ? '#555' : colors.text,
+          color: isDisabled ? 'var(--fc-text-disabled)' : colors.text,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -212,7 +212,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           position={Position.Right}
           id="false"
           style={{
-            background: '#e74c3c', width: 8, height: 8, border: 'none',
+            background: 'var(--fc-state-error)', width: 8, height: 8, border: 'none',
             top: '50%',
           }}
         />
@@ -227,7 +227,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           position={Position.Left}
           id="continue"
           style={{
-            background: '#4a9eff',
+            background: 'var(--fc-accent)',
             width: 10,
             height: 10,
             border: 'none',

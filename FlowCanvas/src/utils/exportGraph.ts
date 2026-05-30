@@ -1,6 +1,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import { blockDefMap } from '../blockDefs/registry';
 import { useFlowStore } from '../stores/useFlowStore';
+import { DEFAULT_COMMENT_COLOR } from './tokens';
 
 export interface CommentData {
   id: string;
@@ -120,7 +121,7 @@ export function buildExecutableGraphPayload(
       comments.push({
         id: n.id,
         text: String(data?.text ?? ''),
-        color: String(data?.color ?? '#e0c040'),
+        color: String(data?.color ?? DEFAULT_COMMENT_COLOR),
         x: n.position?.x ?? 0,
         y: n.position?.y ?? 0,
         width: (n.style?.width as number) ?? 200,
