@@ -1,4 +1,4 @@
-import { memo, type CSSProperties, useCallback } from 'react';
+import { memo, type CSSProperties, useCallback, useEffect, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { blockDefMap, categoryColors, type BlockCategory } from '../blockDefs/registry';
 import { useFlowStore } from '../stores/useFlowStore';
@@ -29,6 +29,38 @@ function heatColor(ratio: number): string {
   return `color-mix(in oklch, ${to} ${pct}%, ${from})`;
 }
 
+// Single source for the duration format (sub-second → "Nms", else "N.Ns") — shared by the
+// settled badge and the live ticker so the value can't drift between running and done.
+function formatDuration(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+// Live elapsed ticker: while a block runs, formats `now - start` via requestAnimationFrame,
+// re-rendering only when the formatted text changes. Returns null when not running, under reduced
+// motion, or before `start` is known — the badge then falls back to the settled duration.
+function useRunningElapsed(start: number | undefined, isRunning: boolean, reducedMotion: boolean): string | null {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isRunning || reducedMotion || start == null) {
+      setText(null);
+      return;
+    }
+    let raf = 0;
+    let last = '';
+    const tick = () => {
+      const next = formatDuration(Date.now() - start);
+      if (next !== last) {
+        last = next;
+        setText(next);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [start, isRunning, reducedMotion]);
+  return text;
+}
+
 function BaseBlock({ data, selected, id }: NodeProps) {
   const blockData = data as BlockNodeData;
   const def = blockDefMap.get(blockData.blockType);
@@ -52,6 +84,10 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     toggleBreakpoint(id);
   }, [id, toggleBreakpoint]);
 
+  // Live ticker — a hook, so it MUST run before the early return below (rules of hooks). It reads
+  // `start` directly off the timings Map; `timing` itself stays declared in the badge block below.
+  const liveText = useRunningElapsed(blockTimings.get(id)?.start, blockData.execState === 'running', reducedMotion);
+
   if (!def) return <div style={{ color: 'var(--fc-state-error-text)' }}>Unknown: {blockData.blockType}</div>;
 
   const colors = categoryColors[def.category as BlockCategory];
@@ -60,12 +96,12 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const isChild = !!blockData.props?.['_isChildOf'];
   const isDisabled = execState === 'disabled';
 
-  // Duration badge
+  // Duration badge: settled value after completion. While running, the live ticker (read above)
+  // drives the badge; on completion it locks to the measured duration.
   const timing = blockTimings.get(id);
   const durationMs = timing?.duration;
-  const durationText = durationMs != null
-    ? durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`
-    : null;
+  const durationText = durationMs != null ? formatDuration(durationMs) : null;
+  const badgeText = execState === 'running' ? liveText : durationText;
 
   // Run-heatmap tint: only on idle/success blocks so it never overrides the
   // running pulse or the error glow (precedence). Render-time only — never
@@ -189,8 +225,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         )
         : execState === 'skipped' ? '— SKIP'
         : '✗ ERROR'}
-      {durationText && (
-        <span style={{
+      {badgeText && (
+        <span data-testid="exec-duration-badge" style={{
           fontSize: 8,
           color: 'var(--fc-text-secondary)',
           background: 'var(--fc-surface-0)',
@@ -198,7 +234,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           borderRadius: 3,
           marginLeft: 2,
         }}>
-          {durationText}
+          {badgeText}
         </span>
       )}
     </span>
