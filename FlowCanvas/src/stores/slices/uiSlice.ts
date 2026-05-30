@@ -24,6 +24,7 @@ export interface UISlice {
   theme: 'dark' | 'light';
   reducedMotion: boolean;
   heatmapEnabled: boolean;
+  branchBandsEnabled: boolean;
   snapToGrid: boolean;
   gridSize: number;
   searchQuery: string;
@@ -55,6 +56,7 @@ export interface UISlice {
   restoreReducedMotion: (value: boolean) => void;
   toggleHeatmap: () => void;
   restoreHeatmapEnabled: (enabled: boolean) => void;
+  toggleBranchBands: () => void;
   toggleSnapToGrid: () => void;
   setSearchQuery: (query: string) => void;
   nextSearchResult: () => void;
@@ -79,6 +81,7 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   theme: 'dark',
   reducedMotion: false,
   heatmapEnabled: false,
+  branchBandsEnabled: true,
   snapToGrid: false,
   gridSize: 20,
   searchQuery: '',
@@ -121,6 +124,10 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     return { heatmapEnabled: next };
   }),
   restoreHeatmapEnabled: (enabled) => set({ heatmapEnabled: enabled }),
+
+  // Transient view preference (default-on, v1). Unlike heatmap it does not persist through
+  // WindowState — keeps the C# surface untouched for Wave 2a (trivial follow-on if requested).
+  toggleBranchBands: () => set((s) => ({ branchBandsEnabled: !s.branchBandsEnabled })),
 
   toggleSnapToGrid: () => set((s) => ({ snapToGrid: !s.snapToGrid })),
 

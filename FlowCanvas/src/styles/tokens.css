@@ -101,6 +101,19 @@
   --fc-cat-grid-icon: var(--fc-cat-grid-border);
   --fc-cat-timing-icon: var(--fc-cat-timing-border);
 
+  /* ── Wave 2a: branch containment bands (alias existing state/accent hues) ── */
+  --fc-branch-then: var(--fc-state-success);
+  --fc-branch-try: var(--fc-state-success);
+  --fc-branch-else: var(--fc-state-error);
+  --fc-branch-catch: var(--fc-state-error);
+  --fc-branch-default: var(--fc-state-error);
+  --fc-branch-elif: var(--fc-state-warning);
+  --fc-branch-do: var(--fc-state-warning);
+  --fc-branch-case: var(--fc-state-warning);
+  --fc-branch-finally: var(--fc-accent);
+  --fc-branch-parallel: var(--fc-cat-network-border);
+  --fc-branch-fallback: var(--fc-text-disabled);
+
   /* Glow / shadow scale */
   --fc-glow-running: oklch(68% 0.16 255 / 0.4);
   --fc-glow-running-min: oklch(68% 0.16 255 / 0.3);
