@@ -84,7 +84,7 @@ function CommentNode({ data, id }: NodeProps) {
           right: 4,
           width: 18,
           height: 18,
-          background: 'var(--fc-overlay-scrim)',
+          background: 'var(--fc-comment-btn-scrim)',
           border: 'none',
           borderRadius: 3,
           color: 'var(--fc-comment-ink)',

@@ -93,8 +93,14 @@
   --fc-glow-disabled: oklch(45% 0 0 / 0.2);
   --fc-glow-selected: oklch(98% 0 0 / 0.15);
   --fc-glow-start: oklch(72% 0.17 150 / 0.15);
+
+  /* Status-chip surfaces (dark tints echoing the pre-sweep #2a1a1a / #1a2a1a chip fills).
+     Paired with --fc-glow-error / --fc-glow-success on the BORDER for bg/border contrast. */
+  --fc-chip-error-bg: oklch(20% 0.04 25);
+  --fc-chip-success-bg: oklch(20% 0.04 150);
   --fc-shadow-sm: 0 2px 8px oklch(0% 0 0 / 0.2);
   --fc-overlay-scrim: oklch(0% 0 0 / 0.6);
+  --fc-comment-btn-scrim: oklch(0% 0 0 / 0.2);
 
   /* Radii / type scale */
   --fc-radius-sm: 3px;

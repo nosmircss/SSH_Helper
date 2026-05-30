@@ -2,6 +2,7 @@ import { memo, type CSSProperties, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { blockDefMap, categoryColors, type BlockCategory } from '../blockDefs/registry';
 import { useFlowStore } from '../stores/useFlowStore';
+import { mix } from '../utils/tokens';
 import './baseblock.css';
 
 export interface BlockNodeData {
@@ -41,6 +42,10 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const blockTimings = useFlowStore((s) => s.blockTimings);
   const heatmapEnabled = useFlowStore((s) => s.heatmapEnabled);
   const maxDuration = useFlowStore((s) => {
+    // Heatmap off → skip the whole-map scan. heatTint (the only consumer) is gated on
+    // heatmapEnabled too, so 0 is never observed while the heatmap is on. Returning a
+    // primitive lets Object.is short-circuit re-renders.
+    if (!s.heatmapEnabled) return 0;
     let max = 0;
     s.blockTimings.forEach((t) => { if (t.duration && t.duration > max) max = t.duration; });
     return max;
@@ -111,7 +116,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
 
   const headerStyle: CSSProperties = {
     padding: '4px 8px',
-    borderBottom: `1px solid ${colors.border}33`,
+    borderBottom: `1px solid ${mix(colors.border, 20)}`,
     display: 'flex',
     alignItems: 'center',
     gap: 6,

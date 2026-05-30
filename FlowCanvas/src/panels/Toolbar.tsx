@@ -4,6 +4,7 @@ import { useFlowStore } from '../stores/useFlowStore';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import { buildExecutableGraphPayload } from '../utils/exportGraph';
+import { mix } from '../utils/tokens';
 
 export default function Toolbar() {
   const { getNodes, getEdges } = useReactFlow();
@@ -122,7 +123,7 @@ export default function Toolbar() {
             alignItems: 'center',
             gap: 4,
             padding: '2px 6px',
-            background: paused ? 'var(--fc-glow-error)' : 'var(--fc-glow-success)',
+            background: paused ? 'var(--fc-chip-error-bg)' : 'var(--fc-chip-success-bg)',
             borderRadius: 4,
             border: `1px solid ${paused ? 'var(--fc-glow-error)' : 'var(--fc-glow-success)'}`,
           }}>
@@ -261,7 +262,7 @@ function btnStyle(color: string, enabled: boolean): React.CSSProperties {
   return {
     padding: '4px 8px',
     background: enabled ? 'var(--fc-surface-2)' : 'var(--fc-surface-1)',
-    border: `1px solid ${enabled ? color + '55' : 'var(--fc-border)'}`,
+    border: `1px solid ${enabled ? mix(color, 33) : 'var(--fc-border)'}`,
     borderRadius: 4,
     color: enabled ? color : 'var(--fc-text-disabled)',
     fontSize: 12,

@@ -35,6 +35,14 @@ function catVars(c: string): CategoryVarSet {
   };
 }
 
+/** Apply an alpha to a `var(--fc-*)` color via color-mix over transparent. Replaces the old
+ *  `color + '<hex-alpha>'` idiom, which produced invalid CSS (e.g. `var(--fc-accent)55`) once the
+ *  category colors became var() strings instead of raw hex. color-mix(in oklch, …) is supported by
+ *  the WebView2 Chromium runtime. `pct` is the opacity percentage (0–100). */
+export function mix(color: string, pct: number): string {
+  return `color-mix(in oklch, ${color} ${pct}%, transparent)`;
+}
+
 /** Resolve a `var(--fc-*)` reference (or bare token name) to a concrete color.
  *  Used only where a raw color string is required (SVG MiniMap nodeColor/maskColor). */
 export function resolveCssVar(varRef: string, fallback = '#4a9eff'): string {

@@ -1,4 +1,5 @@
 import { useFlowStore } from '../stores/useFlowStore';
+import { mix } from '../utils/tokens';
 
 export default function DebugPanel() {
   const paused = useFlowStore((s) => s.paused);
@@ -108,7 +109,7 @@ function ctrlBtn(color: string, enabled: boolean): React.CSSProperties {
   return {
     padding: '3px 8px',
     background: enabled ? 'var(--fc-surface-2)' : 'var(--fc-surface-1)',
-    border: `1px solid ${enabled ? color + '55' : 'var(--fc-border)'}`,
+    border: `1px solid ${enabled ? mix(color, 33) : 'var(--fc-border)'}`,
     borderRadius: 4,
     color: enabled ? color : 'var(--fc-text-disabled)',
     fontSize: 11,

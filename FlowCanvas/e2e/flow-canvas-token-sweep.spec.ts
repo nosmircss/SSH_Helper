@@ -73,27 +73,47 @@ test.describe('Flow Canvas Token Sweep', () => {
 
   // The panel sweep is complete (Task 5); this CI gate enforces Decision #4 — no raw hex in any
   // resolved inline style except the one user-data comment color (DEFAULT_COMMENT_COLOR).
+  //
+  // Two complementary scans run together because each catches a different failure mode:
+  //   (1) a raw '#'-hex literal (a token that never made it into the token layer), and
+  //   (2) a malformed `var(--x)<hex-alpha>` concatenation — the regression class from the
+  //       hex→var() sweep, where `color + '55'` silently became invalid CSS like
+  //       `var(--fc-accent)55`. The browser DROPS such a declaration, so scan (1) alone is
+  //       blind to it (no '#'). The Toolbar and Palette render by default in App, so loading
+  //       any fixture mounts the exact controls (btnStyle / PaletteItem borders) where the bug
+  //       lived — reverting fix #1 makes scan (2) fail here.
   test('no raw hex outside the token layer', async ({ page }) => {
     await loadGraphFixture(page, createSshBlockFixture());
     await expect(page.locator('.react-flow__node[data-id="node-ssh"]')).toBeVisible();
+    // Confirm the toolbar + palette shell is present, so their inline styles are in the scan
+    // (these are where the var()+hex-alpha regression lived).
+    await expect(page.getByText('Flow Canvas v2')).toBeVisible(); // toolbar
+    await expect(page.getByText('Blocks', { exact: true })).toBeVisible(); // palette header
 
-    const offenders = await page.evaluate((commentColor) => {
-      const hexRe = /#[0-9a-fA-F]{3,8}\b/;
+    const { hexOffenders, malformedOffenders } = await page.evaluate((commentColor) => {
+      const hexRe = /#[0-9a-fA-F]{3,8}\b/g;
+      // A var() reference immediately followed by hex-alpha chars (no separator) — i.e. the
+      // dead `color + '55'` idiom applied to a var() string.
+      const malformedRe = /var\([^)]*\)[0-9a-fA-F]{2,8}\b/g;
       const normalize = (s: string) => s.toLowerCase();
       const allow = normalize(commentColor);
-      const hits: string[] = [];
+      const hexHits: string[] = [];
+      const malformedHits: string[] = [];
       for (const el of Array.from(document.querySelectorAll<HTMLElement>('[style]'))) {
         const style = el.getAttribute('style') ?? '';
-        const matches = style.match(new RegExp(hexRe, 'g'));
-        if (!matches) continue;
-        for (const m of matches) {
+        const tag = el.tagName.toLowerCase();
+        for (const m of style.match(hexRe) ?? []) {
           if (normalize(m) === allow) continue;
-          hits.push(`${el.tagName.toLowerCase()}: ${m}`);
+          hexHits.push(`${tag}: ${m}`);
+        }
+        for (const m of style.match(malformedRe) ?? []) {
+          malformedHits.push(`${tag}: ${m}`);
         }
       }
-      return hits;
+      return { hexOffenders: hexHits, malformedOffenders: malformedHits };
     }, DEFAULT_COMMENT_COLOR);
 
-    expect(offenders, offenders.join('\n')).toEqual([]);
+    expect(hexOffenders, hexOffenders.join('\n')).toEqual([]);
+    expect(malformedOffenders, malformedOffenders.join('\n')).toEqual([]);
   });
 });

@@ -6,6 +6,7 @@ import {
   type BlockDef,
   type BlockCategory,
 } from '../blockDefs/registry';
+import { mix } from '../utils/tokens';
 
 const categoryOrder: BlockCategory[] = [
   'ssh', 'control-flow', 'data', 'network', 'io', 'grid', 'timing',
@@ -26,7 +27,7 @@ function PaletteItem({ def }: { def: BlockDef }) {
       style={{
         padding: '4px 8px',
         background: colors.bg,
-        border: `1px solid ${colors.border}55`,
+        border: `1px solid ${mix(colors.border, 33)}`,
         borderRadius: 4,
         fontSize: 12,
         color: colors.text,
@@ -38,7 +39,7 @@ function PaletteItem({ def }: { def: BlockDef }) {
         transition: 'border-color 0.15s',
       }}
       onMouseEnter={(e) => (e.currentTarget.style.borderColor = colors.border)}
-      onMouseLeave={(e) => (e.currentTarget.style.borderColor = `${colors.border}55`)}
+      onMouseLeave={(e) => (e.currentTarget.style.borderColor = mix(colors.border, 33))}
     >
       <span>{def.label}</span>
     </div>

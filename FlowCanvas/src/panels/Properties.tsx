@@ -5,6 +5,7 @@ import { useFlowStore } from '../stores/useFlowStore';
 import { messageBus } from '../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import type { DataBlockTestResult } from '../stores/slices/executionSlice';
+import { mix } from '../utils/tokens';
 
 /**
  * Buffered text-like input state that avoids stale blur commits.
@@ -359,7 +360,7 @@ function ChoiceOptionsEditor({
               width: '100%',
               padding: '4px 6px',
               background: 'var(--fc-input-bg)',
-              border: `1px solid ${(error ? 'var(--fc-state-error)' : `${colors.border}44`)}`,
+              border: `1px solid ${error ? 'var(--fc-state-error)' : mix(colors.border, 27)}`,
               borderRadius: 4,
               color: 'var(--fc-text)',
               fontSize: 12,
@@ -417,7 +418,7 @@ function ChoiceOptionsEditor({
                   width: '100%',
                   padding: '4px 6px',
                   background: 'var(--fc-input-bg)',
-                  border: `1px solid ${(error ? 'var(--fc-state-error)' : `${colors.border}44`)}`,
+                  border: `1px solid ${error ? 'var(--fc-state-error)' : mix(colors.border, 27)}`,
                   borderRadius: 4,
                   color: 'var(--fc-text)',
                   fontSize: 12,
@@ -434,7 +435,7 @@ function ChoiceOptionsEditor({
                   width: '100%',
                   padding: '4px 6px',
                   background: 'var(--fc-input-bg)',
-                  border: `1px solid ${(error ? 'var(--fc-state-error)' : `${colors.border}44`)}`,
+                  border: `1px solid ${error ? 'var(--fc-state-error)' : mix(colors.border, 27)}`,
                   borderRadius: 4,
                   color: 'var(--fc-text)',
                   fontSize: 12,
@@ -481,7 +482,7 @@ function ChoiceOptionsEditor({
             style={{
               alignSelf: 'flex-start',
               padding: '4px 8px',
-              border: `1px solid ${colors.border}66`,
+              border: `1px solid ${mix(colors.border, 40)}`,
               borderRadius: 4,
               background: 'var(--fc-button-bg)',
               color: 'var(--fc-text)',
@@ -541,7 +542,7 @@ function PropertyField({
     width: '100%',
     padding: '4px 6px',
     background: 'var(--fc-input-bg)',
-    border: `1px solid ${invalid ? 'var(--fc-state-error)' : `${colors.border}44`}`,
+    border: `1px solid ${invalid ? 'var(--fc-state-error)' : mix(colors.border, 27)}`,
     borderRadius: 4,
     color: 'var(--fc-text)',
     fontSize: 12,
@@ -757,7 +758,7 @@ function PropertyField({
                 style={{
                   padding: '4px 8px',
                   background: 'var(--fc-button-bg)',
-                  border: `1px solid ${colors.border}66`,
+                  border: `1px solid ${mix(colors.border, 40)}`,
                   borderRadius: 4,
                   color: 'var(--fc-text)',
                   fontSize: 11,
@@ -1278,7 +1279,7 @@ function StartProperties({
     width: '100%',
     padding: '4px 6px',
     background: 'var(--fc-input-bg)',
-    border: `1px solid ${colors.border}44`,
+    border: `1px solid ${mix(colors.border, 27)}`,
     borderRadius: 4,
     color: 'var(--fc-text)',
     fontSize: 12,
@@ -1731,7 +1732,7 @@ export default function Properties() {
           alignItems: 'center',
           gap: 6,
           padding: '4px 8px',
-          background: `${branchColor || 'var(--fc-text-disabled)'}15`,
+          background: mix(branchColor || 'var(--fc-text-disabled)', 8),
           borderRadius: 4,
           borderLeft: `2px solid ${branchColor || 'var(--fc-text-disabled)'}`,
         }}>
