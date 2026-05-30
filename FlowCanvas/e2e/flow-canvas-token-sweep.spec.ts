@@ -4,6 +4,7 @@ import {
   clearOutgoingMessages,
   installHostMessageCapture,
   loadGraphFixture,
+  postHostMessage,
   waitForOutgoingMessage,
 } from './support/harness';
 
@@ -43,6 +44,19 @@ function createSshBlockFixture(): GraphFixture {
         style: { stroke: 'var(--fc-branch-then)' },
       },
     ],
+  };
+}
+
+// Three nodes so running / success / error can be rendered at once (Wave 2b execution cinematics),
+// then re-scanned for raw hex — the comet halo + checkmark mount on these state nodes.
+function createExecStateFixture(): GraphFixture {
+  return {
+    nodes: [
+      { id: 'exec-run', type: 'block', position: { x: 80, y: 80 }, data: { blockType: 'send', label: 'Run', props: {} } },
+      { id: 'exec-ok', type: 'block', position: { x: 80, y: 220 }, data: { blockType: 'print', label: 'Ok', props: {} } },
+      { id: 'exec-err', type: 'block', position: { x: 80, y: 360 }, data: { blockType: 'print', label: 'Err', props: {} } },
+    ],
+    edges: [],
   };
 }
 
@@ -164,6 +178,29 @@ test.describe('Flow Canvas Token Sweep', () => {
     await child.click();
     await expect(page.getByTestId('properties-panel')).toBeVisible();
     await expect(page.getByText('branch', { exact: true })).toBeVisible();
+
+    const { hexOffenders, malformedOffenders } = await scanForRawColors(page, DEFAULT_COMMENT_COLOR);
+
+    expect(hexOffenders, hexOffenders.join('\n')).toEqual([]);
+    expect(malformedOffenders, malformedOffenders.join('\n')).toEqual([]);
+  });
+
+  // Wave 2b: re-run the no-hex scan with nodes in running / success / error so any INLINE [style]
+  // on an exec-state node (e.g. the success card's `0 0 10px var(--fc-glow-success)` settle glow)
+  // is covered. The comet halo + checkmark colors live in execution-cinematics.css (stylesheet, not
+  // inline) — guarded by review + the dist gate, since this DOM [style] scan can't see stylesheet rules.
+  test('no raw hex while nodes are running / success / error', async ({ page }) => {
+    await loadGraphFixture(page, createExecStateFixture());
+    await expect(page.locator('.react-flow__node[data-id="exec-run"]')).toBeVisible();
+
+    await postHostMessage(page, { type: 'execution-update', stepId: 'exec-run', state: 'running' });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'exec-ok', state: 'running' });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'exec-ok', state: 'success', duration: 300 });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'exec-err', state: 'error' });
+
+    // The comet halo + checkmark are mounted before scanning their styles.
+    await expect(page.locator('.react-flow__node[data-id="exec-run"] .fc-run-halo')).toHaveCount(1);
+    await expect(page.locator('.react-flow__node[data-id="exec-ok"] svg.fc-check')).toHaveCount(1);
 
     const { hexOffenders, malformedOffenders } = await scanForRawColors(page, DEFAULT_COMMENT_COLOR);
 
