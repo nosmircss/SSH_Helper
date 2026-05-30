@@ -348,10 +348,10 @@ function FlowCanvasInner() {
     ),
   }), []);
 
-  // Build enhanced edges with animated type when running + selection highlight
+  // Build enhanced edges — all edges use AnimatedEdge (rest + running) + selection highlight
   const displayEdges = edges.map((e) => ({
     ...e,
-    ...(isRunning ? { type: 'animated' } : {}),
+    type: 'animated',
     selected: selectedEdgeIds.has(e.id),
     style: {
       ...e.style,
@@ -398,7 +398,7 @@ function FlowCanvasInner() {
               fitViewOptions={{ maxZoom: 0.85, padding: 0.15 }}
               proOptions={{ hideAttribution: true }}
               style={{ background: canvasBg }}
-              defaultEdgeOptions={{ type: 'smoothstep', style: { stroke: 'var(--fc-edge-idle)' } }}
+              defaultEdgeOptions={{ type: 'animated', style: { stroke: 'var(--fc-edge-idle)' } }}
             >
               <BranchBandsLayer />
               <Controls

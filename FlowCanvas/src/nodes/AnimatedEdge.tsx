@@ -1,96 +1,46 @@
 import { memo } from 'react';
 import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
+import { mix } from '../utils/tokens';
+import { markerIdForStroke } from './EdgeMarkers';
 import { useFlowStore } from '../stores/useFlowStore';
 
-const stateColors: Record<string, string> = {
-  success: 'var(--fc-state-success)',
-  running: 'var(--fc-accent)',
-  error: 'var(--fc-state-error)',
-};
-
 function AnimatedEdge(props: EdgeProps) {
-  const {
-    id,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    source,
-    style,
-    markerEnd,
-  } = props;
+  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, source, style } = props;
 
   const isRunning = useFlowStore((s) => s.isRunning);
   const blockStates = useFlowStore((s) => s.blockStates);
 
   const [edgePath] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    borderRadius: 8,
+    sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 8,
   });
 
-  const sourceState = blockStates.get(source);
-  const shouldAnimate = isRunning && (sourceState === 'success' || sourceState === 'running');
-  const strokeColor = shouldAnimate
-    ? stateColors[sourceState!] || 'var(--fc-edge-idle)'
-    : 'var(--fc-edge-idle)';
+  // Color comes from the edge's style.stroke (set by getBranchVisual / defaultEdgeOptions /
+  // selection). Branch edges = --fc-branch-*, continuation = --fc-accent, plain = --fc-edge-idle.
+  const color = (typeof style?.stroke === 'string' ? style.stroke : undefined) ?? 'var(--fc-edge-idle)';
+  const markerId = markerIdForStroke(color);
 
-  if (shouldAnimate) {
-    return (
-      <>
-        {/* Base edge (solid, dimmed) */}
-        <BaseEdge
-          id={`${id}-base`}
-          path={edgePath}
-          markerEnd={markerEnd}
-          style={{
-            ...style,
-            stroke: strokeColor,
-            strokeWidth: 2,
-            opacity: 0.3,
-          }}
-        />
-        {/* Animated overlay (marching ants) */}
-        <BaseEdge
-          id={id}
-          path={edgePath}
-          markerEnd={markerEnd}
-          style={{
-            ...style,
-            stroke: strokeColor,
-            strokeWidth: 2,
-            strokeDasharray: '8 4',
-            animation: 'marchingAnts 0.5s linear infinite',
-          }}
-        />
-        <style>{`
-          @keyframes marchingAnts {
-            to {
-              stroke-dashoffset: -12;
-            }
-          }
-        `}</style>
-      </>
-    );
-  }
+  const sourceState = blockStates.get(source);
+  const active = isRunning && (sourceState === 'success' || sourceState === 'running');
+
+  const gradientId = `fc-grad-${id}`;
+  const strokeWidth = typeof style?.strokeWidth === 'number' ? style.strokeWidth : active ? 2.5 : 2;
 
   return (
-    <BaseEdge
-      id={id}
-      path={edgePath}
-      markerEnd={markerEnd}
-      style={{
-        ...style,
-        stroke: 'var(--fc-edge-idle)',
-        strokeWidth: 2,
-      }}
-    />
+    <>
+      <defs>
+        {/* userSpaceOnUse so the gradient orients along the actual edge; dim→full toward target. */}
+        <linearGradient id={gradientId} gradientUnits="userSpaceOnUse" x1={sourceX} y1={sourceY} x2={targetX} y2={targetY}>
+          <stop offset="0%" stopColor={mix(color, 30)} />
+          <stop offset="100%" stopColor={color} />
+        </linearGradient>
+      </defs>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={`url(#${markerId})`}
+        style={{ ...style, stroke: `url(#${gradientId})`, strokeWidth }}
+      />
+    </>
   );
 }
 
