@@ -22,12 +22,16 @@ export interface ExecutionSlice {
   blockStates: Map<string, BlockExecState>;
   blockOutputs: Map<string, BlockOutput[]>;
   blockTimings: Map<string, { start: number; end?: number; duration?: number }>;
+  loopIterations: Map<string, number>;
+  branchTaken: Map<string, string>;
   dataBlockTestResults: Map<string, DataBlockTestResult>;
 
   setRunning: (running: boolean) => void;
   setBlockState: (id: string, state: BlockExecState) => void;
   appendBlockOutput: (id: string, output: string, stepType?: string) => void;
   setBlockTiming: (id: string, start: number, end?: number) => void;
+  setLoopIteration: (id: string, iteration: number) => void;
+  setBranchTaken: (id: string, key: string) => void;
   clearExecution: () => void;
   getBlockOutput: (id: string) => BlockOutput[];
   setDataBlockTestResult: (id: string, result: DataBlockTestResult) => void;
@@ -39,6 +43,8 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
   blockStates: new Map(),
   blockOutputs: new Map(),
   blockTimings: new Map(),
+  loopIterations: new Map(),
+  branchTaken: new Map(),
   dataBlockTestResults: new Map(),
 
   setRunning: (running) => set({ isRunning: running }),
@@ -75,11 +81,29 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
     });
   },
 
+  setLoopIteration: (id, iteration) => {
+    set((s) => {
+      const next = new Map(s.loopIterations);
+      next.set(id, iteration);
+      return { loopIterations: next };
+    });
+  },
+
+  setBranchTaken: (id, key) => {
+    set((s) => {
+      const next = new Map(s.branchTaken);
+      next.set(id, key);
+      return { branchTaken: next };
+    });
+  },
+
   clearExecution: () => {
     set({
       blockStates: new Map(),
       blockOutputs: new Map(),
       blockTimings: new Map(),
+      loopIterations: new Map(),
+      branchTaken: new Map(),
       dataBlockTestResults: new Map(),
     });
     // Reset all node exec states to idle
