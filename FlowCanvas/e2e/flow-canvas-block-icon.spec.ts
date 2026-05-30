@@ -9,8 +9,8 @@ import {
 // blank glyph) and that an unknown key falls back without throwing.
 //
 // ORDERING NOTE (Wave 2a Task 1 vs Task 4): a <BlockIcon> only enters the DOM once BaseBlock's
-// header renders it (Task 3). Section 1 ships this spec with the DOM cases marked test.fixme so the
-// module's build-compile gate (npm run build) is the Section-1 proof; Task 4 Step 2 un-fixmes them.
+// header renders it (Task 3). Section 1 shipped this spec with the DOM cases marked test.fixme;
+// now that Task 3 wires <BlockIcon> into the BaseBlock header, the DOM cases are live (Task 4).
 const SAMPLES = [
   { id: 'n-ssh', blockType: 'send' },         // ssh
   { id: 'n-if', blockType: 'if' },            // control-flow
@@ -34,8 +34,7 @@ test.describe('Flow Canvas Block Icons', () => {
   });
 
   for (const s of SAMPLES) {
-    // DOM cases are fixme until Task 4 wires <BlockIcon> into the BaseBlock header.
-    test.fixme(`renders an svg icon for ${s.blockType}`, async ({ page }) => {
+    test(`renders an svg icon for ${s.blockType}`, async ({ page }) => {
       await loadGraphFixture(page, fixtureFor(s.id, s.blockType));
       const svg = page.locator(`.react-flow__node[data-id="${s.id}"] svg`).first();
       await expect(svg).toBeVisible();
