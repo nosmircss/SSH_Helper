@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import type { GraphFixture } from './fixtures/graphs';
+import { expect, test, type Page } from '@playwright/test';
+import { createImportedChildEditingFixture, type GraphFixture } from './fixtures/graphs';
 import {
   clearOutgoingMessages,
   installHostMessageCapture,
@@ -27,6 +27,32 @@ function createSshBlockFixture(): GraphFixture {
     ],
     edges: [],
   };
+}
+
+// Shared hex/malformed-var scan (Decision #4). Returns the two offender lists so each consumer can
+// assert them empty. Identical logic to the original inline scan, hoisted so the branch-chip test
+// can reuse it without duplicating the regex pair.
+async function scanForRawColors(page: Page, commentColor: string) {
+  return page.evaluate((allowed) => {
+    const hexRe = /#[0-9a-fA-F]{3,8}\b/g;
+    const malformedRe = /var\([^)]*\)[0-9a-fA-F]{2,8}\b/g;
+    const normalize = (s: string) => s.toLowerCase();
+    const allow = normalize(allowed);
+    const hexHits: string[] = [];
+    const malformedHits: string[] = [];
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('[style]'))) {
+      const style = el.getAttribute('style') ?? '';
+      const tag = el.tagName.toLowerCase();
+      for (const m of style.match(hexRe) ?? []) {
+        if (normalize(m) === allow) continue;
+        hexHits.push(`${tag}: ${m}`);
+      }
+      for (const m of style.match(malformedRe) ?? []) {
+        malformedHits.push(`${tag}: ${m}`);
+      }
+    }
+    return { hexOffenders: hexHits, malformedOffenders: malformedHits };
+  }, commentColor);
 }
 
 test.describe('Flow Canvas Token Sweep', () => {
@@ -103,28 +129,26 @@ test.describe('Flow Canvas Token Sweep', () => {
     await expect(page.getByText('Flow Canvas v2')).toBeVisible(); // toolbar
     await expect(page.getByText('Blocks', { exact: true })).toBeVisible(); // palette header
 
-    const { hexOffenders, malformedOffenders } = await page.evaluate((commentColor) => {
-      const hexRe = /#[0-9a-fA-F]{3,8}\b/g;
-      // A var() reference immediately followed by hex-alpha chars (no separator) — i.e. the
-      // dead `color + '55'` idiom applied to a var() string.
-      const malformedRe = /var\([^)]*\)[0-9a-fA-F]{2,8}\b/g;
-      const normalize = (s: string) => s.toLowerCase();
-      const allow = normalize(commentColor);
-      const hexHits: string[] = [];
-      const malformedHits: string[] = [];
-      for (const el of Array.from(document.querySelectorAll<HTMLElement>('[style]'))) {
-        const style = el.getAttribute('style') ?? '';
-        const tag = el.tagName.toLowerCase();
-        for (const m of style.match(hexRe) ?? []) {
-          if (normalize(m) === allow) continue;
-          hexHits.push(`${tag}: ${m}`);
-        }
-        for (const m of style.match(malformedRe) ?? []) {
-          malformedHits.push(`${tag}: ${m}`);
-        }
-      }
-      return { hexOffenders: hexHits, malformedOffenders: malformedHits };
-    }, DEFAULT_COMMENT_COLOR);
+    const { hexOffenders, malformedOffenders } = await scanForRawColors(page, DEFAULT_COMMENT_COLOR);
+
+    expect(hexOffenders, hexOffenders.join('\n')).toEqual([]);
+    expect(malformedOffenders, malformedOffenders.join('\n')).toEqual([]);
+  });
+
+  // Wave 2a (Task 7): the Properties branch chip used to consume the raw importer `_branchColor`
+  // hex (e.g. '#2ecc71'). Selecting an imported child renders that chip; this scan would FAIL
+  // against the old raw hex, locking in the hex→`var(--fc-branch-*)` harmonization.
+  test('no raw hex in the Properties branch chip for an imported child', async ({ page }) => {
+    await loadGraphFixture(page, createImportedChildEditingFixture());
+    const child = page.locator('.react-flow__node[data-id="then-1"]');
+    await expect(child).toBeVisible();
+
+    // Select the imported child so Properties renders its branch chip.
+    await child.click();
+    await expect(page.getByTestId('properties-panel')).toBeVisible();
+    await expect(page.getByText('branch', { exact: true })).toBeVisible();
+
+    const { hexOffenders, malformedOffenders } = await scanForRawColors(page, DEFAULT_COMMENT_COLOR);
 
     expect(hexOffenders, hexOffenders.join('\n')).toEqual([]);
     expect(malformedOffenders, malformedOffenders.join('\n')).toEqual([]);

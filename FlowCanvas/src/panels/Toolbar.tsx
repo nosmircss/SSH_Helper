@@ -23,6 +23,8 @@ export default function Toolbar() {
   const toggleReducedMotion = useFlowStore((s) => s.toggleReducedMotion);
   const heatmapEnabled = useFlowStore((s) => s.heatmapEnabled);
   const toggleHeatmap = useFlowStore((s) => s.toggleHeatmap);
+  const branchBandsEnabled = useFlowStore((s) => s.branchBandsEnabled);
+  const toggleBranchBands = useFlowStore((s) => s.toggleBranchBands);
   const problemsVisible = useFlowStore((s) => s.panelsVisible.problems);
   const diagnostics = useFlowStore((s) => s.diagnostics);
   const errorCount = diagnostics.filter((d) => d.severity === 'error').length;
@@ -227,6 +229,13 @@ export default function Toolbar() {
         title="Toggle run heatmap (color blocks by duration)"
       >
         🔥 Heatmap
+      </button>
+      <button
+        onClick={toggleBranchBands}
+        style={btnStyle(branchBandsEnabled ? 'var(--fc-cat-control-flow-border)' : 'var(--fc-text-muted)', true)}
+        title="Toggle branch containment bands (highlight if/try/switch branch regions)"
+      >
+        ▭ Bands
       </button>
       <button
         onClick={() => togglePanel('problems')}

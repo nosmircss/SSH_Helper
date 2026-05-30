@@ -21,6 +21,7 @@ import BaseBlock from './nodes/BaseBlock';
 import CommentNode from './nodes/CommentNode';
 import StartNode from './nodes/StartNode';
 import AnimatedEdge from './nodes/AnimatedEdge';
+import BranchBandsLayer from './nodes/BranchBandsLayer';
 import Palette from './panels/Palette';
 import Properties from './panels/Properties';
 import RightPanel from './panels/RightPanel';
@@ -397,6 +398,7 @@ function FlowCanvasInner() {
               style={{ background: canvasBg }}
               defaultEdgeOptions={{ type: 'smoothstep', style: { stroke: 'var(--fc-edge-idle)' } }}
             >
+              <BranchBandsLayer />
               <Controls
                 style={{ background: controlsBg, borderColor: controlsBorder, borderRadius: '6px' }}
               />

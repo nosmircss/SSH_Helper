@@ -6,6 +6,7 @@ import { messageBus } from '../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import type { DataBlockTestResult } from '../stores/slices/executionSlice';
 import { mix } from '../utils/tokens';
+import { branchColorVar } from '../utils/branchBands';
 
 /**
  * Buffered text-like input state that avoids stale blur commits.
@@ -1624,7 +1625,13 @@ export default function Properties() {
 
   const colors = categoryColors[def.category as BlockCategory];
   const branchLabel = blockData.props?.['_branchLabel'] as string | undefined;
-  const branchColor = blockData.props?.['_branchColor'] as string | undefined;
+  const branchStepPath = blockData.props?.['_stepPath'] as string | undefined;
+  const branchTint = branchColorVar(
+    branchStepPath
+      ? // reuse the same parse as the band layer via the label as a cheap proxy when present
+        (branchLabel ?? branchStepPath)
+      : branchLabel,
+  );
   const groupedProperties: Record<PropertyPaneGroup, PropertyDef[]> = {
     core: [],
     advanced: [],
@@ -1732,11 +1739,11 @@ export default function Properties() {
           alignItems: 'center',
           gap: 6,
           padding: '4px 8px',
-          background: mix(branchColor || 'var(--fc-text-disabled)', 8),
+          background: mix(branchTint, 8),
           borderRadius: 4,
-          borderLeft: `2px solid ${branchColor || 'var(--fc-text-disabled)'}`,
+          borderLeft: `2px solid ${branchTint}`,
         }}>
-          <span style={{ fontSize: 10, color: branchColor || 'var(--fc-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+          <span style={{ fontSize: 10, color: branchTint, fontWeight: 600, textTransform: 'uppercase' }}>
             {branchLabel}
           </span>
           <span style={{ fontSize: 10, color: 'var(--fc-text-muted)' }}>branch</span>
