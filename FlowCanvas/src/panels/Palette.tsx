@@ -7,6 +7,7 @@ import {
   type BlockCategory,
 } from '../blockDefs/registry';
 import { mix } from '../utils/tokens';
+import { BlockIcon } from '../nodes/BlockIcon';
 
 const categoryOrder: BlockCategory[] = [
   'ssh', 'control-flow', 'data', 'network', 'io', 'grid', 'timing',
@@ -41,6 +42,9 @@ function PaletteItem({ def }: { def: BlockDef }) {
       onMouseEnter={(e) => (e.currentTarget.style.borderColor = colors.border)}
       onMouseLeave={(e) => (e.currentTarget.style.borderColor = mix(colors.border, 33))}
     >
+      <span style={{ color: colors.icon, display: 'flex', flexShrink: 0 }}>
+        <BlockIcon name={def.icon} size={14} />
+      </span>
       <span>{def.label}</span>
     </div>
   );

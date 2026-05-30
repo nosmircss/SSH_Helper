@@ -57,12 +57,21 @@ function StartNode({ data, selected }: NodeProps) {
       ? '0 0 12px var(--fc-glow-selected)'
       : '0 0 12px var(--fc-glow-start)',
     transition: 'box-shadow 0.2s, border-color 0.2s',
+    position: 'relative',
+  };
+
+  const railStyle: CSSProperties = {
+    position: 'absolute', left: 0, top: 0, bottom: 0,
+    width: 'var(--fc-rail-w)', background: 'var(--fc-start-accent)',
+    borderTopLeftRadius: 8, borderBottomLeftRadius: 8, pointerEvents: 'none',
   };
 
   return (
     <div style={containerStyle}>
+      <span style={railStyle} />
       <div style={{
         padding: '6px 10px',
+        paddingLeft: 'calc(10px + var(--fc-rail-w))',
         borderBottom: '1px solid var(--fc-start-chip-border)',
         display: 'flex',
         alignItems: 'center',
