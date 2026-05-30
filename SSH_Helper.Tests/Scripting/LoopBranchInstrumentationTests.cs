@@ -95,4 +95,46 @@ public class LoopBranchInstrumentationTests
 
         completed["steps/0"].IterationCount.Should().Be(1); // body ran once, then broke
     }
+
+    [Fact]
+    public async Task While_ReportsIterationCount()
+    {
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new() { Set = "n = 0" },
+                new()
+                {
+                    While = "n < 3",
+                    Do = new List<ScriptStep> { new() { Set = "n = n + 1" } }
+                }
+            }
+        };
+
+        var completed = await RunAndCapture(script);
+
+        completed["steps/1"].IterationCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task Repeat_ReportsIterationCount()
+    {
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new() { Set = "n = 0" },
+                new()
+                {
+                    Until = "n >= 3",
+                    Do = new List<ScriptStep> { new() { Set = "n = n + 1" } }
+                }
+            }
+        };
+
+        var completed = await RunAndCapture(script);
+
+        completed["steps/1"].IterationCount.Should().Be(3);
+    }
 }
