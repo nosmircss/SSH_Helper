@@ -1,0 +1,95 @@
+/* FlowCanvas/src/nodes/execution-cinematics.css
+ * Wave 2b — Execution Cinematics. Pure CSS/SVG running halo, success checkmark, and error
+ * shake+ripple for BaseBlock. Driven entirely by execState (read-only); no node.data writes.
+ * The global reducedMotion.css blanket collapses every keyframe here to its end-state; BaseBlock
+ * ADDITIONALLY does not render the comet child and stops the live ticker under reduced motion.
+ * Only literals: the `black` mask source and the `transparent` keyword (gate-safe). */
+
+/* Animatable angle for the conic comet sweep. Without @property the `from <angle>` can't tween. */
+@property --fc-halo-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* ── Running: breathing accent glow on the card. Owns the running box-shadow (heat is
+   idle/success-only, so it never coexists). `forwards` makes the reduced-motion blanket freeze
+   it to the soft min-glow end frame instead of reverting to no glow. ── */
+.fc-exec-running {
+  animation: fc-run-breathe 2.4s ease-in-out infinite forwards;
+}
+@keyframes fc-run-breathe {
+  0%   { box-shadow: 0 0 8px var(--fc-glow-running-min); }
+  50%  { box-shadow: 0 0 20px var(--fc-glow-running-max); }
+  100% { box-shadow: 0 0 8px var(--fc-glow-running-min); }
+}
+
+/* ── Running: sweeping comet ring on the card edge. inset:0 keeps it inside the border-box
+   (never clipped by overflow:hidden, never grows the node). Masked to a 1.5px ring. ── */
+.fc-run-halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  padding: 1.5px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--fc-halo-angle),
+    var(--fc-run-comet) 0deg,
+    var(--fc-accent) 24deg,
+    transparent 120deg
+  );
+  -webkit-mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  mask-composite: exclude;
+  animation: fc-run-comet-spin 1.4s linear infinite;
+}
+@keyframes fc-run-comet-spin {
+  to { --fc-halo-angle: 360deg; }
+}
+
+/* ── Success: the exec indicator's checkmark draws itself in and pops. pathLength=1 normalizes
+   the dash math regardless of the path's real length. Stroke is the success state token. ── */
+.fc-check {
+  display: inline-block;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fc-check-pop 0.4s ease-out forwards;
+}
+.fc-check path {
+  fill: none;
+  stroke: var(--fc-state-success);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: fc-check-draw 0.4s ease-out forwards;
+}
+@keyframes fc-check-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes fc-check-pop {
+  0%   { transform: scale(0.6); }
+  60%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* ── Error: a small one-shot shake plus a single ripple ring that settles to the error glow.
+   Distinct properties (transform vs box-shadow) compose on the same element. The ripple's
+   `forwards` holds the settled glow — including under the reduced-motion blanket. ── */
+.fc-exec-error {
+  animation: fc-err-shake 0.5s ease-in-out, fc-err-ripple 0.6s ease-out forwards;
+}
+@keyframes fc-err-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-2px); }
+  40% { transform: translateX(2px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+}
+@keyframes fc-err-ripple {
+  0%   { box-shadow: 0 0 0 0 var(--fc-glow-error-strong); }
+  70%  { box-shadow: 0 0 8px 4px transparent; }
+  100% { box-shadow: 0 0 8px 0 var(--fc-glow-error); }
+}
