@@ -182,6 +182,7 @@ export function initMessageBridge(): () => void {
 
       // Timeline entry
       if (execState === 'running') {
+        state.setBlockTiming(stepId, Date.now());
         const node = state.nodes.find((n) => n.id === stepId);
         state.addTimelineEntry({
           nodeId: stepId,
@@ -194,6 +195,9 @@ export function initMessageBridge(): () => void {
           ),
         });
       } else if (execState === 'success' || execState === 'error' || execState === 'skipped') {
+        const now = Date.now();
+        const dur = msg.duration != null ? Number(msg.duration) : undefined;
+        state.setBlockTiming(stepId, dur != null ? now - dur : now, now);
         state.updateTimelineEntry(stepId, {
           state: execState,
           endTime: Date.now(),
