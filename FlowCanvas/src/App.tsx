@@ -79,6 +79,7 @@ function FlowCanvasInner() {
   const hideEdgeContextMenu = useFlowStore((s) => s.hideEdgeContextMenu);
   const pushSnapshot = useFlowStore((s) => s.pushSnapshot);
   const theme = useFlowStore((s) => s.theme);
+  const reducedMotion = useFlowStore((s) => s.reducedMotion);
   const snapToGrid = useFlowStore((s) => s.snapToGrid);
   const gridSize = useFlowStore((s) => s.gridSize);
   const searchResults = useFlowStore((s) => s.searchResults);
@@ -107,6 +108,11 @@ function FlowCanvasInner() {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  // Toggle the global reduced-motion kill switch class on <body>.
+  useEffect(() => {
+    document.body.classList.toggle('fc-reduced-motion', reducedMotion);
+  }, [reducedMotion]);
 
   // Capture one undo snapshot at drag start (pre-move state).
   const onNodeDragStart = useCallback(() => {

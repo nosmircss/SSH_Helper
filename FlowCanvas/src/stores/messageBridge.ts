@@ -331,7 +331,20 @@ export function initMessageBridge(): () => void {
         store.getState().restorePanelSizes(sizes);
       }
     }),
+
+    // Restore UI prefs from WinForms persisted settings (no echo back to host)
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.prefRestore, (msg) => {
+      if (typeof msg.reducedMotion === 'boolean') {
+        store.getState().restoreReducedMotion(msg.reducedMotion);
+      }
+    }),
   ];
+
+  // Seed reduced-motion from the OS preference before announcing readiness so the
+  // body class is correct on first paint. A host `pref-restore` arrives after `ready`
+  // and overrides this seed (explicit toggle stays load-bearing).
+  const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  if (prefersReduced) store.getState().restoreReducedMotion(true);
 
   // Signal ready
   messageBus.sendReady();

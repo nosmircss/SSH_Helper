@@ -18,6 +18,8 @@ export default function Toolbar() {
   const redo = useFlowStore((s) => s.redo);
   const snapToGrid = useFlowStore((s) => s.snapToGrid);
   const toggleSnapToGrid = useFlowStore((s) => s.toggleSnapToGrid);
+  const reducedMotion = useFlowStore((s) => s.reducedMotion);
+  const toggleReducedMotion = useFlowStore((s) => s.toggleReducedMotion);
   const toggleSearch = useFlowStore((s) => s.toggleSearch);
   const searchVisible = useFlowStore((s) => s.searchVisible);
 
@@ -177,6 +179,13 @@ export default function Toolbar() {
       </button>
       <button onClick={toggleSnapToGrid} style={btnStyle(snapToGrid ? 'var(--fc-state-success)' : 'var(--fc-text-muted)', true)} title="Snap to grid">
         ⊡ {snapToGrid ? 'Snap' : 'Free'}
+      </button>
+      <button
+        onClick={toggleReducedMotion}
+        style={btnStyle(reducedMotion ? 'var(--fc-state-success)' : 'var(--fc-text-muted)', true)}
+        title={reducedMotion ? 'Motion reduced — click to enable animations' : 'Reduce motion — disable animations'}
+      >
+        {reducedMotion ? '⏸ Calm' : '▶ Motion'}
       </button>
 
       <Separator color={borderColor} />

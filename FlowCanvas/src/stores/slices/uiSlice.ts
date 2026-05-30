@@ -16,6 +16,7 @@ export const DEFAULT_PANEL_SIZES: PanelSizes = {
 
 export interface UISlice {
   theme: 'dark' | 'light';
+  reducedMotion: boolean;
   snapToGrid: boolean;
   gridSize: number;
   searchQuery: string;
@@ -39,6 +40,9 @@ export interface UISlice {
 
   setTheme: (theme: 'dark' | 'light') => void;
   toggleTheme: () => void;
+  setReducedMotion: (value: boolean) => void;
+  toggleReducedMotion: () => void;
+  restoreReducedMotion: (value: boolean) => void;
   toggleSnapToGrid: () => void;
   setSearchQuery: (query: string) => void;
   nextSearchResult: () => void;
@@ -58,6 +62,7 @@ export interface UISlice {
 
 export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get) => ({
   theme: 'dark',
+  reducedMotion: false,
   snapToGrid: false,
   gridSize: 20,
   searchQuery: '',
@@ -81,6 +86,13 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
 
   setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+
+  setReducedMotion: (value) => {
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.prefSave, reducedMotion: value });
+    set({ reducedMotion: value });
+  },
+  toggleReducedMotion: () => get().setReducedMotion(!get().reducedMotion),
+  restoreReducedMotion: (value) => set({ reducedMotion: value }), // host-driven, no echo
 
   toggleSnapToGrid: () => set((s) => ({ snapToGrid: !s.snapToGrid })),
 

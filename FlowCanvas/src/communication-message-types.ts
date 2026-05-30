@@ -14,6 +14,7 @@ export const CANVAS_HOST_MESSAGES = {
     setTargetHost: 'set-target-host',
     layoutRestore: 'layout-restore',
     browsePathResult: 'browse-path-result',
+    prefRestore: 'pref-restore',
   },
   outgoing: {
     ready: 'ready',
@@ -29,6 +30,7 @@ export const CANVAS_HOST_MESSAGES = {
     layoutSave: 'layout-save',
     layoutAutosave: 'layout-autosave',
     browsePath: 'browse-path',
+    prefSave: 'pref-save',
   },
   deprecatedOutgoingAliases: {
     runRequest: 'run-request',

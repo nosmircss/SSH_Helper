@@ -1,3 +1,13 @@
 /* FlowCanvas/src/styles/reducedMotion.css
- * App-global reduced-motion kill switch. Filled in Section 2 (Decision #7).
- * Intentionally empty for now so the main.tsx import resolves. */
+ * Global motion kill switch. The body-level class blankets ALL CSS @keyframes
+ * (exec-pulse, spin, marchingAnts, the two inline pulse keyframes) and inline
+ * transition:/animation: styles because the !important duration override wins.
+ * 0.001ms (not 0) keeps animationend/transitionend events firing. */
+body.fc-reduced-motion *,
+body.fc-reduced-motion *::before,
+body.fc-reduced-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
