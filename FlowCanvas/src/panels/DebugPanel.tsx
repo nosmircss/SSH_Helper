@@ -15,18 +15,18 @@ export default function DebugPanel() {
       left: 190,
       bottom: 10,
       width: 280,
-      background: 'var(--fc-panel-bg, #12122a)',
-      border: '1px solid var(--fc-panel-border, #2a2a4a)',
+      background: 'var(--fc-panel-bg)',
+      border: '1px solid var(--fc-panel-border)',
       borderRadius: 8,
       overflow: 'hidden',
       zIndex: 10,
-      boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+      boxShadow: 'var(--fc-shadow-sm)',
     }}>
       {/* Header */}
       <div style={{
         padding: '6px 10px',
-        background: paused ? '#2a1a1a' : 'var(--fc-header-bg, #1a1a3a)',
-        borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)',
+        background: paused ? 'var(--fc-glow-error)' : 'var(--fc-header-bg)',
+        borderBottom: '1px solid var(--fc-panel-border)',
         display: 'flex',
         alignItems: 'center',
         gap: 6,
@@ -34,21 +34,21 @@ export default function DebugPanel() {
         {paused && (
           <span style={{
             width: 8, height: 8, borderRadius: '50%',
-            background: '#e74c3c',
-            boxShadow: '0 0 6px rgba(231,76,60,0.6)',
+            background: 'var(--fc-state-error)',
+            boxShadow: '0 0 6px var(--fc-glow-error)',
           }} />
         )}
         {isRunning && !paused && (
           <span style={{
             width: 8, height: 8, borderRadius: '50%',
-            background: '#4a9eff',
-            boxShadow: '0 0 6px rgba(74,158,255,0.6)',
+            background: 'var(--fc-accent)',
+            boxShadow: '0 0 6px var(--fc-glow-running-max)',
             animation: 'pulse 1s ease-in-out infinite',
           }} />
         )}
         <span style={{
           fontSize: 12,
-          color: paused ? '#e74c3c' : '#4a9eff',
+          color: paused ? 'var(--fc-state-error)' : 'var(--fc-accent)',
           fontWeight: 600,
         }}>
           {paused ? 'PAUSED' : 'RUNNING'}
@@ -62,28 +62,28 @@ export default function DebugPanel() {
         gap: 4,
         flexWrap: 'wrap',
       }}>
-        <button onClick={() => debugAction('continue')} disabled={!paused} style={ctrlBtn('#2ecc71', paused)}>
+        <button onClick={() => debugAction('continue')} disabled={!paused} style={ctrlBtn('var(--fc-state-success)', paused)}>
           ▶ Continue
         </button>
-        <button onClick={() => debugAction('step')} disabled={!paused} style={ctrlBtn('#4a9eff', paused)}>
+        <button onClick={() => debugAction('step')} disabled={!paused} style={ctrlBtn('var(--fc-accent)', paused)}>
           ⏭ Step
         </button>
-        <button onClick={() => debugAction('stop')} style={ctrlBtn('#e74c3c', true)}>
+        <button onClick={() => debugAction('stop')} style={ctrlBtn('var(--fc-state-error)', true)}>
           ⏹ Stop
         </button>
       </div>
 
       {/* Call Stack */}
       {callStack.length > 0 && (
-        <div style={{ padding: '0 10px 8px', borderTop: '1px solid var(--fc-panel-border, #2a2a4a)', paddingTop: 8 }}>
-          <div style={{ fontSize: 10, color: 'var(--fc-text-muted, #666)', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 4 }}>
+        <div style={{ padding: '0 10px 8px', borderTop: '1px solid var(--fc-panel-border)', paddingTop: 8 }}>
+          <div style={{ fontSize: 10, color: 'var(--fc-text-muted)', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 4 }}>
             Call Stack
           </div>
-          <div style={{ fontFamily: 'monospace', fontSize: 11, lineHeight: 1.8, color: 'var(--fc-text-secondary, #888)' }}>
+          <div style={{ fontFamily: 'monospace', fontSize: 11, lineHeight: 1.8, color: 'var(--fc-text-secondary)' }}>
             {callStack.map((entry, i) => (
               <div key={i} style={{
-                color: i === 0 ? 'var(--fc-text, #fff)' : 'var(--fc-text-muted, #666)',
-                background: i === 0 ? '#1a2744' : 'transparent',
+                color: i === 0 ? 'var(--fc-border-selected)' : 'var(--fc-text-muted)',
+                background: i === 0 ? 'var(--fc-accent-surface)' : 'transparent',
                 padding: '1px 4px',
                 borderRadius: 3,
               }}>
@@ -107,10 +107,10 @@ export type DebugState = {
 function ctrlBtn(color: string, enabled: boolean): React.CSSProperties {
   return {
     padding: '3px 8px',
-    background: enabled ? '#222244' : '#1a1a2e',
-    border: `1px solid ${enabled ? color + '55' : '#2a2a4a'}`,
+    background: enabled ? 'var(--fc-surface-2)' : 'var(--fc-surface-1)',
+    border: `1px solid ${enabled ? color + '55' : 'var(--fc-border)'}`,
     borderRadius: 4,
-    color: enabled ? color : '#444',
+    color: enabled ? color : 'var(--fc-text-disabled)',
     fontSize: 11,
     cursor: enabled ? 'pointer' : 'default',
     fontFamily: 'inherit',

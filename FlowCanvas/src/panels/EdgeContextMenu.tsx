@@ -292,17 +292,17 @@ export default function EdgeContextMenu() {
         left: x,
         top: y,
         zIndex: 50,
-        background: '#12122a',
-        border: '1px solid #2a2a4a',
+        background: 'var(--fc-surface-0)',
+        border: '1px solid var(--fc-border)',
         borderRadius: 6,
         padding: '4px 0',
         minWidth: 220,
-        boxShadow: '0 6px 20px rgba(0, 0, 0, 0.5)',
+        boxShadow: 'var(--fc-shadow-sm)',
       }}
     >
       {canEditBranchMetadata && (
-        <div style={{ padding: '8px 12px', borderBottom: '1px solid #2a2a4a', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <label style={{ fontSize: 11, color: '#888' }}>Branch</label>
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--fc-border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ fontSize: 11, color: 'var(--fc-text-muted)' }}>Branch</label>
           <select
             data-testid="edge-branch-mode-input"
             value={branchMode}
@@ -310,10 +310,10 @@ export default function EdgeContextMenu() {
             style={{
               width: '100%',
               padding: '4px 6px',
-              background: '#0d1117',
-              border: '1px solid #2a2a4a',
+              background: 'var(--fc-input-bg)',
+              border: '1px solid var(--fc-border)',
               borderRadius: 4,
-              color: '#ddd',
+              color: 'var(--fc-text)',
               fontSize: 12,
             }}
           >
@@ -328,7 +328,7 @@ export default function EdgeContextMenu() {
             || (editableBranchType === 'switch' && branchMode === 'case')
             || editableBranchType === 'parallel') && (
             <>
-              <label style={{ fontSize: 11, color: '#888' }}>Branch Index</label>
+              <label style={{ fontSize: 11, color: 'var(--fc-text-muted)' }}>Branch Index</label>
               <input
                 data-testid="edge-branch-index-input"
                 type="number"
@@ -338,10 +338,10 @@ export default function EdgeContextMenu() {
                 style={{
                   width: '100%',
                   padding: '4px 6px',
-                  background: '#0d1117',
-                  border: '1px solid #2a2a4a',
+                  background: 'var(--fc-input-bg)',
+                  border: '1px solid var(--fc-border)',
                   borderRadius: 4,
-                  color: '#ddd',
+                  color: 'var(--fc-text)',
                   fontSize: 12,
                 }}
               />
@@ -350,7 +350,7 @@ export default function EdgeContextMenu() {
 
           {editableBranchType === 'if' && branchMode === 'elif' && (
             <>
-              <label style={{ fontSize: 11, color: '#888' }}>Elif Condition</label>
+              <label style={{ fontSize: 11, color: 'var(--fc-text-muted)' }}>Elif Condition</label>
               <input
                 data-testid="edge-branch-condition-input"
                 type="text"
@@ -360,10 +360,10 @@ export default function EdgeContextMenu() {
                 style={{
                   width: '100%',
                   padding: '4px 6px',
-                  background: '#0d1117',
-                  border: '1px solid #2a2a4a',
+                  background: 'var(--fc-input-bg)',
+                  border: '1px solid var(--fc-border)',
                   borderRadius: 4,
-                  color: '#ddd',
+                  color: 'var(--fc-text)',
                   fontSize: 12,
                   fontFamily: 'monospace',
                 }}
@@ -373,7 +373,7 @@ export default function EdgeContextMenu() {
 
           {editableBranchType === 'switch' && branchMode === 'case' && (
             <>
-              <label style={{ fontSize: 11, color: '#888' }}>Case Value</label>
+              <label style={{ fontSize: 11, color: 'var(--fc-text-muted)' }}>Case Value</label>
               <input
                 data-testid="edge-branch-case-value-input"
                 type="text"
@@ -383,10 +383,10 @@ export default function EdgeContextMenu() {
                 style={{
                   width: '100%',
                   padding: '4px 6px',
-                  background: '#0d1117',
-                  border: '1px solid #2a2a4a',
+                  background: 'var(--fc-input-bg)',
+                  border: '1px solid var(--fc-border)',
                   borderRadius: 4,
-                  color: '#ddd',
+                  color: 'var(--fc-text)',
                   fontSize: 12,
                   fontFamily: 'monospace',
                 }}
@@ -400,10 +400,10 @@ export default function EdgeContextMenu() {
             style={{
               marginTop: 2,
               padding: '5px 8px',
-              background: '#1e2f55',
-              border: '1px solid #3d5b96',
+              background: 'var(--fc-accent-surface)',
+              border: '1px solid var(--fc-accent-strong)',
               borderRadius: 4,
-              color: '#cfe1ff',
+              color: 'var(--fc-accent-text)',
               fontSize: 12,
               cursor: 'pointer',
             }}
@@ -426,14 +426,14 @@ export default function EdgeContextMenu() {
           padding: '6px 12px',
           background: 'none',
           border: 'none',
-          color: '#e74c3c',
+          color: 'var(--fc-state-error)',
           fontSize: 12,
           cursor: 'pointer',
           textAlign: 'left',
           transition: 'background 0.1s',
         }}
         onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = '#1e1e3a';
+          (e.currentTarget as HTMLElement).style.background = 'var(--fc-surface-2)';
         }}
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLElement).style.background = 'none';
