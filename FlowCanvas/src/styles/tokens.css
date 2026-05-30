@@ -120,6 +120,9 @@
   --fc-glow-running-max: oklch(68% 0.16 255 / 0.6);
   --fc-glow-success: oklch(72% 0.17 150 / 0.3);
   --fc-glow-error: oklch(60% 0.20 25 / 0.3);
+  /* ── Wave 2b: execution cinematics (running comet leading edge + error ripple start) ── */
+  --fc-run-comet: oklch(86% 0.13 255);
+  --fc-glow-error-strong: oklch(60% 0.20 25 / 0.6);
   --fc-glow-warning: oklch(82% 0.15 90 / 0.3);
   --fc-glow-warning-soft: oklch(82% 0.15 90 / 0.15);
   --fc-glow-skipped: oklch(60% 0.01 275 / 0.2);
