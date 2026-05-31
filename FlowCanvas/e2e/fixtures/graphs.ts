@@ -480,3 +480,25 @@ export function createImportedChildEditingFixture(): GraphFixture {
     ],
   };
 }
+
+// An IMPORTED if/then/else, faithfully mirroring what FlowCanvasBridge produces: branch edges
+// carry NO data.branchPath — only style.stroke (branch color), a label, and (for else) the
+// "false" sourceHandle. Branch identity lives on the child nodes' props._stepPath / _isChildOf.
+// This exercises the imported-graph correlation path (the primary preset case), not the
+// canvas-built data.branchPath path. A run can light the taken branch and fade the untaken one.
+export function createBranchPathFixture(): GraphFixture {
+  return {
+    nodes: [
+      { id: '__start__', type: 'start', position: { x: 80, y: 20 }, data: { blockType: '_start', label: 'Start', props: {} } },
+      { id: 'if-1', type: 'block', position: { x: 80, y: 160 }, data: { blockType: 'if', label: 'If', props: { condition: '${enabled}', _stepPath: 'steps/0' } } },
+      { id: 'then-1', type: 'block', position: { x: 40, y: 320 }, data: { blockType: 'print', label: 'Then', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/0', _branchLabel: 'then', message: 'then-branch' } } },
+      { id: 'else-1', type: 'block', position: { x: 360, y: 320 }, data: { blockType: 'print', label: 'Else', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/else/0', _branchLabel: 'else', message: 'else-branch' } } },
+    ],
+    edges: [
+      { id: 'edge-start-if', source: '__start__', target: 'if-1' },
+      // Imported branch edges: branch color in style.stroke, label, no data.branchPath.
+      { id: 'edge-if-then', source: 'if-1', target: 'then-1', label: 'then', style: { stroke: 'var(--fc-branch-then)' } },
+      { id: 'edge-if-else', source: 'if-1', target: 'else-1', sourceHandle: 'false', label: 'else', style: { stroke: 'var(--fc-branch-else)' } },
+    ],
+  };
+}

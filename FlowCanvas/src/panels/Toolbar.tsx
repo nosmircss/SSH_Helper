@@ -32,6 +32,10 @@ export default function Toolbar() {
   const isRunning = useFlowStore((s) => s.isRunning);
   const paused = useFlowStore((s) => s.paused);
   const debugAction = useFlowStore((s) => s.debugAction);
+  const blockStates = useFlowStore((s) => s.blockStates);
+  const pathVisible = useFlowStore((s) => s.pathVisible);
+  const clearPath = useFlowStore((s) => s.clearPath);
+  const hasPath = pathVisible && blockStates.size > 0;
   const autoLayout = useAutoLayout();
 
   const selectedNodeId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
@@ -237,6 +241,14 @@ export default function Toolbar() {
         title="Toggle branch containment bands (highlight if/try/switch branch regions)"
       >
         ▭ Bands
+      </button>
+      <button
+        onClick={clearPath}
+        disabled={!hasPath}
+        style={btnStyle('var(--fc-text-secondary)', hasPath)}
+        title="Clear the highlighted execution path (block results stay)"
+      >
+        ⌫ Clear Path
       </button>
       <button
         onClick={() => togglePanel('problems')}

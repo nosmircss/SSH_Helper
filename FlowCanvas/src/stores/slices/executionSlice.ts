@@ -25,6 +25,8 @@ export interface ExecutionSlice {
   loopIterations: Map<string, number>;
   branchTaken: Map<string, string>;
   dataBlockTestResults: Map<string, DataBlockTestResult>;
+  /** When false, the "Clear Path" control hides the edge highlight without touching node badges. */
+  pathVisible: boolean;
 
   setRunning: (running: boolean) => void;
   setBlockState: (id: string, state: BlockExecState) => void;
@@ -32,6 +34,8 @@ export interface ExecutionSlice {
   setBlockTiming: (id: string, start: number, end?: number) => void;
   setLoopIteration: (id: string, iteration: number) => void;
   setBranchTaken: (id: string, key: string) => void;
+  setPathVisible: (visible: boolean) => void;
+  clearPath: () => void;
   clearExecution: () => void;
   getBlockOutput: (id: string) => BlockOutput[];
   setDataBlockTestResult: (id: string, result: DataBlockTestResult) => void;
@@ -40,6 +44,7 @@ export interface ExecutionSlice {
 
 export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlice> = (set, get) => ({
   isRunning: false,
+  pathVisible: true,
   blockStates: new Map(),
   blockOutputs: new Map(),
   blockTimings: new Map(),
@@ -97,6 +102,11 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
     });
   },
 
+  setPathVisible: (visible) => set({ pathVisible: visible }),
+
+  // Clear Path: hide the edge highlight only. Node blockStates/badges are untouched.
+  clearPath: () => set({ pathVisible: false }),
+
   clearExecution: () => {
     set({
       blockStates: new Map(),
@@ -105,6 +115,7 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
       loopIterations: new Map(),
       branchTaken: new Map(),
       dataBlockTestResults: new Map(),
+      pathVisible: true,
     });
     // Reset all node exec states to idle
     set((s) => ({
