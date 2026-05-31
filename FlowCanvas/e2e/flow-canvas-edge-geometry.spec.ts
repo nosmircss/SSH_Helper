@@ -13,9 +13,11 @@ function block(id: string, x: number, y: number, label: string): GraphFixture['n
 }
 
 async function nodeWidth(page: Page, id: string): Promise<number> {
-  const box = await page.locator(`.react-flow__node[data-id="${id}"]`).boundingBox();
-  if (!box) throw new Error(`node ${id} has no bounding box`);
-  return box.width;
+  const el = page.locator(`.react-flow__node[data-id="${id}"]`);
+  await el.waitFor({ state: 'visible' });
+  // offsetWidth gives the CSS layout width before any canvas-level zoom transform,
+  // which is what we care about (the node's own size, not its zoomed screen size).
+  return el.evaluate((node) => (node as HTMLElement).offsetWidth);
 }
 
 test.describe('Flow Canvas Edge Geometry', () => {
@@ -37,5 +39,19 @@ test.describe('Flow Canvas Edge Geometry', () => {
     const wLong = await nodeWidth(page, 'long');
     // Should be 0 (minWidth===maxWidth===280); allow 1px for Chromium sub-pixel rounding.
     expect(Math.abs(wShort - wLong)).toBeLessThanOrEqual(1);
+  });
+
+  test('the Start node shares the uniform top-level width (~280px)', async ({ page }) => {
+    await loadGraphFixture(page, {
+      nodes: [
+        { id: 'start', type: 'start', position: { x: 200, y: 40 }, data: { blockType: '_start', label: 'S', props: { name: 'S' } } },
+        block('first', 200, 340, 'First'),
+      ],
+      edges: [{ id: 'e-start', source: 'start', target: 'first' }],
+    });
+    await expect(page.locator('.react-flow__node[data-id="start"]')).toBeVisible();
+    const wStart = await nodeWidth(page, 'start');
+    expect(wStart).toBeGreaterThan(276);
+    expect(wStart).toBeLessThan(290);
   });
 });

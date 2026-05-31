@@ -50,8 +50,8 @@ function StartNode({ data, selected }: NodeProps) {
     background: 'linear-gradient(135deg, var(--fc-start-grad-from), var(--fc-start-grad-to))',
     border: `2px solid ${selected ? 'var(--fc-border-selected)' : 'var(--fc-start-accent)'}`,
     borderRadius: 8,
-    minWidth: 260,
-    maxWidth: 300,
+    minWidth: 280,
+    maxWidth: 280,
     overflow: 'hidden',
     boxShadow: selected
       ? '0 0 12px var(--fc-glow-selected)'
