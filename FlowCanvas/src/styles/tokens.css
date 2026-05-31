@@ -81,18 +81,18 @@
   --fc-cat-timing-badge-text: var(--fc-on-accent);
   --fc-cat-timing-text: oklch(78% 0.02 275);
 
-  /* ── Wave 2a: premium node card (accent rail, neutral body) ──────────────── */
+  /* ── Node card: neutral body + category-hued border ("neon ring"). (Wave 2a → neon-block) ── */
   /* Neutral node body — ~surface-1 with a hint of category-neutral chroma. Replaces colors.bg as
-     the idle fill so every node body reads neutral and the rail carries the category color. */
+     the idle fill so the body reads neutral and the category-hued border (the neon ring) carries identity. */
   --fc-node-surface: oklch(22% 0.02 275);
-  /* Neutral 1px outline now that the category color lives on the rail (softer than the old 2px). */
+  /* Neutral 1px node outline token (softer than the old 2px). */
   --fc-node-border: oklch(34% 0.03 275);
-  /* Single source for the accent-rail width AND the header/preview left-padding calc. 4px is a
-     one-line bump if the 3px rail sub-pixel-thins at low zoom. */
+  /* Accent-rail width — used by StartNode's rail (BaseBlock dropped its rail in the neon-block
+     redesign; identity moved to the border). 4px is a one-line bump if 3px sub-pixel-thins at low zoom. */
   --fc-rail-w: 3px;
 
-  /* Per-category ICON tint = the category border/rail hue (full chroma), so the header glyph matches
-     the rail rather than the softer body text. currentColor on <BlockIcon> inherits this. */
+  /* Per-category ICON tint = the category border hue (full chroma), so the header glyph matches the
+     node's category border rather than the softer body text. currentColor on <BlockIcon> inherits this. */
   --fc-cat-ssh-icon: var(--fc-cat-ssh-border);
   --fc-cat-control-flow-icon: var(--fc-cat-control-flow-border);
   --fc-cat-data-icon: var(--fc-cat-data-border);
@@ -129,6 +129,9 @@
   --fc-glow-disabled: oklch(45% 0 0 / 0.2);
   --fc-glow-selected: oklch(98% 0 0 / 0.15);
   --fc-glow-start: oklch(72% 0.17 150 / 0.15);
+  /* Idle "neon ring": derived per-category in utils/nodeStyle.ts (idleNeon) from
+     --fc-cat-*-border via color-mix; alphas 36/46/60 = "Balanced" intensity (no token here).
+     Intensity scale: soft 0.15a background / balanced ~0.36-0.60a idle / 0.3-0.4a run/success/error. */
 
   /* Status-chip surfaces (dark tints echoing the pre-sweep #2a1a1a / #1a2a1a chip fills).
      Paired with --fc-glow-error / --fc-glow-success on the BORDER for bg/border contrast. */
