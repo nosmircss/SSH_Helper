@@ -383,3 +383,4 @@ tools/
 FlowCanvas/tools/*
 !FlowCanvas/tools/FlowCanvasParityCli/
 FlowCanvas/dist/*
+FlowCanvas/tsconfig.tsbuildinfo
