@@ -229,4 +229,14 @@ describe('selectEdgePathStatus', () => {
     const state = makeState({ nodes, edges, blockStates: new Map([['iif', 'success']]) });
     expect(selectEdgePathStatus(state, 'e-cont')).toBe('on-path');
   });
+
+  it('imported if without _stepPath falls back to sourceHandle === "false" for the else edge', () => {
+    const containerNode: Node = { id: 'iif-bare', position: { x: 0, y: 0 }, data: { blockType: 'if' } } as Node;
+    const childNode: Node = { id: 'e-bare', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { _isChildOf: 'iif-bare' } } } as Node;
+    const edges: Edge[] = [
+      { id: 'e-else-bare', source: 'iif-bare', target: 'e-bare', sourceHandle: 'false' } as Edge,
+    ];
+    const state = makeState({ nodes: [containerNode, childNode], edges, blockStates: new Map([['iif-bare', 'success']]), branchTaken: new Map([['iif-bare', 'else']]) });
+    expect(selectEdgePathStatus(state, 'e-else-bare')).toBe('on-path');
+  });
 });

@@ -1,12 +1,14 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { FlowStore } from '../useFlowStore';
+import type { BlockExecState } from '../slices/executionSlice';
 import { START_NODE_ID } from '../slices/graphSlice';
 
 export type EdgePathStatus = 'on-path' | 'untaken' | 'idle';
 
 // Source states from which control flows onward to a plain successor.
 // 'error' halts the trail; 'running' has not completed yet.
-const PASS_THROUGH = new Set(['success', 'skipped', 'disabled']);
+// 'disabled' nodes are skipped but let the trail continue (same as 'skipped').
+const PASS_THROUGH = new Set<BlockExecState>(['success', 'skipped', 'disabled']);
 const LOOP_TYPES = new Set(['foreach', 'while', 'repeat']);
 
 function propsOf(node: Node | undefined): Record<string, unknown> {
