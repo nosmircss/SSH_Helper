@@ -114,11 +114,10 @@ test.describe('Flow Canvas Token Sweep', () => {
       return value;
     }, name);
 
-  // Wave 2a redesign: the category color moved OFF the body border (now neutral --fc-node-border)
-  // and ONTO the absolutely-positioned accent rail (--fc-cat-ssh-border). This gate still proves
-  // the category token is correctly wired and applied — just on the rail, where the design now
-  // carries category identity — while the body border reads the neutral surface-border token.
-  test('ssh block body border is neutral and the accent rail carries the category token', async ({ page }) => {
+  // Neon-ring redesign: the category color is carried by the card BORDER (--fc-cat-ssh-border) — the
+  // legacy accent rail is gone. This gate proves the category token is correctly wired and applied on
+  // the node border, where the design now carries category identity.
+  test('ssh block border carries the category token (neon ring, no rail)', async ({ page }) => {
     await loadGraphFixture(page, createSshBlockFixture());
 
     const block = page.locator('.react-flow__node[data-id="node-ssh"]');
@@ -131,14 +130,9 @@ test.describe('Flow Canvas Token Sweep', () => {
       (el) => getComputedStyle(el as HTMLElement).borderTopColor,
     );
     expect(renderedBorder).not.toBe('');
-    expect(renderedBorder).toBe(await resolveVar(page, '--fc-node-border'));
-
-    // The accent rail child span now carries the category color.
-    const railBg = await block
-      .locator('[data-testid="node-rail"]')
-      .evaluate((el) => getComputedStyle(el as HTMLElement).backgroundColor);
-    expect(railBg).not.toBe('');
-    expect(railBg).toBe(await resolveVar(page, '--fc-cat-ssh-border'));
+    // The card border now carries the category hue directly (the neon ring); the rail is gone.
+    expect(renderedBorder).toBe(await resolveVar(page, '--fc-cat-ssh-border'));
+    await expect(block.locator('[data-testid="node-rail"]')).toHaveCount(0);
   });
 
   // The panel sweep is complete (Task 5); this CI gate enforces Decision #4 — no raw hex in any

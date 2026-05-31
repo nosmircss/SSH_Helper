@@ -8,10 +8,10 @@ import {
   waitForOutgoingMessage,
 } from './support/harness';
 
-// Wave 2a "accent-rail, not blob" node redesign. Proves the body neutralized to --fc-node-surface,
-// the category color moved onto the absolutely-positioned rail, the header renders a category-tinted
-// BlockIcon <svg>, an unknown blockType still renders (fallback path), and the Wave 1 exec-state
-// precedence is unregressed (the rail is a child, NOT part of the box-shadow/animation stack).
+// Node redesign ("neon ring"): proves the body neutralized to --fc-node-surface, the category color
+// is carried by the card BORDER (the neon ring; the legacy accent rail is gone), the header renders a
+// category-tinted BlockIcon <svg>, an unknown blockType still renders (fallback path), and the Wave 1
+// exec-state precedence is unregressed (running's animation owns the box-shadow over the idle ring).
 
 function createSshBlockFixture(): GraphFixture {
   return {
@@ -69,12 +69,13 @@ test.describe('Flow Canvas Node Redesign', () => {
     expect(bg).toBe(await resolveVar(page, '--fc-node-surface'));
   });
 
-  test('accent rail renders and resolves to the category border token', async ({ page }) => {
+  test('card border resolves to the category border token (the neon ring, no rail)', async ({ page }) => {
     await loadGraphFixture(page, createSshBlockFixture());
-    const rail = page.locator('.react-flow__node[data-id="node-ssh"] [data-testid="node-rail"]');
-    await expect(rail).toBeVisible();
-    const railBg = await rail.evaluate((el) => getComputedStyle(el as HTMLElement).backgroundColor);
-    expect(railBg).toBe(await resolveVar(page, '--fc-cat-ssh-border'));
+    const card = page.locator('.react-flow__node[data-id="node-ssh"] > div').first();
+    const border = await card.evaluate((el) => getComputedStyle(el as HTMLElement).borderTopColor);
+    expect(border).toBe(await resolveVar(page, '--fc-cat-ssh-border'));
+    // the legacy rail is gone — identity is on the border now
+    await expect(page.locator('.react-flow__node[data-id="node-ssh"] [data-testid="node-rail"]')).toHaveCount(0);
   });
 
   test('header renders a category-tinted icon svg', async ({ page }) => {
@@ -108,10 +109,10 @@ test.describe('Flow Canvas Node Redesign', () => {
     await expect(page.locator('.react-flow__node[data-id="node-x"]')).toBeVisible();
   });
 
-  test('exec-state precedence + heat ring unregressed (rail is a child, not the shadow)', async ({ page }) => {
+  test('exec-state precedence + heat ring unregressed (running animation owns the shadow)', async ({ page }) => {
     await loadGraphFixture(page, createSshBlockFixture());
     const container = page.locator('.react-flow__node[data-id="node-ssh"] > div').first();
-    // running → breathing-halo (fc-exec-running) animation present on the first-child card (the rail is a separate child).
+    // running → breathing-halo (fc-exec-running) animation present on the card; its animation owns the box-shadow over the idle ring.
     await postHostMessage(page, { type: 'execution-update', stepId: 'node-ssh', state: 'running' });
     await expect
       .poll(() =>
