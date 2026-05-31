@@ -85,8 +85,6 @@
   /* Neutral node body — ~surface-1 with a hint of category-neutral chroma. Replaces colors.bg as
      the idle fill so the body reads neutral and the category-hued border (the neon ring) carries identity. */
   --fc-node-surface: oklch(22% 0.02 275);
-  /* Neutral 1px node outline token (softer than the old 2px). */
-  --fc-node-border: oklch(34% 0.03 275);
   /* Accent-rail width — used by StartNode's rail (BaseBlock dropped its rail in the neon-block
      redesign; identity moved to the border). 4px is a one-line bump if 3px sub-pixel-thins at low zoom. */
   --fc-rail-w: 3px;
