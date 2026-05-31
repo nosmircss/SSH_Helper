@@ -47,4 +47,9 @@ describe('BaseBlock', () => {
     renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
     expect(screen.getByTestId('block-node')).toBeInTheDocument();
   });
+
+  it('no longer renders the legacy accent rail (the category border carries identity now)', () => {
+    renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
+    expect(screen.queryByTestId('node-rail')).toBeNull();
+  });
 });

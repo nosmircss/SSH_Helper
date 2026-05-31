@@ -165,20 +165,6 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     : execState === 'error' ? 'fc-exec-error'
       : undefined;
 
-  // Accent rail: an absolutely-positioned child (NOT a CSS border) so it never participates in the
-  // exec/heat boxShadow stack and survives crisp at low zoom. Category identity lives here + the icon.
-  const railStyle: CSSProperties = {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 'var(--fc-rail-w)',
-    background: isDisabled ? 'var(--fc-border-muted)' : colors.border,
-    borderTopLeftRadius: 8,
-    borderBottomLeftRadius: 8,
-    pointerEvents: 'none',
-  };
-
   // Category-tinted icon chip. color tints the stroke (currentColor); a faint category wash sits
   // behind it. mix() is the gate-safe color-mix helper — no new per-category token needed.
   const iconChipStyle: CSSProperties = {
@@ -195,7 +181,6 @@ function BaseBlock({ data, selected, id }: NodeProps) {
 
   const headerStyle: CSSProperties = {
     padding: '4px 8px',
-    paddingLeft: 'calc(8px + var(--fc-rail-w))',
     borderBottom: `1px solid ${mix(colors.border, 20)}`,
     display: 'flex',
     alignItems: 'center',
@@ -285,9 +270,6 @@ function BaseBlock({ data, selected, id }: NodeProps) {
 
   return (
     <div className={stateClass} style={containerStyle} data-testid="block-node">
-      {/* Accent rail (category identity; absolutely positioned, out of the boxShadow stack) */}
-      <span style={railStyle} data-testid="node-rail" />
-
       {/* Running comet halo: a sweeping conic ring on the card edge. Render-only and gated by
           reduced motion (no comet, no churn when motion is off). inset:0 keeps it inside the
           border-box so it never grows the node or gets clipped. */}
@@ -344,7 +326,6 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       {previewText && (
         <div style={{
           padding: '4px 8px',
-          paddingLeft: 'calc(8px + var(--fc-rail-w))',
           fontFamily: 'monospace',
           fontSize: 11,
           color: isDisabled ? 'var(--fc-text-disabled)' : colors.text,
