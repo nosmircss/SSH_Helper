@@ -163,4 +163,70 @@ describe('selectEdgePathStatus', () => {
     expect(selectEdgePathStatus(ran, 's')).toBe('on-path');
     expect(selectEdgePathStatus(notRun, 's')).toBe('idle');
   });
+
+  // ── Imported presets: branch edges carry NO data.branchPath. Branch identity is on the
+  //    target child's props._stepPath, with props._isChildOf === the container's id. ──
+  const importedIf: Node = { id: 'iif', position: { x: 0, y: 0 }, data: { blockType: 'if', props: { _stepPath: 'steps/0' } } } as Node;
+  function importedChild(id: string, stepPath: string, parent: string, blockType = 'print'): Node {
+    return { id, position: { x: 0, y: 0 }, data: { blockType, props: { _stepPath: stepPath, _isChildOf: parent } } } as Node;
+  }
+
+  it('imported if: lights the taken then-branch and fades the else-branch via _stepPath', () => {
+    const nodes = [importedIf, importedChild('t', 'steps/0/then/0', 'iif'), importedChild('e', 'steps/0/else/0', 'iif')];
+    const edges: Edge[] = [
+      { id: 'e-then', source: 'iif', target: 't', style: { stroke: 'green' } } as Edge,
+      { id: 'e-else', source: 'iif', target: 'e', sourceHandle: 'false', style: { stroke: 'red' } } as Edge,
+    ];
+    const state = makeState({ nodes, edges, blockStates: new Map([['iif', 'success']]), branchTaken: new Map([['iif', 'then']]) });
+    expect(selectEdgePathStatus(state, 'e-then')).toBe('on-path');
+    expect(selectEdgePathStatus(state, 'e-else')).toBe('untaken');
+  });
+
+  it('imported then-vs-elif: taken "then" does NOT match the elif child (_stepPath disambiguates)', () => {
+    const nodes = [importedIf, importedChild('t', 'steps/0/then/0', 'iif'), importedChild('el', 'steps/0/elif/0/then/0', 'iif')];
+    const edges: Edge[] = [
+      { id: 'e-then', source: 'iif', target: 't' } as Edge,
+      { id: 'e-elif', source: 'iif', target: 'el' } as Edge,
+    ];
+    const state = makeState({ nodes, edges, blockStates: new Map([['iif', 'success']]), branchTaken: new Map([['iif', 'then']]) });
+    expect(selectEdgePathStatus(state, 'e-then')).toBe('on-path');
+    expect(selectEdgePathStatus(state, 'e-elif')).toBe('untaken');
+  });
+
+  it('imported switch: matches the taken case index and fades the others', () => {
+    const sw: Node = { id: 'sw', position: { x: 0, y: 0 }, data: { blockType: 'switch', props: { _stepPath: 'steps/1' } } } as Node;
+    const nodes = [sw, importedChild('c0', 'steps/1/cases/0/do/0', 'sw'), importedChild('c2', 'steps/1/cases/2/do/0', 'sw')];
+    const edges: Edge[] = [
+      { id: 'e-c0', source: 'sw', target: 'c0' } as Edge,
+      { id: 'e-c2', source: 'sw', target: 'c2' } as Edge,
+    ];
+    const state = makeState({ nodes, edges, blockStates: new Map([['sw', 'success']]), branchTaken: new Map([['sw', 'cases/2/do']]) });
+    expect(selectEdgePathStatus(state, 'e-c2')).toBe('on-path');
+    expect(selectEdgePathStatus(state, 'e-c0')).toBe('untaken');
+  });
+
+  it('imported loop: body edge (target is a child) lights when iterated, fades at zero', () => {
+    const fe: Node = { id: 'fe', position: { x: 0, y: 0 }, data: { blockType: 'foreach', props: { _stepPath: 'steps/2' } } } as Node;
+    const nodes = [fe, importedChild('b', 'steps/2/do/0', 'fe')];
+    const edges: Edge[] = [{ id: 'e-body', source: 'fe', target: 'b' } as Edge];
+    const ran = makeState({ nodes, edges, blockStates: new Map([['fe', 'success']]), loopIterations: new Map([['fe', 2]]) });
+    const zero = makeState({ nodes, edges, blockStates: new Map([['fe', 'success']]), loopIterations: new Map([['fe', 0]]) });
+    expect(selectEdgePathStatus(ran, 'e-body')).toBe('on-path');
+    expect(selectEdgePathStatus(zero, 'e-body')).toBe('untaken');
+  });
+
+  it('imported within-branch child→child edge is a plain successor, not a branch', () => {
+    const nodes = [importedIf, importedChild('t1', 'steps/0/then/0', 'iif'), importedChild('t2', 'steps/0/then/1', 'iif')];
+    const edges: Edge[] = [{ id: 'e-t1-t2', source: 't1', target: 't2' } as Edge];
+    const state = makeState({ nodes, edges, blockStates: new Map([['t1', 'success']]) });
+    expect(selectEdgePathStatus(state, 'e-t1-t2')).toBe('on-path');
+  });
+
+  it('imported container continuation (target is not a child) is a plain successor', () => {
+    const after: Node = { id: 'after', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { _stepPath: 'steps/1' } } } as Node;
+    const nodes = [importedIf, after];
+    const edges: Edge[] = [{ id: 'e-cont', source: 'iif', target: 'after' } as Edge];
+    const state = makeState({ nodes, edges, blockStates: new Map([['iif', 'success']]) });
+    expect(selectEdgePathStatus(state, 'e-cont')).toBe('on-path');
+  });
 });
