@@ -218,6 +218,73 @@ describe('selectEdgePathStatus', () => {
     expect(selectEdgePathStatus(ran, 's')).toBe('on-path');
     expect(selectEdgePathStatus(notRun, 's')).toBe('idle');
   });
+
+  // ── Imported presets: branch edges carry NO data.branchPath. Branch identity is on the
+  //    target child's props._stepPath, with props._isChildOf === the container's id. ──
+  const importedIf: Node = { id: 'iif', position: { x: 0, y: 0 }, data: { blockType: 'if', props: { _stepPath: 'steps/0' } } } as Node;
+  function importedChild(id: string, stepPath: string, parent: string, blockType = 'print'): Node {
+    return { id, position: { x: 0, y: 0 }, data: { blockType, props: { _stepPath: stepPath, _isChildOf: parent } } } as Node;
+  }
+
+  it('imported if: lights the taken then-branch and fades the else-branch via _stepPath', () => {
+    const nodes = [importedIf, importedChild('t', 'steps/0/then/0', 'iif'), importedChild('e', 'steps/0/else/0', 'iif')];
+    const edges: Edge[] = [
+      { id: 'e-then', source: 'iif', target: 't', style: { stroke: 'green' } } as Edge,
+      { id: 'e-else', source: 'iif', target: 'e', sourceHandle: 'false', style: { stroke: 'red' } } as Edge,
+    ];
+    const state = makeState({ nodes, edges, blockStates: new Map([['iif', 'success']]), branchTaken: new Map([['iif', 'then']]) });
+    expect(selectEdgePathStatus(state, 'e-then')).toBe('on-path');
+    expect(selectEdgePathStatus(state, 'e-else')).toBe('untaken');
+  });
+
+  it('imported then-vs-elif: taken "then" does NOT match the elif child (_stepPath disambiguates)', () => {
+    const nodes = [importedIf, importedChild('t', 'steps/0/then/0', 'iif'), importedChild('el', 'steps/0/elif/0/then/0', 'iif')];
+    const edges: Edge[] = [
+      { id: 'e-then', source: 'iif', target: 't' } as Edge,
+      { id: 'e-elif', source: 'iif', target: 'el' } as Edge,
+    ];
+    const state = makeState({ nodes, edges, blockStates: new Map([['iif', 'success']]), branchTaken: new Map([['iif', 'then']]) });
+    expect(selectEdgePathStatus(state, 'e-then')).toBe('on-path');
+    expect(selectEdgePathStatus(state, 'e-elif')).toBe('untaken');
+  });
+
+  it('imported switch: matches the taken case index and fades the others', () => {
+    const sw: Node = { id: 'sw', position: { x: 0, y: 0 }, data: { blockType: 'switch', props: { _stepPath: 'steps/1' } } } as Node;
+    const nodes = [sw, importedChild('c0', 'steps/1/cases/0/do/0', 'sw'), importedChild('c2', 'steps/1/cases/2/do/0', 'sw')];
+    const edges: Edge[] = [
+      { id: 'e-c0', source: 'sw', target: 'c0' } as Edge,
+      { id: 'e-c2', source: 'sw', target: 'c2' } as Edge,
+    ];
+    const state = makeState({ nodes, edges, blockStates: new Map([['sw', 'success']]), branchTaken: new Map([['sw', 'cases/2/do']]) });
+    expect(selectEdgePathStatus(state, 'e-c2')).toBe('on-path');
+    expect(selectEdgePathStatus(state, 'e-c0')).toBe('untaken');
+  });
+
+  it('imported loop: body edge (target is a child) lights when iterated, fades at zero', () => {
+    const fe: Node = { id: 'fe', position: { x: 0, y: 0 }, data: { blockType: 'foreach', props: { _stepPath: 'steps/2' } } } as Node;
+    const nodes = [fe, importedChild('b', 'steps/2/do/0', 'fe')];
+    const edges: Edge[] = [{ id: 'e-body', source: 'fe', target: 'b' } as Edge];
+    const ran = makeState({ nodes, edges, blockStates: new Map([['fe', 'success']]), loopIterations: new Map([['fe', 2]]) });
+    const zero = makeState({ nodes, edges, blockStates: new Map([['fe', 'success']]), loopIterations: new Map([['fe', 0]]) });
+    expect(selectEdgePathStatus(ran, 'e-body')).toBe('on-path');
+    expect(selectEdgePathStatus(zero, 'e-body')).toBe('untaken');
+  });
+
+  it('imported within-branch child→child edge is a plain successor, not a branch', () => {
+    // source is the first then-child; target._isChildOf is the IF (not the source) → not a branch.
+    const nodes = [importedIf, importedChild('t1', 'steps/0/then/0', 'iif'), importedChild('t2', 'steps/0/then/1', 'iif')];
+    const edges: Edge[] = [{ id: 'e-t1-t2', source: 't1', target: 't2' } as Edge];
+    const state = makeState({ nodes, edges, blockStates: new Map([['t1', 'success']]) });
+    expect(selectEdgePathStatus(state, 'e-t1-t2')).toBe('on-path');
+  });
+
+  it('imported container continuation (target is not a child) is a plain successor', () => {
+    const after: Node = { id: 'after', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { _stepPath: 'steps/1' } } } as Node;
+    const nodes = [importedIf, after];
+    const edges: Edge[] = [{ id: 'e-cont', source: 'iif', target: 'after' } as Edge];
+    const state = makeState({ nodes, edges, blockStates: new Map([['iif', 'success']]) });
+    expect(selectEdgePathStatus(state, 'e-cont')).toBe('on-path');
+  });
 });
 ```
 
@@ -231,7 +298,7 @@ Expected: FAIL — `Cannot find module '../edgePath'` (file does not exist yet).
 Create `src/stores/selectors/edgePath.ts`:
 
 ```ts
-import type { Edge } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import type { FlowStore } from '../useFlowStore';
 import { START_NODE_ID } from '../slices/graphSlice';
 
@@ -240,6 +307,22 @@ export type EdgePathStatus = 'on-path' | 'untaken' | 'idle';
 // Source states from which control flows onward to a plain successor.
 // 'error' halts the trail; 'running' has not completed yet.
 const PASS_THROUGH = new Set(['success', 'skipped', 'disabled']);
+const LOOP_TYPES = new Set(['foreach', 'while', 'repeat']);
+
+function propsOf(node: Node | undefined): Record<string, unknown> {
+  const data = (node?.data ?? {}) as Record<string, unknown>;
+  return (data.props ?? {}) as Record<string, unknown>;
+}
+
+function strProp(node: Node | undefined, key: string): string | undefined {
+  const value = propsOf(node)[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function blockTypeOf(node: Node | undefined): string | undefined {
+  const data = (node?.data ?? {}) as Record<string, unknown>;
+  return typeof data.blockType === 'string' ? data.blockType : undefined;
+}
 
 function branchPathOf(edge: Edge): string | undefined {
   const data = (edge.data ?? {}) as Record<string, unknown>;
@@ -248,12 +331,32 @@ function branchPathOf(edge: Edge): string | undefined {
 }
 
 /**
+ * Imported correlation: does a child's `_stepPath` fall inside the container's `taken`
+ * branch scope? e.g. container "steps/3", child "steps/3/cases/2/do/0", taken "cases/2/do"
+ * → true. The trailing slash on the prefix prevents "steps/3" matching "steps/30"; keeping
+ * the index ("cases/2") disambiguates switch cases and `then` vs `elif/0/then`. Mirrors
+ * FlowCanvasBridge.ExtractBranchKeyFromStepPath (but index-precise).
+ */
+function childInTakenScope(childStepPath: string, containerStepPath: string, taken: string): boolean {
+  const prefix = containerStepPath.endsWith('/') ? containerStepPath : containerStepPath + '/';
+  if (!childStepPath.startsWith(prefix)) return false;
+  const relative = childStepPath.slice(prefix.length);
+  return relative === taken || relative.startsWith(taken + '/');
+}
+
+/**
  * Classify an edge against the last/current run: 'on-path' (traversed), 'untaken'
  * (a sibling branch that did not fire — faded), or 'idle' (never reached / hidden).
  *
  * Derived from state that already persists after a run, so the result survives
  * `execution-finished`. `pathVisible` is the only gate the "Clear Path" control flips.
- * Reads only transient exec maps — never node/edge persisted data — so export is unaffected.
+ * Reads only transient exec maps + visual-only node props — never mutates anything and
+ * never writes to node/edge data — so YAML/graph export is unaffected.
+ *
+ * Branch edges come from two graph origins:
+ *  - canvas-built: edge carries `data.branchPath` (matched directly against branchTaken);
+ *  - imported presets: edge has NO branchPath — its branch identity is on the target child's
+ *    `props._stepPath` (`_isChildOf === source`), correlated against the container's `_stepPath`.
  */
 export function selectEdgePathStatus(state: FlowStore, edgeId: string): EdgePathStatus {
   if (!state.pathVisible) return 'idle';
@@ -271,8 +374,20 @@ export function selectEdgePathStatus(state: FlowStore, edgeId: string): EdgePath
   const sourceState = state.blockStates.get(edge.source);
   if (!sourceState || sourceState === 'idle' || sourceState === 'running') return 'idle';
 
+  const sourceNode = state.nodes.find((n) => n.id === edge.source);
+  const targetNode = state.nodes.find((n) => n.id === edge.target);
+  const blockType = blockTypeOf(sourceNode);
+
+  // Branch detection — an edge entering one of the source container's branches:
+  //  - canvas-built: carries data.branchPath and isn't the 'continue' handle; or
+  //  - imported: the target is a visual child of the source (props._isChildOf === source).
+  // Only the FIRST edge of each branch (container → first child) satisfies the imported test;
+  // within-branch child→child edges have _isChildOf pointing at the container, not the source.
   const branchPath = branchPathOf(edge);
-  const isBranch = !!branchPath && edge.sourceHandle !== 'continue';
+  const targetChildOf = strProp(targetNode, '_isChildOf');
+  const isInCanvasBranch = !!branchPath && edge.sourceHandle !== 'continue';
+  const isImportedBranch = targetChildOf === edge.source;
+  const isBranch = isInCanvasBranch || isImportedBranch;
 
   if (!isBranch) {
     // Plain successor / container continuation: traversed only if the source completed
@@ -280,26 +395,37 @@ export function selectEdgePathStatus(state: FlowStore, edgeId: string): EdgePath
     return PASS_THROUGH.has(sourceState) ? 'on-path' : 'idle';
   }
 
-  // Branch edge of a container block.
-  if (sourceState === 'error') return 'idle'; // conditional failed before it branched
-
-  const sourceNode = state.nodes.find((n) => n.id === edge.source);
-  const sourceData = (sourceNode?.data ?? {}) as Record<string, unknown>;
-  const blockType = typeof sourceData.blockType === 'string' ? sourceData.blockType : undefined;
+  if (sourceState === 'error') return 'idle'; // container failed before it branched
 
   // Parallel fans out to every branch — all of them are on the path.
   if (blockType === 'parallel') return 'on-path';
 
-  // A loop body ('do') is on-path once the loop iterated at least once.
-  if ((blockType === 'foreach' || blockType === 'while') && branchPath === 'do') {
+  // A loop has a single body branch — on-path once it iterated at least once.
+  if (blockType && LOOP_TYPES.has(blockType)) {
     return (state.loopIterations.get(edge.source) ?? 0) > 0 ? 'on-path' : 'untaken';
   }
 
   // Conditional (if / switch / try): compare against the recorded taken branch.
   const taken = state.branchTaken.get(edge.source);
   if (!taken) return 'idle'; // no branch signal — don't guess
-  const matches = branchPath === taken || edge.sourceHandle === taken;
-  return matches ? 'on-path' : 'untaken';
+
+  let matched: boolean;
+  if (branchPath) {
+    // Canvas-built: branchPath is the scope key directly.
+    matched = branchPath === taken;
+  } else {
+    // Imported: correlate the target child's _stepPath against the container's _stepPath.
+    const childStepPath = strProp(targetNode, '_stepPath');
+    const containerStepPath = strProp(sourceNode, '_stepPath');
+    if (childStepPath && containerStepPath) {
+      matched = childInTakenScope(childStepPath, containerStepPath, taken);
+    } else if (edge.sourceHandle === 'false') {
+      matched = taken === 'else'; // last-ditch: the if "false" handle is the else branch
+    } else {
+      return 'idle'; // can't correlate this branch — don't guess
+    }
+  }
+  return matched ? 'on-path' : 'untaken';
 }
 ```
 
@@ -790,23 +916,24 @@ git commit -m "feat(flow-canvas): add Clear Path toolbar control"
 Append to `e2e/fixtures/graphs.ts` (before the final closing — it is a flat list of exported functions):
 
 ```ts
-// If with both a then-branch and an else-branch, so a run can light the taken branch and
-// fade the untaken one. Edge metadata mirrors what the importer/onConnect produce
-// (branchPath + the if "false" sourceHandle on the else edge).
+// An IMPORTED if/then/else, faithfully mirroring what FlowCanvasBridge produces: branch edges
+// carry NO data.branchPath — only style.stroke (branch color), a label, and (for else) the
+// "false" sourceHandle. Branch identity lives on the child nodes' props._stepPath / _isChildOf.
+// This exercises the imported-graph correlation path (the primary preset case), not the
+// canvas-built data.branchPath path. A run can light the taken branch and fade the untaken one.
 export function createBranchPathFixture(): GraphFixture {
   return {
     nodes: [
       { id: '__start__', type: 'start', position: { x: 80, y: 20 }, data: { blockType: '_start', label: 'Start', props: {} } },
-      { id: 'if-1', type: 'block', position: { x: 80, y: 160 }, data: { blockType: 'if', label: 'If', props: { condition: '${enabled}' } } },
-      { id: 'then-1', type: 'block', position: { x: 40, y: 320 }, data: { blockType: 'print', label: 'Then', props: { _isChildOf: 'if-1', _branchLabel: 'then', message: 'then-branch' } } },
-      { id: 'else-1', type: 'block', position: { x: 360, y: 320 }, data: { blockType: 'print', label: 'Else', props: { _isChildOf: 'if-1', _branchLabel: 'else', message: 'else-branch' } } },
+      { id: 'if-1', type: 'block', position: { x: 80, y: 160 }, data: { blockType: 'if', label: 'If', props: { condition: '${enabled}', _stepPath: 'steps/0' } } },
+      { id: 'then-1', type: 'block', position: { x: 40, y: 320 }, data: { blockType: 'print', label: 'Then', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/0', _branchLabel: 'then', message: 'then-branch' } } },
+      { id: 'else-1', type: 'block', position: { x: 360, y: 320 }, data: { blockType: 'print', label: 'Else', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/else/0', _branchLabel: 'else', message: 'else-branch' } } },
     ],
     edges: [
       { id: 'edge-start-if', source: '__start__', target: 'if-1' },
-      // Branch edges carry the branch color in `style.stroke` (what getBranchVisual writes on
-      // import), so the on-path overlay keeps the branch hue rather than the spine token.
-      { id: 'edge-if-then', source: 'if-1', target: 'then-1', sourceHandle: 'true', data: { branchPath: 'then' }, style: { stroke: 'var(--fc-branch-then)' } },
-      { id: 'edge-if-else', source: 'if-1', target: 'else-1', sourceHandle: 'false', data: { branchPath: 'else' }, style: { stroke: 'var(--fc-branch-else)' } },
+      // Imported branch edges: branch color in style.stroke, label, no data.branchPath.
+      { id: 'edge-if-then', source: 'if-1', target: 'then-1', label: 'then', style: { stroke: 'var(--fc-branch-then)' } },
+      { id: 'edge-if-else', source: 'if-1', target: 'else-1', sourceHandle: 'false', label: 'else', style: { stroke: 'var(--fc-branch-else)' } },
     ],
   };
 }

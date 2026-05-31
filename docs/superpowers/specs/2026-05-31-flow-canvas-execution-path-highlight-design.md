@@ -61,11 +61,16 @@ Predicate:
 
 | Result | Condition |
 |--------|-----------|
-| `idle` | `pathVisible === false`, **or** the edge's source node has no recorded exec state (never ran). |
-| `on-path` | source ran **and** one of: (a) source is non-branching → its single continuation edge; (b) source is a conditional and the edge's branch (`data.branchPath` **or** `sourceHandle`) matches `branchTaken.get(source)`; (c) source is a loop and this is the body edge with `loopIterations.get(source) > 0`; (d) source is a parallel fan-out → **all** its branch edges. |
-| `untaken` | source ran, but this edge is a sibling branch of a conditional that did **not** fire. |
+| `idle` | `pathVisible === false`, **or** the edge's source node has no recorded exec state (never ran / still running). |
+| `on-path` | source completed **and** one of: (a) source is non-branching → its continuation/successor edge (source state ∈ {success, skipped, disabled}); (b) source is a conditional and this branch edge matches `branchTaken.get(source)`; (c) source is a loop and this is the body edge with `loopIterations.get(source) > 0`; (d) source is a parallel fan-out → **all** its branch edges. |
+| `untaken` | source ran, but this edge is a sibling branch of a conditional/loop that did **not** fire. |
 
-Branch matching guards on **both** `sourceHandle` and `data.branchPath` (memory: imported branch edges are identified by color + `sourceHandle`, not `data.branchPath` alone).
+**Branch detection and matching must handle two graph origins** (this is load-bearing — the canvas is primarily a preset-builder fed by imported YAML):
+
+- **Canvas-built edges** carry `data.branchPath` (set by `graphSlice`'s `onConnect`/`getBranchVisual`), e.g. `'then'`, `'cases/2/do'`. Detection: `!!branchPath && sourceHandle !== 'continue'`. Matching: `branchPath === branchTaken`.
+- **Imported edges** (from `FlowCanvasBridge`) carry **no** `data.branchPath` — only `style.stroke` (color), `label`, and (for `else` only) `sourceHandle='false'`. Their branch identity lives on the **target child node's `props._stepPath`** (e.g. `steps/3/cases/2/do/0`), with `props._isChildOf === source`. Detection: `targetNode.props._isChildOf === edge.source`. Matching: strip the container node's `props._stepPath` prefix (with trailing slash, so `steps/3` ≠ `steps/30`) from the child's `_stepPath`; the edge matches iff the relative remainder equals `branchTaken` or `startsWith(branchTaken + '/')`. This mirrors `FlowCanvasBridge.ExtractBranchKeyFromStepPath` and `branchBands.ts`, but keeps the index (`cases/2`) so it disambiguates switch cases and `then` vs `elif/0/then`.
+
+When a branch edge can't be correlated to a recorded `branchTaken` (e.g. `try` emits none), return `idle` — never guess a false `on-path`. `branchTaken`/`loopIterations` arrive on the container's completion, so branch highlighting appears when the container resolves.
 
 ### 2. `AnimatedEdge.tsx` (modify)
 
