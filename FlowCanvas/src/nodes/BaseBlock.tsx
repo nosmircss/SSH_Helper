@@ -147,7 +147,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     background: isDisabled ? 'var(--fc-surface-disabled)' : 'var(--fc-node-surface)',
     border: `1px solid ${selected ? 'var(--fc-border-selected)' : isDisabled ? 'var(--fc-border-muted)' : 'var(--fc-node-border)'}`,
     borderRadius: 8,
-    minWidth: isChild ? 160 : 180,
+    minWidth: isChild ? 160 : 280,
     maxWidth: isChild ? 260 : 280,
     overflow: 'hidden',
     opacity: isDisabled ? 0.5 : isChild ? 0.95 : 1,
