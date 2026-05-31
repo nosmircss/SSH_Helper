@@ -3,6 +3,7 @@ import { BaseEdge, getSmoothStepPath, getStraightPath, type EdgeProps } from '@x
 import { mix } from '../utils/tokens';
 import { markerIdForStroke } from './EdgeMarkers';
 import { useFlowStore } from '../stores/useFlowStore';
+import { selectEdgePathStatus } from '../stores/selectors/edgePath';
 import './animatededge.css';
 
 function AnimatedEdge(props: EdgeProps) {
@@ -11,6 +12,8 @@ function AnimatedEdge(props: EdgeProps) {
   const isRunning = useFlowStore((s) => s.isRunning);
   const blockStates = useFlowStore((s) => s.blockStates);
   const reducedMotion = useFlowStore((s) => s.reducedMotion);
+  // Path overlay status. Returns a string → referentially stable, no extra renders.
+  const pathStatus = useFlowStore((s) => selectEdgePathStatus(s, id));
 
   // Geometry (not data.branchPath / sourceHandle) is the discriminator: imported branch edges
   // carry no branchPath, so metadata would misclassify them. Aligned, downward edges (the
@@ -36,7 +39,32 @@ function AnimatedEdge(props: EdgeProps) {
   const active = isRunning && (sourceState === 'success' || sourceState === 'running');
 
   const gradientId = `fc-grad-${id}`;
-  const strokeWidth = typeof style?.strokeWidth === 'number' ? style.strokeWidth : active ? 2.5 : 2;
+
+  // ── Execution-path overlay (persists after the run; decoupled from isRunning) ──
+  // on-path: full-strength stroke + soft glow. Idle-grey spine edges promote to the traversed
+  //   token so a traveled wire actually reads as lit; branch edges keep their branch color.
+  // untaken: a branch that did not fire — faded via the .fc-edge-untaken class.
+  const onPath = pathStatus === 'on-path';
+  const untaken = pathStatus === 'untaken';
+  const onPathStroke = color === 'var(--fc-edge-idle)' ? 'var(--fc-edge-traversed)' : color;
+
+  let stroke: string;
+  let strokeWidth: number;
+  let edgeClass: string | undefined;
+  if (onPath) {
+    stroke = onPathStroke;
+    strokeWidth = typeof style?.strokeWidth === 'number' ? style.strokeWidth : 3;
+    edgeClass = 'fc-edge-onpath';
+  } else if (untaken) {
+    stroke = color;
+    strokeWidth = typeof style?.strokeWidth === 'number' ? style.strokeWidth : 1.5;
+    edgeClass = 'fc-edge-untaken';
+  } else {
+    // Idle: existing behavior — dim→full gradient, widening while the source is active.
+    stroke = `url(#${gradientId})`;
+    strokeWidth = typeof style?.strokeWidth === 'number' ? style.strokeWidth : active ? 2.5 : 2;
+    edgeClass = undefined;
+  }
 
   return (
     <>
@@ -49,9 +77,10 @@ function AnimatedEdge(props: EdgeProps) {
       </defs>
       <BaseEdge
         id={id}
+        className={edgeClass}
         path={edgePath}
         markerEnd={`url(#${markerId})`}
-        style={{ ...style, stroke: `url(#${gradientId})`, strokeWidth }}
+        style={{ ...style, stroke, strokeWidth }}
       />
       {active && !reducedMotion && (
         <circle
