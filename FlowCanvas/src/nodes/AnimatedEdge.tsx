@@ -30,8 +30,8 @@ function AnimatedEdge(props: EdgeProps) {
         sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 8,
       });
 
-  // Color comes from the edge's style.stroke (set by getBranchVisual / defaultEdgeOptions /
-  // selection). Branch edges = --fc-branch-*, continuation = --fc-accent, plain = --fc-edge-idle.
+  // Color comes from the edge's style.stroke (set by getBranchVisual / defaultEdgeOptions).
+  // Branch edges = --fc-branch-*, continuation = --fc-accent, plain = --fc-edge-idle.
   const color = (typeof style?.stroke === 'string' ? style.stroke : undefined) ?? 'var(--fc-edge-idle)';
   const markerId = markerIdForStroke(color);
 

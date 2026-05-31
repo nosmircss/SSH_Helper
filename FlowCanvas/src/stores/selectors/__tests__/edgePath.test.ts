@@ -239,4 +239,17 @@ describe('selectEdgePathStatus', () => {
     const state = makeState({ nodes: [containerNode, childNode], edges, blockStates: new Map([['iif-bare', 'success']]), branchTaken: new Map([['iif-bare', 'else']]) });
     expect(selectEdgePathStatus(state, 'e-else-bare')).toBe('on-path');
   });
+
+  it('imported parallel: every branch edge lights (no untaken among them)', () => {
+    const par: Node = { id: 'par', position: { x: 0, y: 0 }, data: { blockType: 'parallel', props: { _stepPath: 'steps/3' } } } as Node;
+    const nodes = [par, importedChild('p0', 'steps/3/parallel/0/0', 'par'), importedChild('p1', 'steps/3/parallel/1/0', 'par')];
+    const edges: Edge[] = [
+      { id: 'e-p0', source: 'par', target: 'p0' } as Edge,
+      { id: 'e-p1', source: 'par', target: 'p1' } as Edge,
+    ];
+    // No branchTaken — parallel runs all branches; the blockType short-circuit covers it.
+    const state = makeState({ nodes, edges, blockStates: new Map([['par', 'success']]) });
+    expect(selectEdgePathStatus(state, 'e-p0')).toBe('on-path');
+    expect(selectEdgePathStatus(state, 'e-p1')).toBe('on-path');
+  });
 });
