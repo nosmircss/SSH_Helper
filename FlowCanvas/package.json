@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:parity": "playwright test --workers=1 e2e/flow-canvas-preset-parity.spec.ts e2e/flow-canvas-preset-negative.spec.ts e2e/flow-canvas-gesture-smoke.spec.ts e2e/flow-canvas-connection-guards.spec.ts",
     "test:e2e:dist": "npm run build && playwright test --config playwright.preview.config.ts",
@@ -27,12 +28,16 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/dagre": "^0.7.54",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "jsdom": "^29.1.1",
     "typescript": "^5.9.3",
     "vite": "^8.0.1",
-    "vite-plugin-singlefile": "^2.3.2"
+    "vite-plugin-singlefile": "^2.3.2",
+    "vitest": "^4.1.7"
   }
 }

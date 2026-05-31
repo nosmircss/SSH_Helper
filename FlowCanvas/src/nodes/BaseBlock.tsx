@@ -3,6 +3,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { blockDefMap, categoryColors, type BlockCategory } from '../blockDefs/registry';
 import { useFlowStore } from '../stores/useFlowStore';
 import { mix } from '../utils/tokens';
+import { nodeBorderColor, resolveNodeShadow } from '../utils/nodeStyle';
 import { BlockIcon } from './BlockIcon';
 import './baseblock.css';
 import './execution-cinematics.css';
@@ -135,17 +136,19 @@ function BaseBlock({ data, selected, id }: NodeProps) {
 
   // running + error are class-driven: the fc-exec-running / fc-exec-error animations own the
   // box-shadow via the cascade (CSS animations outrank inline styles), so no inline glow here.
-  // success settles to a soft static glow on the INLINE path so the heat ring still stacks;
-  // skipped keeps its glow; selection / idle unchanged.
-  const existingBoxShadow =
-    execState === 'success' ? '0 0 10px var(--fc-glow-success)'
-      : execState === 'skipped' ? '0 0 16px var(--fc-glow-skipped)'
-        : selected ? '0 0 12px var(--fc-glow-selected)'
-          : 'none';
+  // success/skipped settle to a soft static glow on the INLINE path so the heat ring still stacks;
+  // idle gets the category "neon ring" (gated off when the heat ring is active). See utils/nodeStyle.
+  const heatActive = heatTint != null;
+  const existingBoxShadow = resolveNodeShadow({
+    execState,
+    selected,
+    heatActive,
+    border: colors.border,
+  });
 
   const containerStyle: CSSProperties = {
     background: isDisabled ? 'var(--fc-surface-disabled)' : 'var(--fc-node-surface)',
-    border: `1px solid ${selected ? 'var(--fc-border-selected)' : isDisabled ? 'var(--fc-border-muted)' : 'var(--fc-node-border)'}`,
+    border: `1px solid ${nodeBorderColor({ selected, isDisabled, border: colors.border })}`,
     borderRadius: 8,
     minWidth: isChild ? 160 : 280,
     maxWidth: isChild ? 260 : 280,
@@ -281,7 +284,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   ) : null;
 
   return (
-    <div className={stateClass} style={containerStyle}>
+    <div className={stateClass} style={containerStyle} data-testid="block-node">
       {/* Accent rail (category identity; absolutely positioned, out of the boxShadow stack) */}
       <span style={railStyle} data-testid="node-rail" />
 
