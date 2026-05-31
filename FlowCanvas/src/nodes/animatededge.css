@@ -18,3 +18,13 @@
   transform-origin: center;
   animation: fc-packet-travel 1.6s linear infinite, fc-packet-pulse 0.8s ease-in-out infinite;
 }
+
+/* Execution-path overlay (Wave 2b → execution path). Static styling only — no animation — so
+ * it is safe under reduced motion and persists after the run finishes. on-path = soft glow on
+ * top of the (full-strength) stroke; untaken = a branch that did not fire, faded back. */
+.fc-edge-onpath {
+  filter: drop-shadow(0 0 2px var(--fc-edge-traversed-glow));
+}
+.fc-edge-untaken {
+  opacity: 0.35;
+}
