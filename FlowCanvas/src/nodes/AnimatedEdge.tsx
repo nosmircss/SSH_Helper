@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
+import { BaseEdge, getSmoothStepPath, getStraightPath, type EdgeProps } from '@xyflow/react';
 import { mix } from '../utils/tokens';
 import { markerIdForStroke } from './EdgeMarkers';
 import { useFlowStore } from '../stores/useFlowStore';
@@ -12,9 +12,20 @@ function AnimatedEdge(props: EdgeProps) {
   const blockStates = useFlowStore((s) => s.blockStates);
   const reducedMotion = useFlowStore((s) => s.reducedMotion);
 
-  const [edgePath] = getSmoothStepPath({
-    sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 8,
-  });
+  // Geometry (not data.branchPath / sourceHandle) is the discriminator: imported branch edges
+  // carry no branchPath, so metadata would misclassify them. Aligned, downward edges (the
+  // continuation spine) get a literal straight line so the run packet glides cleanly; X-offset
+  // edges (branch/loop corridors — IF "false", container "continue", branch-first) keep
+  // smoothstep so they route orthogonally around child blocks. See design doc.
+  // ALIGN_EPS: flow coords are integers, so centered equal-width handles compute dx==0 exactly;
+  // 0.5 absorbs sub-pixel float drift and never catches a real corridor (smallest offset ~70px).
+  const ALIGN_EPS = 0.5;
+  const isSpine = Math.abs(sourceX - targetX) < ALIGN_EPS && targetY > sourceY;
+  const [edgePath] = isSpine
+    ? getStraightPath({ sourceX, sourceY, targetX, targetY })
+    : getSmoothStepPath({
+        sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 8,
+      });
 
   // Color comes from the edge's style.stroke (set by getBranchVisual / defaultEdgeOptions /
   // selection). Branch edges = --fc-branch-*, continuation = --fc-accent, plain = --fc-edge-idle.

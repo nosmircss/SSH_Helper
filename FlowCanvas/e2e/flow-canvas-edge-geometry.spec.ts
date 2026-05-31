@@ -54,4 +54,27 @@ test.describe('Flow Canvas Edge Geometry', () => {
     expect(wStart).toBeGreaterThan(276);
     expect(wStart).toBeLessThan(290);
   });
+
+  test('an aligned, downward continuation edge renders as a straight line', async ({ page }) => {
+    await loadGraphFixture(page, {
+      nodes: [block('top', 200, 80, SHORT), block('bottom', 200, 360, LONG)],
+      edges: [{ id: 'e1', source: 'top', target: 'bottom' }],
+    });
+    // A purely-vertical SVG path has zero bounding-box width so Playwright's visibility check
+    // (getBoundingClientRect) returns hidden even when the path is rendered. Check DOM presence
+    // instead, which is all we need before asserting the shape.
+    await expect(page.locator('path#e1')).toHaveCount(1);
+    // getStraightPath emits exactly one line segment: "M x,yL x,y" — no extra L/Q/C commands.
+    await expect(page.locator('path#e1')).toHaveAttribute('d', /^M[\s\d.,-]+L[\s\d.,-]+$/);
+  });
+
+  test('an X-offset edge keeps its orthogonal (smoothstep) routing', async ({ page }) => {
+    await loadGraphFixture(page, {
+      nodes: [block('a', 200, 80, SHORT), block('b', 600, 360, SHORT)],
+      edges: [{ id: 'e2', source: 'a', target: 'b' }],
+    });
+    await expect(page.locator('path#e2')).toBeVisible();
+    // smoothstep with borderRadius:8 emits a quadratic-curved corner (Q) on any real bend.
+    await expect(page.locator('path#e2')).toHaveAttribute('d', /Q/);
+  });
 });
