@@ -1,5 +1,169 @@
 # Changelog
 
+## Changes Since `f8d02fa` (0.51.21)
+
+This release pairs a ground-up visual and execution overhaul of the Flow Canvas with a substantial expansion of the YAML scripting language: universal step guards, a do-while loop, corrected loop scoping, stricter parse-time validation, and new networking/date/regex helper functions.
+
+### Scripting: Control-Flow Ergonomics and Loop Correctness
+
+A set of control-flow changes (tracked as OpenSpec change `update-scripting-control-flow`) makes conditional logic terser and fixes long-standing loop-scoping bugs.
+
+**Universal `when:` guard** — A step-level `when:` condition can now be added to *any* command, not just `if`/`foreach`. The step is skipped when the condition evaluates false, removing the need to wrap a single conditional step in an `if`/`then` block (two indent levels). The guard is evaluated in `ScriptExecutor.ExecuteStepCoreAsync`, so it applies uniformly across every step type.
+
+```yaml
+# Restart only when the service is not already active — no if/then wrapper
+- send:
+    command: "systemctl restart nginx"
+    when: nginx_state != "active"
+```
+
+**`repeat`/`until` (do-while) loop** — A new `RepeatCommand` runs its `do` block at least once and re-runs until the `until` condition becomes true (bottom-tested). This replaces the old pattern of duplicating a body before a `while` loop for "run, then poll until healthy" workflows. Both a nested form and a scalar shorthand are supported, and a `max_iterations` safety limit (default 10,000) prevents runaway loops. `break`, `continue`, `exit`, and `return` are all honored inside the body.
+
+```yaml
+# Start a service, then poll until it reports active
+- repeat:
+    until: state == "active"
+    do:
+      - send:
+          command: "systemctl is-active nginx"
+          into: state
+      - wait: 2
+
+# Scalar shorthand: condition inline, body in a sibling `do`
+- repeat: state == "active"
+  do:
+    - send: { command: "systemctl is-active nginx", into: state }
+```
+
+**Loop block scoping (BREAKING)** — `foreach` and `while` now save and restore the iterator variable, removing it (or restoring its prior value) when the loop ends. Previously a loop iterator was written into the shared context and never cleaned up, silently clobbering a same-named global. **This is breaking for scripts that read a loop iterator's value after the loop has finished** — move any such read inside the loop body or capture it to a differently named variable before the loop exits.
+
+**Flat loop metadata scalars** — Each loop now exposes additional iterator-prefixed metadata alongside the existing `<item>_index`:
+
+| Variable | Meaning |
+|----------|---------|
+| `<item>_number` | One-based position (`index + 1`) |
+| `<item>_first` | `true` on the first iteration |
+| `<item>_last` | `true` on the last iteration |
+| `<item>_count` | Total number of items |
+
+**Dictionary iteration** — `foreach` can iterate an object's key/value pairs directly: `foreach: k, v in {{ map }}`.
+
+**Soft-assert run summary** — Every `assert` with `severity: warning` is now tallied across the run. At completion the script reports `Soft assertions: N passed, M failed`, turning warning-level checks into a lightweight test report that does not halt execution. The aggregation lives in `ScriptContext`, with the totals surfaced by `AssertCommand`.
+
+### Scripting: Parse-Time Validation Hardening
+
+Validation changes (folded in from the archived OpenSpec change `update-scripting-validation`) catch typos and malformed shorthand before a script runs instead of failing mid-execution.
+
+- **Strict typo-key validation with did-you-mean** — Unrecognized (typo-class) keys are now *blocking errors* rather than silently ignored. `ScriptParser` enriches each `Unknown <scope> key '<key>'` message with a closest-match suggestion (`Did you mean '<suggestion>'?`). Genuine deprecation notices remain warnings.
+- **Misspelled-command did-you-mean** — A misspelled step root (e.g. `prnt:` instead of `print:`) is reported as the step's own `Unknown step key` error with a suggestion. The step is flagged via `ScriptStep.HasUnknownStepKey` so the generic fallback validation does not emit a redundant second error for the same line.
+- **Parse-time shorthand grammar validation** — The `foreach`/`set` shorthand grammars are validated when the script is parsed, so malformed `foreach: x in ...` / `set: x = ...` expressions surface as errors up front.
+- **Unified interpolation scanner** — `{{ ... }}` and `${ ... }` interpolation now route through a single balanced-brace scanner, so both syntaxes parse identically (including nested braces and function calls).
+
+### Scripting: Networking, Date/Time, and Regex Helper Functions
+
+A new function category and several extensions (OpenSpec change `add-scripting-helper-functions`) close gaps in a tool whose whole purpose is network automation. All additions are pure, deterministic, and non-breaking — `now()` semantics are unchanged.
+
+**New `NetworkFunctions` category** (`Services/Scripting/Functions/NetworkFunctions.cs`):
+
+| Function | Example | Result |
+|----------|---------|--------|
+| `is_valid_ip(s)` | `is_valid_ip(Host_IP)` | `true`/`false` for IPv4/IPv6 parse |
+| `ip_version(s)` | `ip_version("::1")` | `4` or `6`, empty if invalid |
+| `ip_in_cidr(addr, cidr)` | `ip_in_cidr(Host_IP, "10.0.0.0/8")` | `true` if the address is inside the CIDR range (family-aware, prefix-validated) |
+| `url_host(url)` | `url_host("https://h:8443/p")` | `h` |
+| `url_port(url)` | `url_port("https://h:8443/p")` | `8443` |
+
+**`DateTimeFunctions` extensions** — `now_local()` and `now_utc()` make the time base explicit (fixing a latent local-vs-UTC mix between `now()` and `epoch()`); `parse_date(input, format[, outFormat])` parses a string with an explicit input format; `date_add`/`date_diff` gain `week`/`month`/`year` units.
+
+```yaml
+- set:
+    expression: ts = now_utc("yyyy-MM-dd HH:mm:ss")
+- set:
+    expression: dt = parse_date("15-01-2026", "dd-MM-yyyy")
+```
+
+**Regex functions in `StringFunctions`** — `regex_match(s, pattern[, group])` returns the first match or a chosen capture group; `regex_match_all(s, pattern)` returns a list of all matches; `regex_groups(s, pattern)` returns the capture groups of the first match. All reuse `regex_replace`'s 5-second timeout and `/.../` delimiter handling.
+
+```yaml
+- set:
+    expression: ip = regex_match(line, '/inet (\d+\.\d+\.\d+\.\d+)/', 1)
+```
+
+**Named-capture `extract`** — The `extract` command now surfaces named regex capture groups as named variables. The change is gated so positional behavior is byte-for-byte preserved when a pattern has no named groups.
+
+### Flow Canvas: Premium Visual and Execution Overhaul
+
+The Flow Canvas received a wave-by-wave redesign (scoped in `FLOW_CANVAS_ENHANCEMENTS.md`) that makes it read as a flagship node editor while leaving the YAML export path untouched — every visual and transient-runtime change serializes nothing new into scripts.
+
+**OKLCH design-token foundation** — A single CSS-custom-property layer (`src/styles/tokens.css` + `src/utils/tokens.ts`) authored in OKLCH replaces ~300+ scattered hex literals across nodes, edges, and panels. `theme.ts` is slimmed and `categoryColors` now point at the token layer; a no-hex test gate guards against regressions. This unblocks coherent theming and a working light mode.
+
+**Block icons and node redesign** — Lucide stroke icons are vendored inline as `BlockIcon.tsx` (no runtime dependency) and rendered as a category-tinted chip in each block header and Palette item, finally using the previously dead `def.icon` field. The node card was iterated from an accent-rail design to the final **neon block** treatment: a category-hued border carries block identity with an idle neon ring, and the separate accent rail was retired. A `BranchBandsLayer` renders branch membership as background bands derived from `computeBranchBands`.
+
+**Live Wires — gradient edges with data packets** — A single universal `AnimatedEdge` renders all edges with a branch-color gradient stroke and a tokenized arrowhead (`EdgeMarkers.tsx`), replacing the old flat `#666` markerless smoothstep. Active edges carry a traveling pulse-dot packet via SVG `offset-path`, gated behind reduced-motion.
+
+**Execution cinematics** — Live runs now animate: a running block shows a comet sweep plus a breathing halo, errors shake with a ripple, success draws an SVG checkmark (draw-in + pop), and a duration badge counts up live via `requestAnimationFrame` before settling on the measured duration. Effects are class/data-attribute driven (compositor-only) and defined in `execution-cinematics.css`.
+
+**Loop and branch instrumentation** — `CommandResult` and `StepExecutionEventArgs` gain `IterationCount` and `BranchTaken`. `foreach`/`while`/`repeat` report body-execution counts and `if`/`switch` report the taken branch scope-key; these flow over the `execution-update` message into transient store Maps and render as a static loop/branch instrumentation badge on each block.
+
+**Execution path highlight** — After a run, the traversed path is drawn persistently on edges (new traversed-edge token and overlay CSS), with a `pathVisible` flag reset at run start and a new **Clear Path** toolbar control. Imported preset edges (which carry no `data.branchPath`) are correlated to the path via child `_stepPath` metadata, so highlighting works for both canvas-built and imported branch edges.
+
+**Hierarchical auto-layout** — A new in-house layout engine (`src/utils/layout/`: `types.ts`, `branchScope.ts`, `treeBuilder.ts`, `hierarchicalLayout.ts`) replaces the `dagre` dependency. Fresh imports are auto-laid-out hierarchically, the Auto-organize toolbar button drives the same engine, and a `hasUserLayout` flag is sent with `load-graph` so previously hand-positioned graphs are not reorganized. The canvas now owns positions end to end — dead C# layout math and the old `autoLayout.ts` were removed.
+
+**Straight-spine edge routing** — Top-level blocks use a fixed 280px width and the Start node matches it, so the first edge and the main spine align as straight vertical paths; smoothstep is retained only for branch corridors.
+
+**Run heatmap overlay** — A toggleable overlay tints blocks by execution cost, with the preference persisted through `AppConfiguration.WindowState.FlowCanvasHeatmapEnabled`. A fix populates `blockTimings` on `execution-update` so the duration badge renders during live runs (previously duration arrived on the wire but was dropped).
+
+**Problems panel with click-to-fix** — C# now emits structured per-node diagnostics (with `NodeId`) on the apply-result instead of flattening them to strings. A new `ProblemsPanel.tsx` reads them and lets the user click a diagnostic to focus the offending node.
+
+**Connection-validity guards** — A pure `isConnectionAllowed` predicate (`src/utils/connectionRules.ts`) backs `isValidConnection`/`onConnect` guards, with an in-canvas `ConnectionNotice` explaining rejected connections.
+
+**Reduced-motion kill switch** — A single `.fc-reduced-motion` body class disables every animation at once. It auto-detects the OS `prefers-reduced-motion` setting, exposes a manual Toolbar toggle, and persists through `AppConfiguration.WindowState.FlowCanvasReducedMotion` (null defers to the OS preference) — making aggressive motion safe over RDP and software-GPU sessions.
+
+### Dependency Changes
+
+FlowCanvas (`FlowCanvas/package.json`) only; no C# package changes.
+
+| Package | Change | Purpose |
+|---------|--------|---------|
+| `@dagrejs/dagre`, `@types/dagre` | Removed | Replaced by the in-house hierarchical layout engine |
+| `vitest` | Added `^4.1.7` | Component/unit test runner (`npm test`) |
+| `jsdom` | Added `^29.1.1` | DOM environment for vitest |
+| `@testing-library/react` | Added `^16.3.2` | React component testing |
+| `@testing-library/jest-dom` | Added `^6.9.1` | DOM assertion matchers |
+
+### Documentation
+
+- **`SCRIPTING.md`** — Documents the universal `when:` guard, `repeat`/`until` loop, loop scoping and metadata, dictionary iteration, the soft-assert summary, and the new networking/date-time/regex helper functions.
+- **`FLOW_CANVAS_ENHANCEMENTS.md`** (new) — The full enhancement scope: current-state assessment, design vision (OKLCH token foundation, depth/motion principles), and a 44-proposal catalog sequenced into waves.
+- **`SCRIPTING_LANGUAGE_ROADMAP.md`** and **`SCRIPTING_DEFERRED_REVIEW.md`** (new) — Forward-looking scripting language roadmap and a log of deferred review items.
+- **OpenSpec** — New changes `add-scripting-helper-functions` and `update-scripting-control-flow`; `update-scripting-validation` archived with its deltas folded into the live `scripting-runtime`/`scripting-validation` specs. `docs/superpowers/` adds the design specs and implementation plans for each Flow Canvas wave.
+
+### Test Coverage
+
+**C# (`SSH_Helper.Tests/`):**
+
+| Test class | Coverage |
+|------------|----------|
+| `Scripting/NetworkFunctionTests.cs` | `is_valid_ip`, `ip_version`, `ip_in_cidr`, `url_host`, `url_port` |
+| `Scripting/DateTimeFunctionEnhancementTests.cs` | `now_local`/`now_utc`, `parse_date`, week/month/year units |
+| `Scripting/RegexFunctionTests.cs` | `regex_match`, `regex_match_all`, `regex_groups` |
+| `Scripting/ScriptExecutorWhenGuardTests.cs` | Universal `when:` step guard |
+| `Scripting/ScriptRepeatLoopTests.cs` | `repeat`/`until` do-while semantics, break/continue, max-iterations |
+| `Scripting/ScriptExecutorLoopScopingTests.cs` | Iterator save/restore and removal after loops |
+| `Scripting/LoopBranchInstrumentationTests.cs` | `IterationCount`/`BranchTaken` reporting |
+| `Scripting/ScriptExecutorSoftAssertTests.cs` | Soft-assert run summary aggregation |
+| `Scripting/ScriptStrictKeyValidationTests.cs` | Blocking typo-key errors + did-you-mean |
+| `Scripting/ScriptShorthandGrammarValidationTests.cs` | Parse-time `foreach`/`set` shorthand validation |
+| `Scripting/ScriptInterpolationScannerTests.cs` | Unified `{{ }}`/`${ }` balanced-brace scanner |
+| `UI/FlowCanvasFormLayoutTests.cs` | Flow Canvas layout/load-graph host wiring |
+| `UI/Form1FlowCanvasReducedMotionTests.cs` | Reduced-motion preference persistence |
+
+Existing suites extended: `ExtractCommandTests` (named captures), `ScriptParserTests`, `ScriptDependencyAnalyzerTests`, `SetCommandTests`, and `Services/FlowCanvasBridgeTests`.
+
+**Flow Canvas (`FlowCanvas/`):** A new vitest + jsdom + Testing Library harness (`npm test`) covers `AnimatedEdge`, `BaseBlock`, `nodeStyle`, the edge-path selector, the `pathVisible` execution slice, and the layout engine (`branchScope`, `treeBuilder`, `hierarchicalLayout`). Fourteen new Playwright e2e specs cover auto-layout, block icons, branch bands, connection guards, edge geometry, execution cinematics, the execution path, live wires, loop/branch instrumentation, the node redesign, the Problems panel, reduced motion, run timing, and a token sweep that fails on stray hex.
+
+---
+
 ## Changes Since `28cbf8c` (0.51.19)
 
 ### `readfile` Path Capture Modes
