@@ -519,7 +519,7 @@ namespace SSH_Helper.Services.Scripting
                     if (args.Count < 2)
                         return false;
 
-                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(args[0], context));
+                    var list = ValueResolver.ResolveCollectionExpression(args[0], context);
                     var candidate = ResolveJsonValue(args[1], context)?.ToString() ?? string.Empty;
                     var comparer = ValueResolver.ResolveComparisonComparer(args.Count > 2 ? ResolveJsonValue(args[2], context)?.ToString() : null);
                     if (!list.Contains(candidate, comparer))

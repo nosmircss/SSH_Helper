@@ -30,8 +30,12 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return Task.FromResult(CommandResult.Fail(evalError));
             }
 
+            var isWarning = string.Equals(step.Assert.Severity, "warning", StringComparison.OrdinalIgnoreCase);
+
             if (result)
             {
+                if (isWarning)
+                    context.RecordSoftAssert(true);
                 context.EmitOutput($"Assert passed: {step.Assert.Condition}", ScriptOutputType.Debug);
                 return Task.FromResult(CommandResult.Ok());
             }
@@ -41,10 +45,9 @@ namespace SSH_Helper.Services.Scripting.Commands
                 ? context.SubstituteVariables(step.Assert.Message)
                 : $"Assertion failed: {step.Assert.Condition}";
 
-            var isWarning = string.Equals(step.Assert.Severity, "warning", StringComparison.OrdinalIgnoreCase);
-
             if (isWarning)
             {
+                context.RecordSoftAssert(false);
                 context.EmitOutput($"[WARNING] {message}", ScriptOutputType.Warning);
                 return Task.FromResult(CommandResult.Ok());
             }

@@ -9,6 +9,12 @@ export interface PanelSizes {
   outputHeight: number;
 }
 
+export interface NodeDiagnostic {
+  nodeId?: string;
+  severity: 'error' | 'warning';
+  message: string;
+}
+
 export const DEFAULT_PANEL_SIZES: PanelSizes = {
   rightPanelWidth: 600,
   outputHeight: 200,
@@ -16,6 +22,9 @@ export const DEFAULT_PANEL_SIZES: PanelSizes = {
 
 export interface UISlice {
   theme: 'dark' | 'light';
+  reducedMotion: boolean;
+  heatmapEnabled: boolean;
+  branchBandsEnabled: boolean;
   snapToGrid: boolean;
   gridSize: number;
   searchQuery: string;
@@ -29,6 +38,7 @@ export interface UISlice {
     debug: boolean;
     output: boolean;
     timeline: boolean;
+    problems: boolean;
   };
   panelSizes: PanelSizes;
   exportStatus: {
@@ -36,9 +46,17 @@ export interface UISlice {
     errors: string[];
     warnings: string[];
   };
+  diagnostics: NodeDiagnostic[];
+  connectionNotice: { message: string; nonce: number } | null;
 
   setTheme: (theme: 'dark' | 'light') => void;
   toggleTheme: () => void;
+  setReducedMotion: (value: boolean) => void;
+  toggleReducedMotion: () => void;
+  restoreReducedMotion: (value: boolean) => void;
+  toggleHeatmap: () => void;
+  restoreHeatmapEnabled: (enabled: boolean) => void;
+  toggleBranchBands: () => void;
   toggleSnapToGrid: () => void;
   setSearchQuery: (query: string) => void;
   nextSearchResult: () => void;
@@ -54,10 +72,16 @@ export interface UISlice {
   restorePanelSizes: (sizes: Partial<PanelSizes>) => void;
   setExportStatus: (status: UISlice['exportStatus']) => void;
   clearExportStatus: () => void;
+  setDiagnostics: (d: NodeDiagnostic[]) => void;
+  showConnectionNotice: (message: string) => void;
+  clearConnectionNotice: () => void;
 }
 
 export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get) => ({
   theme: 'dark',
+  reducedMotion: false,
+  heatmapEnabled: false,
+  branchBandsEnabled: true,
   snapToGrid: false,
   gridSize: 20,
   searchQuery: '',
@@ -71,6 +95,7 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     debug: false,
     output: true,
     timeline: false,
+    problems: false,
   },
   panelSizes: { ...DEFAULT_PANEL_SIZES },
   exportStatus: {
@@ -78,9 +103,31 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     errors: [],
     warnings: [],
   },
+  diagnostics: [],
+  connectionNotice: null,
 
   setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+
+  setReducedMotion: (value) => {
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.prefSave, reducedMotion: value });
+    set({ reducedMotion: value });
+  },
+  toggleReducedMotion: () => get().setReducedMotion(!get().reducedMotion),
+  restoreReducedMotion: (value) => set({ reducedMotion: value }), // host-driven, no echo
+
+  // Reuses the existing layout-save channel so the host persists the toggle
+  // through WindowState (fewer message types). Restore is host-driven, no echo.
+  toggleHeatmap: () => set((s) => {
+    const next = !s.heatmapEnabled;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, heatmapEnabled: next });
+    return { heatmapEnabled: next };
+  }),
+  restoreHeatmapEnabled: (enabled) => set({ heatmapEnabled: enabled }),
+
+  // Transient view preference (default-on, v1). Unlike heatmap it does not persist through
+  // WindowState — keeps the C# surface untouched for Wave 2a (trivial follow-on if requested).
+  toggleBranchBands: () => set((s) => ({ branchBandsEnabled: !s.branchBandsEnabled })),
 
   toggleSnapToGrid: () => set((s) => ({ snapToGrid: !s.snapToGrid })),
 
@@ -173,6 +220,13 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
         errors: [],
         warnings: [],
       },
+      diagnostics: [],
     });
   },
+
+  setDiagnostics: (d) => set({ diagnostics: d }),
+
+  showConnectionNotice: (message) =>
+    set((s) => ({ connectionNotice: { message, nonce: (s.connectionNotice?.nonce ?? 0) + 1 } })),
+  clearConnectionNotice: () => set({ connectionNotice: null }),
 });

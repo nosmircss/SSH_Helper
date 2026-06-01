@@ -60,7 +60,7 @@ namespace SSH_Helper.Services
                     .ToList();
         }
 
-        private const double NodeSpacingY = 85;
+        private const double NodeSpacingY = 106;  // ~25% looser than the original 85 for more breathing room
         private const double SingleBranchChildOffset = 70;
         private const double NodeStartX = 250;
         private const double NodeStartY = 40;
@@ -72,10 +72,7 @@ namespace SSH_Helper.Services
         // MinColumnWidth must be >= max child node width + gap to prevent overlap
         private const double ChildNodeMaxWidth = 260;
         private const double ColumnGap = 30;
-        private const double BaseColumnWidth = ChildNodeMaxWidth + ColumnGap;  // 290
-        private const double ColumnWidthDecay = 0.92;
         private const double MinColumnWidth = ChildNodeMaxWidth + ColumnGap;   // 290 — never narrower than a node
-        private const double MaxSpreadWidth = 1400;
 
         // Branch edge colors
         private const string ColorThen = "#2ecc71";
@@ -221,6 +218,7 @@ namespace SSH_Helper.Services
                 ["if"] = ["condition"],
                 ["foreach"] = ["iterator"],
                 ["while"] = ["condition"],
+                ["repeat"] = ["until"],
                 ["switch"] = ["value", "cases"],
                 ["call"] = ["subroutine"],
                 ["assert"] = ["condition"],
@@ -563,47 +561,20 @@ namespace SSH_Helper.Services
             JArray nodes,
             JArray edges)
         {
-            // Pass 1: Measure each branch width
-            var branchSizes = new List<SubtreeSize>();
-            foreach (var branch in branches)
-                branchSizes.Add(MeasureSteps(branch.Steps));
-
-            int totalColumns = branchSizes.Sum(s => s.Columns);
-            double colWidth = GetColumnWidth(depth);
-            double totalPixelWidth = totalColumns * colWidth;
-
-            // Cap total spread
-            if (totalPixelWidth > MaxSpreadWidth)
-            {
-                colWidth = MaxSpreadWidth / totalColumns;
-                totalPixelWidth = MaxSpreadWidth;
-            }
-
-            // Calculate X positions for each branch, centered around centerX
-            double leftEdge = centerX - totalPixelWidth / 2.0;
+            // Positions are placeholders only — the canvas recomputes layout on import.
+            // Keep branches in distinct columns so a host-only (no-canvas) render is still legible.
             var branchStartY = currentY;
             var maxBranchEndY = currentY;
             var branchEndNodes = new List<string>();
-
-            for (int i = 0; i < branches.Count; i++)
+            double columnX = centerX;
+            foreach (var branch in branches)
             {
-                var branch = branches[i];
-                var branchSize = branchSizes[i];
-
-                // Each branch gets its proportional horizontal share
-                double branchPixelWidth = branchSize.Columns * colWidth;
-                double branchCenterX = leftEdge + branchPixelWidth / 2.0;
-
-                // Each branch starts at the same Y (independent tracking)
                 var branchY = branchStartY;
-                var lastNodeId = PlaceBranchSteps(branch, parentNodeId, parentStepPath, ref branchY, depth, branchCenterX, branchCenterX, nodes, edges);
-
+                var lastNodeId = PlaceBranchSteps(branch, parentNodeId, parentStepPath, ref branchY, depth, columnX, columnX, nodes, edges);
                 branchEndNodes.Add(lastNodeId);
                 maxBranchEndY = Math.Max(maxBranchEndY, branchY);
-                leftEdge += branchPixelWidth;
+                columnX += MinColumnWidth;
             }
-
-            // Advance past the tallest branch
             currentY = maxBranchEndY;
             return branchEndNodes;
         }
@@ -748,6 +719,11 @@ namespace SSH_Helper.Services
                         branches.Add(new BranchInfo("loop", "do", ColorLoop, null, step.Do));
                     break;
 
+                case StepType.Repeat:
+                    if (step.Do != null && step.Do.Count > 0)
+                        branches.Add(new BranchInfo("loop", "do", ColorLoop, null, step.Do));
+                    break;
+
                 case StepType.Try:
                     if (step.Try != null && step.Try.Count > 0)
                         branches.Add(new BranchInfo("try", "try", ColorTry, null, step.Try));
@@ -794,6 +770,7 @@ namespace SSH_Helper.Services
             return stepType == StepType.If
                 || stepType == StepType.Foreach
                 || stepType == StepType.While
+                || stepType == StepType.Repeat
                 || stepType == StepType.Try
                 || stepType == StepType.Switch
                 || stepType == StepType.Parallel;
@@ -872,64 +849,6 @@ namespace SSH_Helper.Services
             }
         }
 
-        #region Subtree Measurement (Pass 1)
-
-        /// <summary>
-        /// Measures the dimensions of a list of steps for layout purposes.
-        /// Width = number of columns needed, Height = number of rows needed.
-        /// </summary>
-        private sealed class SubtreeSize
-        {
-            public int Columns { get; set; } = 1;
-            public int Rows { get; set; }
-        }
-
-        /// <summary>
-        /// Measures the subtree size for a list of steps.
-        /// </summary>
-        private SubtreeSize MeasureSteps(List<ScriptStep> steps)
-        {
-            var size = new SubtreeSize();
-
-            foreach (var step in steps)
-            {
-                var stepType = step.GetStepType();
-                size.Rows += 1; // the step itself
-
-                if (IsContainerStep(stepType))
-                {
-                    var branches = GetBranches(step, stepType);
-                    if (IsMultiBranch(branches))
-                    {
-                        int totalBranchCols = 0;
-                        int maxBranchRows = 0;
-                        foreach (var branch in branches)
-                        {
-                            if (branch.Steps == null || branch.Steps.Count == 0) continue;
-                            var branchSize = MeasureSteps(branch.Steps);
-                            totalBranchCols += branchSize.Columns;
-                            maxBranchRows = Math.Max(maxBranchRows, branchSize.Rows);
-                        }
-                        size.Columns = Math.Max(size.Columns, Math.Max(2, totalBranchCols));
-                        size.Rows += maxBranchRows;
-                    }
-                    else
-                    {
-                        // Single branch — takes 1 column, height adds to parent
-                        foreach (var branch in branches)
-                        {
-                            if (branch.Steps == null || branch.Steps.Count == 0) continue;
-                            var branchSize = MeasureSteps(branch.Steps);
-                            size.Columns = Math.Max(size.Columns, branchSize.Columns);
-                            size.Rows += branchSize.Rows;
-                        }
-                    }
-                }
-            }
-
-            return size;
-        }
-
         /// <summary>
         /// Returns true when a container has 2+ non-empty branches (needs side-by-side layout).
         /// </summary>
@@ -937,17 +856,6 @@ namespace SSH_Helper.Services
         {
             return branches.Count(b => b.Steps != null && b.Steps.Count > 0) >= 2;
         }
-
-        /// <summary>
-        /// Calculates the column width in pixels for a given nesting depth.
-        /// Deeper nesting = narrower columns to prevent extreme horizontal spread.
-        /// </summary>
-        private static double GetColumnWidth(int depth)
-        {
-            return Math.Max(MinColumnWidth, BaseColumnWidth * Math.Pow(ColumnWidthDecay, depth));
-        }
-
-        #endregion
 
         /// <summary>
         /// Converts a parsed Script model into graph JSON (fallback when raw text isn't available).
@@ -1685,7 +1593,8 @@ namespace SSH_Helper.Services
                 }
             }
             else if (string.Equals(blockType, "foreach", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(blockType, "while", StringComparison.OrdinalIgnoreCase))
+                     string.Equals(blockType, "while", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(blockType, "repeat", StringComparison.OrdinalIgnoreCase))
             {
                 var doEdge = nodeEdges.FirstOrDefault(edge =>
                     string.Equals(edge.BranchPath, "do", StringComparison.OrdinalIgnoreCase))
@@ -2143,6 +2052,17 @@ namespace SSH_Helper.Services
                     return false;
                 }
             }
+            else if (string.Equals(blockType, "repeat", StringComparison.OrdinalIgnoreCase))
+            {
+                SetScalarOptionIfPresent("until", "until");
+                if (props?["max_iterations"] != null)
+                    options["max_iterations"] = props["max_iterations"]!.DeepClone();
+                if (options["until"] == null)
+                {
+                    error = "Repeat block is missing required until condition.";
+                    return false;
+                }
+            }
             else if (string.Equals(blockType, "switch", StringComparison.OrdinalIgnoreCase))
             {
                 SetScalarOptionIfPresent("value", "value");
@@ -2290,6 +2210,7 @@ namespace SSH_Helper.Services
             // Common options shared across multiple commands.
             SetIfNumber(props, "timeout", step.Timeout);
             SetIfNotNull(props, "on_error", step.OnError);
+            SetIfNotNull(props, "when", step.When);
             SetIfNotNull(props, "capture", step.Capture);
             SetIfNotNull(props, "expect", step.Expect);
             SetIfBoolTrue(props, "suppress", step.Suppress);
@@ -2363,6 +2284,11 @@ namespace SSH_Helper.Services
 
                 case StepType.While:
                     SetIfNotNull(props, "condition", step.While);
+                    SetIfNumber(props, "max_iterations", step.MaxIterations);
+                    break;
+
+                case StepType.Repeat:
+                    SetIfNotNull(props, "until", step.Until);
                     SetIfNumber(props, "max_iterations", step.MaxIterations);
                     break;
 
@@ -2808,12 +2734,24 @@ namespace SSH_Helper.Services
                 return false;
 
             var unsupportedProps = new List<string>();
+            var stepRootOptions = new JObject();
             if (props != null)
             {
                 foreach (var property in props.Properties())
                 {
                     if (IsMetadataProperty(property.Name))
                         continue;
+
+                    // `when:` is a step-level guard (a sibling of the command), not a command-map option.
+                    if (string.Equals(property.Name, "when", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var whenText = property.Value.Type == JTokenType.String
+                            ? property.Value.ToString()
+                            : property.Value.ToString(Newtonsoft.Json.Formatting.None);
+                        if (!string.IsNullOrWhiteSpace(whenText))
+                            stepRootOptions["when"] = new JValue(whenText);
+                        continue;
+                    }
 
                     if (TryHandleSpecialLegacyProp(commandKey, blockType, property.Name, property.Value, options, out var specialError))
                     {
@@ -2855,7 +2793,7 @@ namespace SSH_Helper.Services
 
             var orderedOptions = ReorderOptionsForSerialization(commandKey, options);
             var commandValue = BuildCommandValueToken(commandKey, orderedOptions);
-            return TrySerializeStepYaml(commandKey, commandValue, out yaml, out error);
+            return TrySerializeStepYaml(commandKey, commandValue, stepRootOptions, out yaml, out error);
         }
 
         private static bool TryResolveCommandKey(string blockType, out string commandKey)
@@ -3590,6 +3528,9 @@ namespace SSH_Helper.Services
                 case "while":
                     options["condition"] = commandValue;
                     return true;
+                case "repeat":
+                    options["until"] = commandValue;
+                    return true;
                 case "switch":
                     options["value"] = commandValue;
                     return true;
@@ -3914,26 +3855,37 @@ namespace SSH_Helper.Services
         }
 
         private static bool TrySerializeStepYaml(string commandKey, JToken commandValue, out string yaml, out string? error)
+            => TrySerializeStepYaml(commandKey, commandValue, null, out yaml, out error);
+
+        private static bool TrySerializeStepYaml(string commandKey, JToken commandValue, JObject? rootOptions, out string yaml, out string? error)
         {
             error = null;
             yaml = string.Empty;
 
+            var hasRoot = rootOptions != null && rootOptions.Count > 0;
+            var isNullCommand = commandValue.Type == JTokenType.Null || commandValue.Type == JTokenType.Undefined;
+
             try
             {
-                if (commandValue.Type == JTokenType.Null || commandValue.Type == JTokenType.Undefined)
+                if (isNullCommand && !hasRoot)
                 {
                     yaml = $"- {commandKey}:";
                     return true;
                 }
 
-                var serializer = new SerializerBuilder().Build();
-                var yamlObject = new List<object?>
+                var stepMap = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    new Dictionary<string, object?>(StringComparer.Ordinal)
-                    {
-                        [commandKey] = ConvertJTokenToYamlValue(commandValue),
-                    },
+                    [commandKey] = isNullCommand ? null : ConvertJTokenToYamlValue(commandValue),
                 };
+
+                if (hasRoot)
+                {
+                    foreach (var rootProp in rootOptions!.Properties())
+                        stepMap[rootProp.Name] = ConvertJTokenToYamlValue(rootProp.Value);
+                }
+
+                var serializer = new SerializerBuilder().Build();
+                var yamlObject = new List<object?> { stepMap };
                 yaml = serializer.Serialize(yamlObject).TrimEnd('\r', '\n');
                 return true;
             }
@@ -3998,6 +3950,7 @@ namespace SSH_Helper.Services
             return blockType == "if"
                 || blockType == "foreach"
                 || blockType == "while"
+                || blockType == "repeat"
                 || blockType == "switch"
                 || blockType == "parallel"
                 || blockType == "try";
@@ -4102,6 +4055,7 @@ namespace SSH_Helper.Services
                 StepType.If => ("if", step.If),
                 StepType.Foreach => ("foreach", step.Foreach),
                 StepType.While => ("while", step.While),
+                StepType.Repeat => ("repeat", step.Until),
                 StepType.Switch => ("switch", step.Switch),
                 StepType.Try => ("try", null),
                 StepType.Break => ("break", null),
@@ -4629,6 +4583,7 @@ namespace SSH_Helper.Services
                 "if" => "condition",
                 "foreach" => "iterator",
                 "while" => "condition",
+                "repeat" => "until",
                 "set" => "expression",
                 "wait" => "seconds",
                 "vault" => "path",

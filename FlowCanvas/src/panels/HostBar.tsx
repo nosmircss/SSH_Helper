@@ -8,15 +8,14 @@ const MAX_VARS = 4;
 
 export default function HostBar() {
   const targetHost = useFlowStore((s) => s.targetHost);
-  const theme = useFlowStore((s) => s.theme);
 
-  const isDark = theme === 'dark';
-  const barBg = isDark ? '#0f1a2e' : '#e8ecf4';
-  const borderColor = isDark ? '#1a3a5c' : '#c0c8d8';
-  const accentColor = isDark ? '#4ecca3' : '#1a8a5a';
-  const labelColor = isDark ? '#667' : '#889';
-  const valueColor = isDark ? '#ccd' : '#334';
-  const mutedColor = isDark ? '#556' : '#999';
+  // HostBar ships dark-only; values come from the token layer (styles/tokens.css).
+  const barBg = 'var(--fc-host-bg)';
+  const borderColor = 'var(--fc-border)';
+  const accentColor = 'var(--fc-host-accent)';
+  const labelColor = 'var(--fc-text-muted)';
+  const valueColor = 'var(--fc-text)';
+  const mutedColor = 'var(--fc-text-disabled)';
 
   if (!targetHost) {
     return (

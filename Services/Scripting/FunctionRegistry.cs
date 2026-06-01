@@ -97,6 +97,7 @@ namespace SSH_Helper.Services.Scripting
             RegisterCategory(new TypeFunctions());
             RegisterCategory(new DateTimeFunctions());
             RegisterCategory(new EncodingFunctions());
+            RegisterCategory(new NetworkFunctions());
             RegisterCategory(new VaultFunctions());
         }
     }

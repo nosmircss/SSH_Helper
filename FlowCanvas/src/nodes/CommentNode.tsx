@@ -1,6 +1,7 @@
 import { memo, useState, useRef, useEffect, useCallback } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { useFlowStore } from '../stores/useFlowStore';
+import { DEFAULT_COMMENT_COLOR } from '../utils/tokens';
 
 export interface CommentNodeData {
   commentId: string;
@@ -19,7 +20,7 @@ function CommentNode({ data, id }: NodeProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const commentId = commentData.commentId || id;
-  const color = commentData.color || '#e0c040';
+  const color = commentData.color || DEFAULT_COMMENT_COLOR;
 
   useEffect(() => {
     setText(commentData.text || '');
@@ -71,7 +72,7 @@ function CommentNode({ data, id }: NodeProps) {
         padding: 10,
         position: 'relative',
         cursor: editing ? 'text' : 'grab',
-        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+        boxShadow: 'var(--fc-shadow-sm)',
       }}
     >
       {/* Delete button */}
@@ -83,10 +84,10 @@ function CommentNode({ data, id }: NodeProps) {
           right: 4,
           width: 18,
           height: 18,
-          background: 'rgba(0, 0, 0, 0.2)',
+          background: 'var(--fc-comment-btn-scrim)',
           border: 'none',
           borderRadius: 3,
-          color: '#333',
+          color: 'var(--fc-comment-ink)',
           fontSize: 12,
           lineHeight: '16px',
           textAlign: 'center',
@@ -116,10 +117,10 @@ function CommentNode({ data, id }: NodeProps) {
           style={{
             width: '100%',
             minHeight: 60,
-            background: 'rgba(255, 255, 255, 0.2)',
+            background: 'var(--fc-comment-field-bg)',
             border: 'none',
             borderRadius: 3,
-            color: '#1a1a1a',
+            color: 'var(--fc-comment-ink)',
             fontSize: 12,
             lineHeight: 1.4,
             padding: 4,
@@ -131,7 +132,7 @@ function CommentNode({ data, id }: NodeProps) {
       ) : (
         <div
           style={{
-            color: '#1a1a1a',
+            color: 'var(--fc-comment-ink)',
             fontSize: 12,
             lineHeight: 1.4,
             whiteSpace: 'pre-wrap',

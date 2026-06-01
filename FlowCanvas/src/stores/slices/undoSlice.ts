@@ -66,6 +66,7 @@ export const createUndoSlice: StateCreator<FlowStore, [], [], UndoSlice> = (set,
         errors: [],
         warnings: [],
       },
+      diagnostics: [],
     }));
   },
 
@@ -92,6 +93,7 @@ export const createUndoSlice: StateCreator<FlowStore, [], [], UndoSlice> = (set,
         errors: [],
         warnings: [],
       },
+      diagnostics: [],
     }));
   },
 

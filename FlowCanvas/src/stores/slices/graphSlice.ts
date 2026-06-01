@@ -3,16 +3,19 @@ import type { Node, Edge, OnNodesChange, OnEdgesChange, Connection } from '@xyfl
 import { applyNodeChanges, applyEdgeChanges, addEdge } from '@xyflow/react';
 import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
+import { isConnectionAllowed } from '../../utils/connectionRules';
+import { branchColorVar } from '../../utils/branchBands';
 
 export const START_NODE_ID = '__start__';
 
-function clearedExportStatusState(): Pick<FlowStore, 'exportStatus'> {
+function clearedExportStatusState(): Pick<FlowStore, 'exportStatus' | 'diagnostics'> {
   return {
     exportStatus: {
       hasErrors: false,
       errors: [],
       warnings: [],
     },
+    diagnostics: [],
   };
 }
 
@@ -128,91 +131,49 @@ function getBranchVisual(
   style: Record<string, unknown>;
   labelStyle?: Record<string, unknown>;
 } {
-  const defaultVisual = { style: { stroke: '#666' } };
+  const defaultVisual = { style: { stroke: 'var(--fc-edge-idle)' } };
   if (!blockType) return defaultVisual;
 
   const branchPath = metadata.branchPath;
   if (!branchPath) return defaultVisual;
 
-  const dashed = { strokeDasharray: '5,5' };
+  // getBranchVisual stays the blockType-aware KEY resolver; branchColorVar is the single
+  // branch→token map (shared with the Wave 2a bands + Properties chip). No more dashes —
+  // color now carries branch meaning (Wave 2b Live Wires).
+  const visual = (key: string, label: string) => ({
+    label,
+    style: { stroke: branchColorVar(key) },
+    labelStyle: { fill: branchColorVar(key), fontSize: 11, fontWeight: 600 },
+  });
 
   if (blockType === 'if') {
-    if (branchPath === 'else') {
-      return {
-        label: 'else',
-        style: { stroke: '#e74c3c', ...dashed },
-        labelStyle: { fill: '#e74c3c', fontSize: 11, fontWeight: 600 },
-      };
-    }
+    if (branchPath === 'else') return visual('else', 'else');
     if (branchPath.startsWith('elif/')) {
       const condition = (metadata.condition ?? '').trim();
-      return {
-        label: condition ? `elif: ${condition}` : 'elif',
-        style: { stroke: '#f0c040', ...dashed },
-        labelStyle: { fill: '#f0c040', fontSize: 11, fontWeight: 600 },
-      };
+      return visual('elif', condition ? `elif: ${condition}` : 'elif');
     }
-    return {
-      label: 'then',
-      style: { stroke: '#2ecc71', ...dashed },
-      labelStyle: { fill: '#2ecc71', fontSize: 11, fontWeight: 600 },
-    };
+    return visual('then', 'then');
   }
 
   if (blockType === 'foreach' || blockType === 'while') {
-    return {
-      label: 'do',
-      style: { stroke: '#f0c040', ...dashed },
-      labelStyle: { fill: '#f0c040', fontSize: 11, fontWeight: 600 },
-    };
+    return visual('do', 'do');
   }
 
   if (blockType === 'try') {
-    if (branchPath === 'catch') {
-      return {
-        label: 'catch',
-        style: { stroke: '#e74c3c', ...dashed },
-        labelStyle: { fill: '#e74c3c', fontSize: 11, fontWeight: 600 },
-      };
-    }
-    if (branchPath === 'finally') {
-      return {
-        label: 'finally',
-        style: { stroke: '#4a9eff', ...dashed },
-        labelStyle: { fill: '#4a9eff', fontSize: 11, fontWeight: 600 },
-      };
-    }
-    return {
-      label: 'do',
-      style: { stroke: '#2ecc71', ...dashed },
-      labelStyle: { fill: '#2ecc71', fontSize: 11, fontWeight: 600 },
-    };
+    if (branchPath === 'catch') return visual('catch', 'catch');
+    if (branchPath === 'finally') return visual('finally', 'finally');
+    return visual('try', 'do');
   }
 
   if (blockType === 'switch') {
-    if (branchPath === 'default' || branchPath === 'else') {
-      return {
-        label: 'default',
-        style: { stroke: '#e74c3c', ...dashed },
-        labelStyle: { fill: '#e74c3c', fontSize: 11, fontWeight: 600 },
-      };
-    }
+    if (branchPath === 'default' || branchPath === 'else') return visual('default', 'default');
     const caseValue = (metadata.caseValue ?? '').trim();
-    return {
-      label: caseValue ? `case: ${caseValue}` : 'case',
-      style: { stroke: '#f0c040', ...dashed },
-      labelStyle: { fill: '#f0c040', fontSize: 11, fontWeight: 600 },
-    };
+    return visual('case', caseValue ? `case: ${caseValue}` : 'case');
   }
 
   if (blockType === 'parallel') {
     const index = parseIndexedBranch(branchPath, 'parallel');
-    const branchLabel = index === null ? 'branch' : `branch ${index + 1}`;
-    return {
-      label: branchLabel,
-      style: { stroke: '#1abc9c', ...dashed },
-      labelStyle: { fill: '#1abc9c', fontSize: 11, fontWeight: 600 },
-    };
+    return visual('parallel', index === null ? 'branch' : `branch ${index + 1}`);
   }
 
   return defaultVisual;
@@ -293,6 +254,14 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   },
 
   onConnect: (connection) => {
+    // Reject shapes the YAML exporter cannot faithfully serialize (self-loop, fan-in,
+    // duplicate, extra plain successor, cycle, edge-into-start). Valid drags fall through
+    // unchanged so exported output is identical to before the guard.
+    const verdict = isConnectionAllowed(connection, get().nodes, get().edges);
+    if (!verdict.ok) {
+      get().showConnectionNotice(verdict.reason ?? 'Connection not allowed.');
+      return;
+    }
     // Push undo snapshot before connecting
     get().pushSnapshot('Connect edge');
     set((state) => {
@@ -317,14 +286,14 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
 
       if (isContinuation) {
         // Continuation edges get explicit styling — bypass getBranchVisual
-        edgeProps.style = { stroke: '#4a9eff' };
+        edgeProps.style = { stroke: 'var(--fc-accent)' };
         edgeProps.label = 'next';
-        edgeProps.labelStyle = { fill: '#4a9eff', fontSize: 9, fontWeight: 600 };
+        edgeProps.labelStyle = { fill: 'var(--fc-accent)', fontSize: 9, fontWeight: 600 };
         // No data assignment — continuation edges carry no branch metadata
       } else {
         const branchVisual = isContainer
           ? getBranchVisual(blockType, branchMetadata)
-          : { style: { stroke: '#666' } };
+          : { style: { stroke: 'var(--fc-edge-idle)' } };
         edgeProps.style = branchVisual.style;
         if (branchVisual.label) edgeProps.label = branchVisual.label;
         if (branchVisual.labelStyle) edgeProps.labelStyle = branchVisual.labelStyle;

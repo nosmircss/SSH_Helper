@@ -25,10 +25,13 @@ namespace SSH_Helper.Services.Scripting.Commands
             var resolvedValue = context.SubstituteVariables(step.Switch).Trim();
             context.EmitOutput($"Switch on '{step.Switch}' => '{resolvedValue}'", ScriptOutputType.Debug);
 
+            string? branchTaken = null;
+
             if (step.Cases != null)
             {
-                foreach (var switchCase in step.Cases)
+                for (int i = 0; i < step.Cases.Count; i++)
                 {
+                    var switchCase = step.Cases[i];
                     var caseValue = context.SubstituteVariables(switchCase.Value).Trim();
 
                     bool matches;
@@ -55,12 +58,14 @@ namespace SSH_Helper.Services.Scripting.Commands
                     if (matches)
                     {
                         context.EmitOutput($"Switch matched case '{switchCase.Value}'", ScriptOutputType.Debug);
+                        branchTaken = $"cases/{i}/do";
                         if (switchCase.Do != null && switchCase.Do.Count > 0)
                         {
                             var result = await _executor.ExecuteStepsAsync(switchCase.Do, context, cancellationToken, context.LoopDepth);
+                            result.BranchTaken = branchTaken;
                             return result;
                         }
-                        return CommandResult.Ok();
+                        return new CommandResult { Success = true, BranchTaken = branchTaken };
                     }
                 }
             }
@@ -69,12 +74,14 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (step.Else != null && step.Else.Count > 0)
             {
                 context.EmitOutput("Switch using default branch", ScriptOutputType.Debug);
+                branchTaken = "default";
                 var defaultResult = await _executor.ExecuteStepsAsync(step.Else, context, cancellationToken, context.LoopDepth);
+                defaultResult.BranchTaken = branchTaken;
                 return defaultResult;
             }
 
             context.EmitOutput("Switch: no matching case and no default", ScriptOutputType.Debug);
-            return CommandResult.Ok();
+            return new CommandResult { Success = true, BranchTaken = branchTaken };
         }
     }
 }

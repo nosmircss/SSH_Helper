@@ -1,0 +1,209 @@
+/* FlowCanvas/src/styles/tokens.css
+ * Single source of truth for Flow Canvas design tokens (Decision #3/#4: OKLCH, dark-first,
+ * no hex outside this file). A future light/high-contrast theme is a [data-theme] override here. */
+:root {
+  /* Surface ladder */
+  --fc-surface-0: oklch(18% 0.03 275);
+  --fc-surface-1: oklch(22% 0.035 275);
+  --fc-surface-2: oklch(26% 0.04 275);
+  --fc-surface-3: oklch(30% 0.045 275);
+  --fc-surface-disabled: oklch(24% 0 0);
+  --fc-canvas-bg: var(--fc-surface-1);
+
+  /* Borders */
+  --fc-border: oklch(34% 0.04 275);
+  --fc-border-subtle: oklch(40% 0.02 275);
+  --fc-border-muted: oklch(45% 0.01 275);
+  --fc-border-selected: oklch(98% 0 0);
+
+  /* Text ramp */
+  --fc-text: oklch(85% 0.01 275);
+  --fc-text-secondary: oklch(72% 0.01 275);
+  --fc-text-muted: oklch(60% 0.01 275);
+  --fc-text-faint: oklch(48% 0.01 275);
+  --fc-text-disabled: oklch(40% 0.01 275);
+
+  /* Accent rail (indigo/azure — continues #4a9eff running/active signal) */
+  --fc-accent: oklch(68% 0.16 255);
+  --fc-accent-strong: oklch(62% 0.18 258);
+  --fc-accent-surface: oklch(30% 0.07 255);
+  --fc-accent-text: oklch(88% 0.06 255);
+  --fc-on-accent: oklch(15% 0 0);
+
+  /* State colors */
+  --fc-state-success: oklch(72% 0.17 150);
+  --fc-state-error: oklch(60% 0.20 25);
+  --fc-state-error-text: var(--fc-state-error);
+  --fc-state-warning: oklch(82% 0.15 90);
+  --fc-state-running: var(--fc-accent);
+  --fc-state-skipped: var(--fc-text-muted);
+
+  /* 7 category hues — constant L 62% / C 0.13, rotating H */
+  --fc-cat-ssh-border: oklch(62% 0.13 255);
+  --fc-cat-ssh-bg: oklch(20% 0.06 255);
+  --fc-cat-ssh-badge: var(--fc-cat-ssh-border);
+  --fc-cat-ssh-badge-text: var(--fc-on-accent);
+  --fc-cat-ssh-text: oklch(78% 0.07 255);
+
+  --fc-cat-control-flow-border: oklch(62% 0.13 90);
+  --fc-cat-control-flow-bg: oklch(20% 0.06 90);
+  --fc-cat-control-flow-badge: var(--fc-cat-control-flow-border);
+  --fc-cat-control-flow-badge-text: var(--fc-on-accent);
+  --fc-cat-control-flow-text: oklch(78% 0.07 90);
+
+  --fc-cat-data-border: oklch(62% 0.13 310);
+  --fc-cat-data-bg: oklch(20% 0.06 310);
+  --fc-cat-data-badge: var(--fc-cat-data-border);
+  --fc-cat-data-badge-text: var(--fc-text);
+  --fc-cat-data-text: oklch(78% 0.07 310);
+
+  --fc-cat-network-border: oklch(62% 0.13 175);
+  --fc-cat-network-bg: oklch(20% 0.06 175);
+  --fc-cat-network-badge: var(--fc-cat-network-border);
+  --fc-cat-network-badge-text: var(--fc-on-accent);
+  --fc-cat-network-text: oklch(78% 0.07 175);
+
+  --fc-cat-io-border: oklch(62% 0.13 55);
+  --fc-cat-io-bg: oklch(20% 0.06 55);
+  --fc-cat-io-badge: var(--fc-cat-io-border);
+  --fc-cat-io-badge-text: var(--fc-text);
+  --fc-cat-io-text: oklch(78% 0.07 55);
+
+  --fc-cat-grid-border: oklch(62% 0.13 235);
+  --fc-cat-grid-bg: oklch(20% 0.06 235);
+  --fc-cat-grid-badge: var(--fc-cat-grid-border);
+  --fc-cat-grid-badge-text: var(--fc-text);
+  --fc-cat-grid-text: oklch(78% 0.07 235);
+
+  --fc-cat-timing-border: oklch(62% 0.03 275);
+  --fc-cat-timing-bg: oklch(20% 0.02 275);
+  --fc-cat-timing-badge: var(--fc-cat-timing-border);
+  --fc-cat-timing-badge-text: var(--fc-on-accent);
+  --fc-cat-timing-text: oklch(78% 0.02 275);
+
+  /* ── Node card: neutral body + category-hued border ("neon ring"). (Wave 2a → neon-block) ── */
+  /* Neutral node body — ~surface-1 with a hint of category-neutral chroma. Replaces colors.bg as
+     the idle fill so the body reads neutral and the category-hued border (the neon ring) carries identity. */
+  --fc-node-surface: oklch(22% 0.02 275);
+  /* Accent-rail width — used by StartNode's rail (BaseBlock dropped its rail in the neon-block
+     redesign; identity moved to the border). 4px is a one-line bump if 3px sub-pixel-thins at low zoom. */
+  --fc-rail-w: 3px;
+
+  /* Per-category ICON tint = the category border hue (full chroma), so the header glyph matches the
+     node's category border rather than the softer body text. currentColor on <BlockIcon> inherits this. */
+  --fc-cat-ssh-icon: var(--fc-cat-ssh-border);
+  --fc-cat-control-flow-icon: var(--fc-cat-control-flow-border);
+  --fc-cat-data-icon: var(--fc-cat-data-border);
+  --fc-cat-network-icon: var(--fc-cat-network-border);
+  --fc-cat-io-icon: var(--fc-cat-io-border);
+  --fc-cat-grid-icon: var(--fc-cat-grid-border);
+  --fc-cat-timing-icon: var(--fc-cat-timing-border);
+
+  /* ── Wave 2a: branch containment bands (alias existing state/accent hues) ── */
+  --fc-branch-then: var(--fc-state-success);
+  --fc-branch-try: var(--fc-state-success);
+  --fc-branch-else: var(--fc-state-error);
+  --fc-branch-catch: var(--fc-state-error);
+  --fc-branch-default: var(--fc-state-error);
+  --fc-branch-elif: var(--fc-state-warning);
+  --fc-branch-do: var(--fc-state-warning);
+  --fc-branch-case: var(--fc-state-warning);
+  --fc-branch-finally: var(--fc-accent);
+  --fc-branch-parallel: var(--fc-cat-network-border);
+  --fc-branch-fallback: var(--fc-text-disabled);
+
+  /* Glow / shadow scale */
+  --fc-glow-running: oklch(68% 0.16 255 / 0.4);
+  --fc-glow-running-min: oklch(68% 0.16 255 / 0.3);
+  --fc-glow-running-max: oklch(68% 0.16 255 / 0.6);
+  --fc-glow-success: oklch(72% 0.17 150 / 0.3);
+  --fc-glow-error: oklch(60% 0.20 25 / 0.3);
+  /* ── Wave 2b: execution cinematics (running comet leading edge + error ripple start) ── */
+  --fc-run-comet: oklch(86% 0.13 255);
+  --fc-glow-error-strong: oklch(60% 0.20 25 / 0.6);
+  --fc-glow-warning: oklch(82% 0.15 90 / 0.3);
+  --fc-glow-warning-soft: oklch(82% 0.15 90 / 0.15);
+  --fc-glow-skipped: oklch(60% 0.01 275 / 0.2);
+  --fc-glow-disabled: oklch(45% 0 0 / 0.2);
+  --fc-glow-selected: oklch(98% 0 0 / 0.15);
+  --fc-glow-start: oklch(72% 0.17 150 / 0.15);
+  /* Idle "neon ring": derived per-category in utils/nodeStyle.ts (idleNeon) from
+     --fc-cat-*-border via color-mix; alphas 36/46/60 = "Balanced" intensity (no token here).
+     Intensity scale: soft 0.15a background / balanced ~0.36-0.60a idle / 0.3-0.4a run/success/error. */
+
+  /* Status-chip surfaces (dark tints echoing the pre-sweep #2a1a1a / #1a2a1a chip fills).
+     Paired with --fc-glow-error / --fc-glow-success on the BORDER for bg/border contrast. */
+  --fc-chip-error-bg: oklch(20% 0.04 25);
+  --fc-chip-success-bg: oklch(20% 0.04 150);
+  --fc-shadow-sm: 0 2px 8px oklch(0% 0 0 / 0.2);
+  --fc-overlay-scrim: oklch(0% 0 0 / 0.6);
+  --fc-comment-btn-scrim: oklch(0% 0 0 / 0.2);
+
+  /* Radii / type scale */
+  --fc-radius-sm: 3px;
+  --fc-radius-md: 6px;
+  --fc-radius-lg: 8px;
+  --fc-font-mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  --fc-fs-badge: 10px;
+  --fc-fs-body: 12px;
+  --fc-fs-header: 13px;
+
+  /* Specialty (not in generic ladder) */
+  --fc-term-bg: oklch(16% 0.01 255);
+  --fc-term-surface: oklch(22% 0.01 255);
+  --fc-term-surface-2: oklch(26% 0.01 255);
+  --fc-term-text: oklch(85% 0.02 255);
+  --fc-host-bg: oklch(20% 0.05 255);
+  --fc-host-surface: oklch(92% 0.02 255);
+  --fc-host-accent: oklch(72% 0.13 165);
+  --fc-host-accent-strong: oklch(56% 0.13 160);
+  --fc-start-grad-from: oklch(30% 0.08 155);
+  --fc-start-grad-to: oklch(22% 0.07 155);
+  --fc-start-accent: oklch(72% 0.17 150);
+  --fc-start-badge-text: var(--fc-on-accent);
+  --fc-start-chip-bg: oklch(72% 0.17 150 / 0.1);
+  --fc-start-chip-border: oklch(72% 0.17 150 / 0.25);
+  --fc-start-chip-text: oklch(80% 0.1 150);
+  --fc-edge-idle: oklch(48% 0.01 275);
+  /* ── Wave 2b: live-wire data packet (bright core for the traveling dot) ── */
+  --fc-edge-packet: oklch(95% 0.03 200);
+  /* ── Execution path highlight (persists after a run; see execution-path design doc) ──
+     Cyan trail (hue 200, harmonizing with the bright packet above), distinct from idle grey
+     and from success-green so a traversed wire reads as "traveled", not "succeeded". */
+  --fc-edge-traversed: oklch(72% 0.17 200);
+  --fc-grid-dot: oklch(34% 0.04 275);
+  --fc-search-outline: oklch(82% 0.15 90);
+  --fc-comment-ink: oklch(20% 0 0);
+  --fc-comment-field-bg: oklch(100% 0 0 / 0.2);
+  --fc-comment-default-fallback: #e0c040; /* mirror only — do NOT consume as authored color */
+
+  /* Heatmap */
+  --fc-heat-cold: var(--fc-accent);
+  --fc-heat-mid: oklch(78% 0.13 90);
+  --fc-heat-hot: oklch(62% 0.2 35);
+  --fc-heat-ring-alpha: 0.55;
+
+  /* Diagnostics */
+  --fc-diag-error: var(--fc-state-error);
+  --fc-diag-warning: var(--fc-state-warning);
+  --fc-diag-row-bg: var(--fc-surface-1);
+  --fc-diag-row-hover-bg: var(--fc-surface-2);
+
+  /* Connection guard feedback */
+  --fc-connection-invalid: var(--fc-state-error);
+  --fc-notice-bg: var(--fc-surface-2);
+  --fc-notice-fg: var(--fc-text);
+  --fc-notice-border: var(--fc-state-error);
+
+  /* Theme aliases consumed by existing panels via var(--fc-*). These KEBAB-CASE names are
+     exactly what applyTheme used to emit and what panels (DebugPanel, OutputPreview, Properties,
+     etc.) still reference directly — VERIFIED in-tree — so they MUST stay defined here after
+     theme.ts is slimmed. (--fc-canvas-bg / --fc-text / --fc-text-secondary / --fc-text-muted are
+     already defined above; --fc-button-bg was referenced by Properties.tsx but never defined by
+     the old applyTheme — define it here to fix that latent gap.) */
+  --fc-panel-bg: var(--fc-surface-0);
+  --fc-panel-border: var(--fc-border);
+  --fc-header-bg: var(--fc-surface-1);
+  --fc-input-bg: oklch(15% 0.02 255);
+  --fc-button-bg: var(--fc-surface-2);
+}

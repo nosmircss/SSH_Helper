@@ -719,6 +719,22 @@ public class ScriptDependencyAnalyzerTests
         result.SftpUsesDefaultHost.Should().BeTrue();
     }
 
+    [Fact]
+    public void AnalyzeScript_WhenGuardOnNonForeachStep_ReportsReferencedColumn()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var script = new ScriptParser().Parse("""
+            ---
+            steps:
+              - send: echo hi
+                when: '{{role}} == "primary"'
+            """);
+
+        var result = analyzer.AnalyzeScript(script);
+
+        result.ReferencedColumns.Should().Contain("role");
+    }
+
     private static SshRequirementResult AnalyzeSshRequirements(string scriptText)
     {
         var analyzer = new ScriptDependencyAnalyzer();

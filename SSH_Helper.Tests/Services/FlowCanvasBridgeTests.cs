@@ -174,6 +174,96 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_RepeatUntilContainer_RoundTripsToRepeatStep()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            name: Repeat RoundTrip
+            version: 1
+            steps:
+              - set: "i = 0"
+              - repeat:
+                  until: "i >= 3"
+                  max_iterations: 10
+                  do:
+                    - set:
+                        expression: "i = i + 1"
+            """;
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        var graph = new JObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges
+        };
+
+        var export = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(export.Yaml);
+        var validationErrors = parser.Validate(script, export.Yaml, enforceCanonicalSyntax: true);
+
+        Assert.Empty(validationErrors);
+        Assert.Equal(2, script.Steps.Count);
+        var repeatStep = script.Steps[1];
+        Assert.Equal(StepType.Repeat, repeatStep.GetStepType());
+        Assert.Equal("i >= 3", repeatStep.Until);
+        Assert.NotNull(repeatStep.Do);
+        Assert.Single(repeatStep.Do!);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_WhenGuardOnGeneratedStep_RoundTrips()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: systemctl restart nginx
+                when: nginx_state != "active"
+            """;
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        var graph = new JObject { ["nodes"] = nodes, ["edges"] = edges };
+        var export = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        var script = new ScriptParser().Parse(export.Yaml);
+        Assert.Single(script.Steps);
+        Assert.Equal("nginx_state != \"active\"", script.Steps[0].When);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_WhenGuardOnContainerStep_RoundTrips()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - while:
+                  condition: "1 == 1"
+                  max_iterations: 3
+                  do:
+                    - print:
+                        message: hi
+                when: enabled == "yes"
+            """;
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        var graph = new JObject { ["nodes"] = nodes, ["edges"] = edges };
+        var export = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        var script = new ScriptParser().Parse(export.Yaml);
+        Assert.Single(script.Steps);
+        Assert.Equal("enabled == \"yes\"", script.Steps[0].When);
+    }
+
+    [Fact]
     public void ExportGraphToYaml_UnsupportedBlockType_ReturnsErrorDiagnostic()
     {
         var bridge = new FlowCanvasBridge();
@@ -221,6 +311,11 @@ public class FlowCanvasBridgeTests
 
         Assert.False(result.Success);
         Assert.Contains(result.Errors, e => e.Contains("Unsupported block type", System.StringComparison.OrdinalIgnoreCase));
+
+        var errorDiagnostic = Assert.Single(result.Diagnostics, d =>
+            d.Severity == FlowCanvasBridge.ExportDiagnosticSeverity.Error &&
+            d.Message.Contains("Unsupported block type", System.StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("node-1", errorDiagnostic.NodeId);
     }
 
     [Fact]

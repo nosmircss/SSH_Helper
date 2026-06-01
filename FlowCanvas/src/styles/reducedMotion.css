@@ -1,0 +1,14 @@
+/* FlowCanvas/src/styles/reducedMotion.css
+ * Global motion kill switch. The body-level class blankets ALL CSS @keyframes
+ * (the execution-cinematics set fc-run-breathe / fc-run-comet-spin / fc-check-draw / fc-check-pop /
+ * fc-err-shake / fc-err-ripple, plus fc-packet-travel / fc-packet-pulse) and inline
+ * transition:/animation: styles because the !important duration override wins.
+ * 0.001ms (not 0) keeps animationend/transitionend events firing. */
+body.fc-reduced-motion *,
+body.fc-reduced-motion *::before,
+body.fc-reduced-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}

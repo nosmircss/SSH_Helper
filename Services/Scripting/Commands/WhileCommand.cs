@@ -31,6 +31,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (maxIterations <= 0)
                 maxIterations = DefaultMaxIterations;
             int iteration = 0;
+            int executed = 0;
 
             while (iteration < maxIterations)
             {
@@ -56,13 +57,20 @@ namespace SSH_Helper.Services.Scripting.Commands
 
                 // Execute the 'do' block
                 var execResult = await _executor.ExecuteStepsAsync(step.Do, context, cancellationToken, context.LoopDepth + 1);
+                executed++;
 
                 // Handle control flow
                 if (execResult.ShouldExit)
+                {
+                    execResult.IterationCount = executed;
                     return execResult;
+                }
 
                 if (execResult.ShouldReturn)
+                {
+                    execResult.IterationCount = executed;
                     return execResult;
+                }
 
                 if (execResult.ShouldBreak)
                 {
@@ -77,7 +85,10 @@ namespace SSH_Helper.Services.Scripting.Commands
                 }
 
                 if (!execResult.Success)
+                {
+                    execResult.IterationCount = executed;
                     return execResult;
+                }
 
                 iteration++;
             }
@@ -87,7 +98,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput($"While: reached maximum iterations ({maxIterations}), stopping", ScriptOutputType.Warning);
             }
 
-            return CommandResult.Ok();
+            return new CommandResult { Success = true, IterationCount = executed };
         }
     }
 }

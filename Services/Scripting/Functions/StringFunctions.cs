@@ -28,6 +28,9 @@ namespace SSH_Helper.Services.Scripting.Functions
             registry.Register("repeat", Repeat);
             registry.Register("reverse", Reverse);
             registry.Register("regex_replace", RegexReplace);
+            registry.Register("regex_match", RegexMatch);
+            registry.Register("regex_match_all", RegexMatchAll);
+            registry.Register("regex_groups", RegexGroups);
             registry.Register("format", Format);
             registry.Register("char_at", CharAt);
             registry.Register("index_of", IndexOf);
@@ -171,6 +174,81 @@ namespace SSH_Helper.Services.Scripting.Functions
             {
                 return source;
             }
+        }
+
+        private static object? RegexMatch(string argsString, ScriptContext context)
+        {
+            var args = JsonUtilities.SplitTopLevelCommas(argsString);
+            if (args.Count < 2) return string.Empty;
+
+            var source = Resolve(args[0], context);
+            var pattern = StripDelimiters(Resolve(args[1], context));
+
+            int group = 0;
+            if (args.Count >= 3 &&
+                int.TryParse(Resolve(args[2], context), NumberStyles.Integer, CultureInfo.InvariantCulture, out var requested))
+            {
+                group = requested;
+            }
+
+            try
+            {
+                var match = Regex.Match(source, pattern, RegexOptions.None, TimeSpan.FromSeconds(5));
+                if (!match.Success) return string.Empty;
+                return group >= 0 && group < match.Groups.Count ? match.Groups[group].Value : string.Empty;
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                return string.Empty;
+            }
+            catch (ArgumentException)
+            {
+                return string.Empty;
+            }
+        }
+
+        private static object? RegexMatchAll(string argsString, ScriptContext context)
+        {
+            var args = JsonUtilities.SplitTopLevelCommas(argsString);
+            var results = new List<string>();
+            if (args.Count < 2) return results;
+
+            var source = Resolve(args[0], context);
+            var pattern = StripDelimiters(Resolve(args[1], context));
+
+            try
+            {
+                foreach (Match match in Regex.Matches(source, pattern, RegexOptions.None, TimeSpan.FromSeconds(5)))
+                    results.Add(match.Value);
+            }
+            catch (RegexMatchTimeoutException) { }
+            catch (ArgumentException) { }
+
+            return results;
+        }
+
+        private static object? RegexGroups(string argsString, ScriptContext context)
+        {
+            var args = JsonUtilities.SplitTopLevelCommas(argsString);
+            var results = new List<string>();
+            if (args.Count < 2) return results;
+
+            var source = Resolve(args[0], context);
+            var pattern = StripDelimiters(Resolve(args[1], context));
+
+            try
+            {
+                var match = Regex.Match(source, pattern, RegexOptions.None, TimeSpan.FromSeconds(5));
+                if (match.Success)
+                {
+                    for (int i = 1; i < match.Groups.Count; i++)
+                        results.Add(match.Groups[i].Value);
+                }
+            }
+            catch (RegexMatchTimeoutException) { }
+            catch (ArgumentException) { }
+
+            return results;
         }
 
         private static object? Format(string argsString, ScriptContext context)

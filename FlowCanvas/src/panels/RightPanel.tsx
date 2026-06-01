@@ -77,7 +77,7 @@ export default function RightPanel({ children }: RightPanelProps) {
           background: 'transparent',
           zIndex: 20,
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = '#4a9eff55')}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--fc-glow-running)')}
         onMouseLeave={(e) => { if (!isDragging.current) e.currentTarget.style.background = 'transparent'; }}
       />
       <div style={{
@@ -85,8 +85,8 @@ export default function RightPanel({ children }: RightPanelProps) {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        borderLeft: '1px solid #2a2a4a',
-        background: '#12122a',
+        borderLeft: '1px solid var(--fc-border)',
+        background: 'var(--fc-surface-0)',
       }}>
         {children}
       </div>

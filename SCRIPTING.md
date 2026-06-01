@@ -421,6 +421,9 @@ Sets or modifies variable values with expression support.
 | uuid() | `val = uuid()` | Generate RFC 4122 UUID (GUID) string |
 | reverse() | `val = reverse(text)` | Reverse string or list order |
 | regex_replace() | `val = regex_replace(s, '/\d+/', "X")` | Replace regex matches |
+| regex_match() | `ip = regex_match(s, '/inet (\d+\.\d+\.\d+\.\d+)/', 1)` | First match; optional capture-group index (default: whole match), empty if no match |
+| regex_match_all() | `nums = regex_match_all(s, '/\d+/')` | List of all matches |
+| regex_groups() | `parts = regex_groups(s, '/(\d+)-(\d+)/')` | Capture groups of the first match |
 | format() | `val = format("{0} of {1}", a, b)` | C#-style string formatting |
 | char_at() | `val = char_at(text, 0)` | Character at zero-based index |
 | index_of() | `idx = index_of(text, "sub")` | Index of substring (-1 if not found) |
@@ -450,9 +453,12 @@ Sets or modifies variable values with expression support.
 | now() | `ts = now("yyyy-MM-dd")` | Current local datetime (custom format) |
 | epoch() | `ts = epoch()` | Current UTC Unix timestamp (seconds) |
 | epoch_to_date() | `dt = epoch_to_date(ts, "yyyy-MM-dd")` | Unix timestamp to local datetime |
-| date_add() | `dt = date_add(ts, 1, "hours")` | Add time to datetime |
-| date_diff() | `val = date_diff(a, b, "minutes")` | Difference between datetimes |
+| now_local() | `ts = now_local("yyyy-MM-dd")` | Current datetime, explicit local base |
+| now_utc() | `ts = now_utc("yyyy-MM-dd HH:mm:ss")` | Current datetime, explicit UTC base |
+| date_add() | `dt = date_add(ts, 3, "months")` | Add time (units: seconds, minutes, hours, days, weeks, months, years) |
+| date_diff() | `val = date_diff(a, b, "weeks")` | Difference (units: seconds, minutes, hours, days, weeks) |
 | date_format() | `val = date_format(ts, "MM/dd/yyyy")` | Reformat datetime string |
+| parse_date() | `dt = parse_date("15-01-2026", "dd-MM-yyyy")` | Parse a string using an explicit input format |
 | **Encoding/Hashing** | | |
 | base64_encode() | `val = base64_encode(text)` | Base64 encode UTF-8 string |
 | base64_decode() | `val = base64_decode(encoded)` | Decode Base64 to UTF-8 |
@@ -461,6 +467,12 @@ Sets or modifies variable values with expression support.
 | hash() | `val = hash(text, "SHA256")` | Hash digest (MD5, SHA1, SHA256, SHA384, SHA512) |
 | hex_encode() | `val = hex_encode(text)` | Encode to lowercase hex |
 | hex_decode() | `val = hex_decode(hex)` | Decode hex to UTF-8 |
+| **Networking** | | |
+| is_valid_ip() | `bool = is_valid_ip(Host_IP)` | True if a valid IPv4/IPv6 address |
+| ip_version() | `v = ip_version(Host_IP)` | `4` or `6` (empty if invalid) |
+| ip_in_cidr() | `bool = ip_in_cidr(Host_IP, "10.0.0.0/8")` | True if the address falls within the CIDR range |
+| url_host() | `h = url_host(url)` | Host component of a URL (empty if unparseable) |
+| url_port() | `p = url_port(url)` | Port component of a URL (empty if unparseable) |
 | Nested assignment | `obj.key.subkey = value` | Assign to nested path |
 
 **Basic Examples:**
@@ -1443,9 +1455,28 @@ Iterates over items in a collection.
 
 `iterator:` can use collection expressions, not just variable names. Common examples include `item in split(csv, ",")`, `item in compact(list_values)`, and `entry in json.items(data, "path")`.
 
-**Special Variables in Loop:**
-- `${item}`: Current item value (or your chosen variable name)
-- `${item_index}`: Zero-based index of current item (uses your iterator name, e.g., `${line_index}` if you use `foreach: line in ...`)
+**Special Variables in Loop** (each prefixed with your iterator name — e.g. `host_number` when you write `foreach: host in ...`):
+- `${item}`: Current item value
+- `${item_index}`: Zero-based index
+- `${item_number}`: One-based position (`index + 1`)
+- `${item_first}` / `${item_last}`: `true` on the first / last iteration
+- `${item_count}`: Total number of items
+
+> **Loop scoping:** the iterator and its metadata are scoped to the loop — any prior value of a same-named variable is restored (or the variable removed) when the loop ends, so a loop no longer silently overwrites an outer variable.
+
+**Dictionary iteration** — iterate an object/map's entries with a two-name `key, value` header:
+```yaml
+- foreach: key, value in {{my_map}}
+  do:
+    - print:
+        message: "${key} = ${value}"
+```
+
+> **`when:` works on every step.** Shown here on `foreach` (where it filters each item), a `when:` guard can be added to *any* step — the step is skipped when the condition is false:
+> ```yaml
+> - send: { command: systemctl restart nginx }
+>   when: nginx_state != "active"
+> ```
 
 **Examples:**
 ```yaml
@@ -1591,9 +1622,53 @@ Repeatedly executes a block while a condition is true.
 
 ---
 
+### repeat - Loop Until Condition
+
+Runs the body **at least once**, then repeats until the `until` condition becomes true (a do-while loop). Ideal for "do the thing, then poll until healthy" patterns where `while` would awkwardly require running the body before the first check.
+
+**Syntax:**
+```yaml
+- repeat:
+    until: condition
+    max_iterations: 30      # optional safety cap (default 10,000)
+    do:
+      - step1
+      - step2
+```
+
+**Shorthand Header:**
+```yaml
+- repeat: condition
+  do:
+    - step1
+```
+
+**Features:**
+- Body always executes once before `until` is evaluated (bottom-tested)
+- Loop exits as soon as `until` becomes true
+- `${_iteration}` tracks iteration count (0-based); `break`/`continue` supported
+
+**Example:**
+```yaml
+# Start a service, then poll until it reports active
+- send:
+    command: systemctl start app
+- repeat:
+    until: state == "active"
+    max_iterations: 30
+    do:
+      - send:
+          command: systemctl is-active app
+          capture: state
+      - wait:
+          seconds: 2
+```
+
+---
+
 ### break - Exit Current Loop
 
-Exits the current `foreach` or `while` loop immediately.
+Exits the current `foreach`, `while`, or `repeat` loop immediately.
 
 **Syntax:**
 ```yaml
@@ -3736,6 +3811,8 @@ Validates that a condition is true. Useful for adding guardrails and sanity chec
 | `condition` | string | (required) | Expression to evaluate (same syntax as `if` conditions) |
 | `message` | string | `"Assertion failed: {condition}"` | Custom failure message. Supports `${variable}` substitution. |
 | `severity` | string | `error` | `error` stops script execution; `warning` logs a warning and continues |
+
+> **Soft-assert summary:** every `assert` with `severity: warning` is tallied across the run. At completion the script reports `Soft assertions: N passed, M failed`, so warning-level checks act as a lightweight test report without halting execution.
 
 **Examples:**
 ```yaml

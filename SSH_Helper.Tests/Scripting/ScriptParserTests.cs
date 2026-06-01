@@ -1122,22 +1122,21 @@ steps:
     }
 
     [Fact]
-    public void Parse_UnknownKey_AddsWarningWithLineNumber()
+    public void Validate_UnknownStepKey_IsBlockingErrorWithLineNumber()
     {
         var yaml = @"---
 steps:
   - send: show version
     typoo: yes";
 
-        _parser.Parse(yaml);
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
 
-        _parser.Warnings.Should().ContainSingle();
-        _parser.Warnings[0].Should().Contain("Line");
-        _parser.Warnings[0].Should().Contain("Unknown step key 'typoo'");
+        errors.Should().Contain(e => e.Contains("Line") && e.Contains("Unknown step key 'typoo'"));
     }
 
     [Fact]
-    public void Parse_UnknownOptionKey_AddsWarningWithLineNumber()
+    public void Validate_UnknownOptionKey_IsBlockingError()
     {
         var yaml = @"---
 steps:
@@ -1146,10 +1145,10 @@ steps:
       into: data
       typoo: yes";
 
-        _parser.Parse(yaml);
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
 
-        _parser.Warnings.Should().ContainSingle();
-        _parser.Warnings[0].Should().Contain("Unknown readfile key 'typoo'");
+        errors.Should().Contain(e => e.Contains("Unknown readfile key 'typoo'"));
     }
 
     [Fact]
@@ -1241,16 +1240,19 @@ steps:
         var yaml = @"---
     steps:
       - readfile:
-        select_file: true
-        path_only: true
-        path_into: chosen_path";
+          select_file: true
+          path_only: true
+          path_into: chosen_path";
 
         var script = _parser.Parse(yaml);
         var errors = _parser.Validate(script, yaml);
         var readfile = script.Steps[0].Readfile;
 
         readfile.Should().NotBeNull();
-        readfile!.AutoBrowse.Should().BeNull();
+        readfile!.SelectFile.Should().BeTrue();
+        readfile.PathOnly.Should().BeTrue();
+        readfile.PathInto.Should().Be("chosen_path");
+        readfile.AutoBrowse.Should().BeNull();
         errors.Should().BeEmpty();
       }
 
@@ -2299,7 +2301,7 @@ steps:
     }
 
     [Fact]
-    public void Parse_ExistsUnknownKey_AddsWarning()
+    public void Validate_ExistsUnknownKey_IsBlockingError()
     {
       var yaml = """
         ---
@@ -2310,10 +2312,10 @@ steps:
               typoo: true
         """;
 
-      _ = _parser.Parse(yaml);
+      var script = _parser.Parse(yaml);
+      var errors = _parser.Validate(script, yaml);
 
-      _parser.Warnings.Should().ContainSingle();
-      _parser.Warnings[0].Should().Contain("Unknown exists key 'typoo'");
+      errors.Should().Contain(e => e.Contains("Unknown exists key 'typoo'"));
     }
 
     #endregion

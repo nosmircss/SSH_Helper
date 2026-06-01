@@ -6,6 +6,8 @@ import {
   type BlockDef,
   type BlockCategory,
 } from '../blockDefs/registry';
+import { mix } from '../utils/tokens';
+import { BlockIcon } from '../nodes/BlockIcon';
 
 const categoryOrder: BlockCategory[] = [
   'ssh', 'control-flow', 'data', 'network', 'io', 'grid', 'timing',
@@ -26,7 +28,7 @@ function PaletteItem({ def }: { def: BlockDef }) {
       style={{
         padding: '4px 8px',
         background: colors.bg,
-        border: `1px solid ${colors.border}55`,
+        border: `1px solid ${mix(colors.border, 33)}`,
         borderRadius: 4,
         fontSize: 12,
         color: colors.text,
@@ -38,8 +40,11 @@ function PaletteItem({ def }: { def: BlockDef }) {
         transition: 'border-color 0.15s',
       }}
       onMouseEnter={(e) => (e.currentTarget.style.borderColor = colors.border)}
-      onMouseLeave={(e) => (e.currentTarget.style.borderColor = `${colors.border}55`)}
+      onMouseLeave={(e) => (e.currentTarget.style.borderColor = mix(colors.border, 33))}
     >
+      <span style={{ color: colors.icon, display: 'flex', flexShrink: 0 }}>
+        <BlockIcon name={def.icon} size={14} />
+      </span>
       <span>{def.label}</span>
     </div>
   );
@@ -52,8 +57,8 @@ export default function Palette() {
   return (
     <div style={{
       width: 180,
-      background: '#12122a',
-      borderRight: '1px solid #2a2a4a',
+      background: 'var(--fc-surface-0)',
+      borderRight: '1px solid var(--fc-border)',
       overflowY: 'auto',
       padding: '8px',
       display: 'flex',
@@ -64,7 +69,7 @@ export default function Palette() {
       <div style={{
         fontSize: 11,
         fontWeight: 600,
-        color: '#666',
+        color: 'var(--fc-text-faint)',
         textTransform: 'uppercase',
         letterSpacing: '1px',
         padding: '4px 0',

@@ -38,6 +38,12 @@ namespace SSH_Helper.Services.Scripting
 
         /// <summary>Whether the step was skipped (e.g., disabled node).</summary>
         public bool Skipped { get; init; }
+
+        /// <summary>Loop body execution count (only set on StepCompleted for foreach/while/repeat).</summary>
+        public int? IterationCount { get; init; }
+
+        /// <summary>Scope-path key of the branch taken (only set on StepCompleted for if/switch).</summary>
+        public string? BranchTaken { get; init; }
     }
 
     /// <summary>
@@ -106,6 +112,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.If, new IfCommand(this) },
                 { StepType.Foreach, new ForeachCommand(this) },
                 { StepType.While, new WhileCommand(this) },
+                { StepType.Repeat, new RepeatCommand(this) },
                 { StepType.Try, new TryCommand(this) },
                 { StepType.Break, new BreakCommand() },
                 { StepType.Continue, new ContinueCommand() },
@@ -240,6 +247,13 @@ namespace SSH_Helper.Services.Scripting
             }
             finally
             {
+                if (context.SoftAssertPassed + context.SoftAssertFailed > 0)
+                {
+                    context.EmitOutput(
+                        $"Soft assertions: {context.SoftAssertPassed} passed, {context.SoftAssertFailed} failed",
+                        context.SoftAssertFailed > 0 ? ScriptOutputType.Warning : ScriptOutputType.Success);
+                }
+
                 LocalCmdCommand.CleanupTrackedBackgroundProcesses(context, wasCancelled);
             }
         }
@@ -300,6 +314,26 @@ namespace SSH_Helper.Services.Scripting
                         continue;
                     }
 
+                    // Universal `when:` guard: skip non-foreach steps whose guard evaluates false.
+                    // (foreach evaluates `when:` per item inside ForeachCommand.)
+                    if (stepType != StepType.Foreach && !string.IsNullOrEmpty(step.When))
+                    {
+                        var guard = new ExpressionEvaluator(context);
+                        if (!guard.Evaluate(context.SubstituteVariables(step.When)))
+                        {
+                            StepCompleted?.Invoke(this, new StepExecutionEventArgs
+                            {
+                                StepIndex = stepIndex,
+                                StepPath = stepPath,
+                                StepType = stepType,
+                                LineNumber = step.LineNumber,
+                                Success = true,
+                                Skipped = true
+                            });
+                            continue;
+                        }
+                    }
+
                     // Fire step-starting event
                     StepStarting?.Invoke(this, new StepExecutionEventArgs
                     {
@@ -324,7 +358,9 @@ namespace SSH_Helper.Services.Scripting
                         StepName = null,
                         Success = result.Success,
                         Output = context.LastCommandOutput,
-                        DurationMs = sw.ElapsedMilliseconds
+                        DurationMs = sw.ElapsedMilliseconds,
+                        IterationCount = result.IterationCount,
+                        BranchTaken = result.BranchTaken
                     });
 
                     if (result.SuppressedError)

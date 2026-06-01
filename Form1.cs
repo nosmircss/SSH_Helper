@@ -112,7 +112,7 @@ namespace SSH_Helper
 
         #region Constants
 
-        private const string ApplicationVersion = "0.51.19";
+        private const string ApplicationVersion = "0.51.21";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -6822,7 +6822,8 @@ namespace SSH_Helper
                 var bridge = new FlowCanvasBridge();
                 var (nodes, edges) = bridge.TextToGraph(scriptText);
 
-                // Merge stored canvas layout if the script structure hasn't changed
+                // Merge stored canvas layout if the script structure hasn't changed.
+                bool hasUserLayout = false;
                 if (!string.IsNullOrEmpty(_activePresetName))
                 {
                     var preset = _presetManager.Get(_activePresetName);
@@ -6833,11 +6834,12 @@ namespace SSH_Helper
                         if (string.Equals(currentHash, layout.StructureHash, StringComparison.Ordinal))
                         {
                             FlowCanvasBridge.MergeLayout(nodes, layout);
+                            hasUserLayout = true;
                         }
                     }
                 }
 
-                _flowCanvasForm.LoadGraph(nodes, edges);
+                _flowCanvasForm.LoadGraph(nodes, edges, hasUserLayout);
             }
             catch
             {
@@ -6908,7 +6910,8 @@ namespace SSH_Helper
                         success: false,
                         errors: exportResult.Errors.ToArray(),
                         warnings: warnings,
-                        nodeStepMap: null);
+                        nodeStepMap: null,
+                        diagnostics: exportResult.Diagnostics);
                     return false;
                 }
 
@@ -6953,7 +6956,8 @@ namespace SSH_Helper
                     success: true,
                     errors: Array.Empty<string>(),
                     warnings: warnings,
-                    nodeStepMap: _nodeToStepPathMap);
+                    nodeStepMap: _nodeToStepPathMap,
+                    diagnostics: exportResult.Diagnostics);
 
                 return true;
             }
@@ -6977,15 +6981,26 @@ namespace SSH_Helper
             bool success,
             IReadOnlyCollection<string> errors,
             IReadOnlyCollection<string> warnings,
-            Dictionary<string, string>? nodeStepMap)
+            Dictionary<string, string>? nodeStepMap,
+            IReadOnlyList<FlowCanvasBridge.FlowCanvasExportDiagnostic>? diagnostics = null)
         {
+            var diag = (diagnostics ?? Array.Empty<FlowCanvasBridge.FlowCanvasExportDiagnostic>())
+                .Select(d => new
+                {
+                    nodeId = d.NodeId,
+                    severity = d.Severity == FlowCanvasBridge.ExportDiagnosticSeverity.Error ? "error" : "warning",
+                    message = d.Message,
+                })
+                .ToArray();
+
             _flowCanvasForm?.SendMessage(new
             {
                 type = "apply-result",
                 success,
                 errors = errors.ToArray(),
                 warnings = warnings.ToArray(),
-                nodeStepMap = nodeStepMap ?? new Dictionary<string, string>(StringComparer.Ordinal)
+                nodeStepMap = nodeStepMap ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                diagnostics = diag,
             });
         }
 
@@ -13563,6 +13578,8 @@ namespace SSH_Helper
                 stepId = nodeId,
                 state = e.Skipped ? "skipped" : (e.Success == true ? "success" : "error"),
                 duration = e.DurationMs,
+                iterationCount = e.IterationCount,
+                branchTaken = e.BranchTaken,
                 variables
             });
 

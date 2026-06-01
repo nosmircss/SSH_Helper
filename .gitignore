@@ -375,11 +375,14 @@ RebexPOC/
 rebex.key
 .claude/napkin.md
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 .worktrees/
 .superpowers/
+.playwright-mcp/
 
 tools/
 !FlowCanvas/tools/
 FlowCanvas/tools/*
 !FlowCanvas/tools/FlowCanvasParityCli/
 FlowCanvas/dist/*
+FlowCanvas/tsconfig.tsbuildinfo

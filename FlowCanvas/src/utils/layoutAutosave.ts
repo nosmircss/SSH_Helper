@@ -2,6 +2,7 @@ import { messageBus } from '../MessageBus';
 import { useFlowStore } from '../stores/useFlowStore';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import type { CommentData } from './exportGraph';
+import { DEFAULT_COMMENT_COLOR } from './tokens';
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -26,7 +27,7 @@ function doSend(): void {
       comments.push({
         id: node.id,
         text: String(data?.text ?? ''),
-        color: String(data?.color ?? '#e0c040'),
+        color: String(data?.color ?? DEFAULT_COMMENT_COLOR),
         x: node.position?.x ?? 0,
         y: node.position?.y ?? 0,
         width: (node.style?.width as number) ?? 200,

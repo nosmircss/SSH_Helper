@@ -3,12 +3,12 @@ import { useFlowStore } from '../stores/useFlowStore';
 import type { BlockExecState } from '../stores/slices/executionSlice';
 
 const stateColors: Record<BlockExecState, string> = {
-  idle: '#555',
-  running: '#4a9eff',
-  success: '#2ecc71',
-  error: '#e74c3c',
-  skipped: '#888',
-  disabled: '#555',
+  idle: 'var(--fc-text-disabled)',
+  running: 'var(--fc-accent)',
+  success: 'var(--fc-state-success)',
+  error: 'var(--fc-state-error)',
+  skipped: 'var(--fc-text-muted)',
+  disabled: 'var(--fc-text-disabled)',
 };
 
 export default function TimelinePanel() {
@@ -68,7 +68,7 @@ export default function TimelinePanel() {
   return (
     <div
       style={{
-        borderTop: '1px solid #2a2a4a',
+        borderTop: '1px solid var(--fc-border)',
         padding: 8,
         display: 'flex',
         flexDirection: 'column',
@@ -82,14 +82,14 @@ export default function TimelinePanel() {
           alignItems: 'center',
           justifyContent: 'space-between',
           fontSize: 11,
-          color: '#888',
+          color: 'var(--fc-text-muted)',
           fontWeight: 600,
           textTransform: 'uppercase',
           letterSpacing: '0.5px',
         }}
       >
         <span>Timeline</span>
-        <span style={{ fontWeight: 400, fontSize: 10, color: '#666' }}>
+        <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--fc-text-faint)' }}>
           {timelineEntries.length > 0
             ? `${timelineEntries.length} step${timelineEntries.length !== 1 ? 's' : ''}`
             : ''}
@@ -101,7 +101,7 @@ export default function TimelinePanel() {
         <div
           style={{
             fontSize: 11,
-            color: '#555',
+            color: 'var(--fc-text-disabled)',
             textAlign: 'center',
             padding: '8px 0',
           }}
@@ -120,7 +120,7 @@ export default function TimelinePanel() {
         >
           {timelineEntries.map((entry) => {
             const isActive = timelineIndex === entry.index;
-            const color = stateColors[entry.state] || '#555';
+            const color = stateColors[entry.state] || 'var(--fc-text-disabled)';
             const width = getBarWidth(entry.duration);
 
             return (
@@ -139,7 +139,7 @@ export default function TimelinePanel() {
                   cursor: 'pointer',
                   flexShrink: 0,
                   opacity: isActive ? 1 : 0.6,
-                  border: isActive ? '1px solid #fff' : '1px solid transparent',
+                  border: isActive ? '1px solid var(--fc-border-selected)' : '1px solid transparent',
                   transition: 'opacity 0.15s, border-color 0.15s',
                 }}
                 title={`${entry.nodeLabel || entry.blockType}${entry.duration !== undefined ? ` \u2014 ${entry.duration}ms` : ''}`}
@@ -152,7 +152,7 @@ export default function TimelinePanel() {
               style={{
                 width: 20,
                 height: 18,
-                background: '#4a9eff',
+                background: 'var(--fc-accent)',
                 borderRadius: 3,
                 flexShrink: 0,
                 opacity: 0.4,
@@ -170,12 +170,12 @@ export default function TimelinePanel() {
           display: 'none',
           position: 'fixed',
           zIndex: 100,
-          background: '#1a1a2e',
-          border: '1px solid #2a2a4a',
+          background: 'var(--fc-surface-1)',
+          border: '1px solid var(--fc-border)',
           borderRadius: 4,
           padding: '3px 8px',
           fontSize: 10,
-          color: '#ccc',
+          color: 'var(--fc-text)',
           whiteSpace: 'nowrap',
           pointerEvents: 'none',
         }}

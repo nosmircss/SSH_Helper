@@ -124,9 +124,35 @@ namespace SSH_Helper.Services.Scripting
             public bool LocalCmdRunAllApproved { get; set; }
             public string? LocalCmdApprovedHost { get; set; }
             public HashSet<string> LocalCmdApprovedCommands { get; } = new();
+            public int SoftAssertPassed { get; set; }
+            public int SoftAssertFailed { get; set; }
             public EventHandler<ScriptOutputEventArgs>? OutputReceived { get; set; }
             public EventHandler<ColumnUpdateEventArgs>? ColumnUpdateRequested { get; set; }
             public EventHandler<EnvironmentUpdateEventArgs>? EnvironmentUpdateRequested { get; set; }
+        }
+
+        /// <summary>
+        /// Number of soft assertions (assert with severity: warning) that passed during this run.
+        /// </summary>
+        public int SoftAssertPassed => _sharedState.SoftAssertPassed;
+
+        /// <summary>
+        /// Number of soft assertions (assert with severity: warning) that failed during this run.
+        /// </summary>
+        public int SoftAssertFailed => _sharedState.SoftAssertFailed;
+
+        /// <summary>
+        /// Records the outcome of a soft assertion for the end-of-run summary. Thread-safe.
+        /// </summary>
+        public void RecordSoftAssert(bool passed)
+        {
+            lock (_sharedState.StateLock)
+            {
+                if (passed)
+                    _sharedState.SoftAssertPassed++;
+                else
+                    _sharedState.SoftAssertFailed++;
+            }
         }
 
         /// <summary>
@@ -694,30 +720,22 @@ namespace SSH_Helper.Services.Scripting
 
             for (int i = 0; i < input.Length; i++)
             {
-                // ${...} pattern with nested placeholder support.
-                if (input[i] == '$' && i + 1 < input.Length && input[i + 1] == '{')
+                // ${...} (alias) and {{...}} (canonical) are scanned with the same balanced-brace
+                // rules, so the same expression resolves identically in either form.
+                if (input[i] == '$' && i + 1 < input.Length && input[i + 1] == '{' &&
+                    TryExtractBalanced(input, i, "${", "}", out var dollarExpr, out var dollarEnd))
                 {
-                    if (TryExtractDollarExpression(input, i, out var expr, out var endIndex))
-                    {
-                        var resolvedExpr = SubstituteVariableTokens(expr);
-                        output.Append(ResolveVariableExpression(resolvedExpr));
-                        i = endIndex;
-                        continue;
-                    }
+                    output.Append(ResolveVariableExpression(SubstituteVariableTokens(dollarExpr)));
+                    i = dollarEnd;
+                    continue;
                 }
 
-                // {{...}} pattern (CSV-style variable names).
-                if (input[i] == '{' && i + 1 < input.Length && input[i + 1] == '{')
+                if (input[i] == '{' && i + 1 < input.Length && input[i + 1] == '{' &&
+                    TryExtractBalanced(input, i, "{{", "}}", out var braceExpr, out var braceEnd))
                 {
-                    var endIndex = input.IndexOf("}}", i + 2, StringComparison.Ordinal);
-                    if (endIndex >= 0)
-                    {
-                        var expr = input.Substring(i + 2, endIndex - (i + 2));
-                        var resolvedExpr = SubstituteVariableTokens(expr);
-                        output.Append(ResolveVariableExpression(resolvedExpr));
-                        i = endIndex + 1;
-                        continue;
-                    }
+                    output.Append(ResolveVariableExpression(SubstituteVariableTokens(braceExpr)));
+                    i = braceEnd;
+                    continue;
                 }
 
                 output.Append(input[i]);
@@ -726,42 +744,68 @@ namespace SSH_Helper.Services.Scripting
             return output.ToString();
         }
 
-        private static bool TryExtractDollarExpression(
+        /// <summary>
+        /// Extracts the expression inside a balanced <paramref name="open"/>…<paramref name="close"/>
+        /// pair starting at <paramref name="startIndex"/>, honoring nested pairs of the same delimiter.
+        /// On success, <paramref name="endIndex"/> is the index of the final character of the closing
+        /// token. Returns false (leaving the token literal) when no matching close is found.
+        /// </summary>
+        private static bool TryExtractBalanced(
             string input,
             int startIndex,
+            string open,
+            string close,
             out string expression,
             out int endIndex)
         {
             expression = string.Empty;
             endIndex = startIndex;
 
-            if (startIndex + 1 >= input.Length || input[startIndex] != '$' || input[startIndex + 1] != '{')
-                return false;
-
+            var contentStart = startIndex + open.Length;
             var depth = 1;
+            var i = contentStart;
 
-            for (int i = startIndex + 2; i < input.Length; i++)
+            while (i < input.Length)
             {
-                if (input[i] == '$' && i + 1 < input.Length && input[i + 1] == '{')
+                if (MatchesAt(input, i, open))
                 {
                     depth++;
-                    i++;
+                    i += open.Length;
                     continue;
                 }
 
-                if (input[i] == '}')
+                if (MatchesAt(input, i, close))
                 {
                     depth--;
                     if (depth == 0)
                     {
-                        expression = input.Substring(startIndex + 2, i - (startIndex + 2));
-                        endIndex = i;
+                        expression = input.Substring(contentStart, i - contentStart);
+                        endIndex = i + close.Length - 1;
                         return true;
                     }
+
+                    i += close.Length;
+                    continue;
                 }
+
+                i++;
             }
 
             return false;
+        }
+
+        private static bool MatchesAt(string input, int index, string token)
+        {
+            if (index + token.Length > input.Length)
+                return false;
+
+            for (int k = 0; k < token.Length; k++)
+            {
+                if (input[index + k] != token[k])
+                    return false;
+            }
+
+            return true;
         }
 
         /// <summary>

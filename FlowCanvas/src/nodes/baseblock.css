@@ -1,19 +1,2 @@
-@keyframes exec-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(74, 158, 255, 0.3); }
-  50% { box-shadow: 0 0 24px rgba(74, 158, 255, 0.6); }
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.search-match {
-  outline: 2px dashed #e0c040 !important;
-  outline-offset: 2px;
-}
-
-.search-current {
-  outline: 2px solid #e0c040 !important;
-  outline-offset: 2px;
-}
+.search-match { outline: 2px dashed var(--fc-search-outline) !important; outline-offset: 2px; }
+.search-current { outline: 2px solid var(--fc-search-outline) !important; outline-offset: 2px; }

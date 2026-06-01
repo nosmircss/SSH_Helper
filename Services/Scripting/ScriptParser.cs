@@ -8,6 +8,7 @@ using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
+using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
 
 namespace SSH_Helper.Services.Scripting
@@ -19,6 +20,7 @@ namespace SSH_Helper.Services.Scripting
     {
         private readonly IDeserializer _deserializer;
         private readonly List<string> _warnings = new();
+        private readonly List<string> _unknownKeyErrors = new();
         private static readonly string[] KnownStepKeys =
         {
             "send",
@@ -30,6 +32,7 @@ namespace SSH_Helper.Services.Scripting
             "if",
             "foreach",
             "while",
+            "repeat",
             "updatecolumn",
             "updateenvironment",
             "readfile",
@@ -112,6 +115,7 @@ namespace SSH_Helper.Services.Scripting
                 ["if"] = ["condition", "then", "elif", "else"],
                 ["foreach"] = ["iterator", "when", "do"],
                 ["while"] = ["condition", "max_iterations", "do"],
+                ["repeat"] = ["until", "max_iterations", "do"],
                 ["try"] = ["do", "catch", "finally"],
                 ["readfile"] = ["path", "select_file", "message", "fileext", "autobrowse", "path_into", "path_only", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding", "on_error"],
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
@@ -155,6 +159,7 @@ namespace SSH_Helper.Services.Scripting
                 ["if"] = [],
                 ["foreach"] = [],
                 ["while"] = [],
+                ["repeat"] = [],
                 ["updatecolumn"] = [],
                 ["updateenvironment"] = [],
                 ["readfile"] = [],
@@ -199,6 +204,7 @@ namespace SSH_Helper.Services.Scripting
             "if",
             "foreach",
             "while",
+            "repeat",
             "try",
             "call",
             "switch",
@@ -462,6 +468,7 @@ namespace SSH_Helper.Services.Scripting
             try
             {
                 _warnings.Clear();
+                _unknownKeyErrors.Clear();
 
                 yamlText = PreprocessYaml(yamlText);
 
@@ -575,7 +582,7 @@ namespace SSH_Helper.Services.Scripting
         private static readonly HashSet<string> ScalarValueKeys = new(StringComparer.OrdinalIgnoreCase)
         {
             // Step keys that accept inline expression/string scalars
-            "set", "print", "send", "exit", "if", "while", "when", "assert",
+            "set", "print", "send", "exit", "if", "while", "repeat", "until", "when", "assert",
             "call", "return", "foreach", "sethistorylabel",
             // Expanded-form sub-keys that accept expression scalars
             "expression", "condition", "message", "command", "expect",
@@ -943,6 +950,10 @@ namespace SSH_Helper.Services.Scripting
                         step.DeclaredStepType = StepType.While;
                         ParseWhileStep(parser, step);
                         break;
+                    case "repeat":
+                        step.DeclaredStepType = StepType.Repeat;
+                        ParseRepeatStep(parser, step);
+                        break;
                     case "break":
                         step.DeclaredStepType = StepType.Break;
                         step.BreakLoop = ParseBooleanish(parser);
@@ -1137,6 +1148,7 @@ namespace SSH_Helper.Services.Scripting
                         step.Finally = ParseSteps(parser);
                         break;
                     default:
+                        step.HasUnknownStepKey = true;
                         AddUnknownKeyWarning($"Unknown step key '{key.Value}'", (int)key.Start.Line);
                         SkipValue(parser);
                         break;
@@ -1618,6 +1630,59 @@ namespace SSH_Helper.Services.Scripting
 
             SkipValue(parser);
             AddStepParseError(step, "while must be a mapping with required key 'condition'");
+        }
+
+        private void ParseRepeatStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var hasUntil = false;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+                    switch (key)
+                    {
+                        case "until":
+                            step.Until = parser.Consume<Scalar>().Value;
+                            hasUntil = !string.IsNullOrWhiteSpace(step.Until);
+                            break;
+                        case "do":
+                            step.Do = ParseSteps(parser);
+                            break;
+                        case "max_iterations":
+                        case "maxiterations":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var maxIterations))
+                                step.MaxIterations = maxIterations;
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown repeat key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (!hasUntil)
+                {
+                    AddStepParseError(step, "repeat.until is required");
+                }
+                return;
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                step.Until = parser.Consume<Scalar>().Value;
+                if (string.IsNullOrWhiteSpace(step.Until))
+                {
+                    AddStepParseError(step, "repeat.until is required");
+                }
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "repeat must be a mapping with required key 'until'");
         }
 
         private void ParseTryStep(IParser parser, ScriptStep step)
@@ -2553,7 +2618,7 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case "columns":
-                        AddUnknownKeyWarning("interactive.columns is deprecated; use interactive.width/interactive.height (pixels)", (int)keyScalar.Start.Line);
+                        AddDeprecationWarning("interactive.columns is deprecated; use interactive.width/interactive.height (pixels)", (int)keyScalar.Start.Line);
                         if (int.TryParse(parser.Consume<Scalar>().Value, out var legacyColumns))
                         {
                             options.Columns = legacyColumns;
@@ -2565,7 +2630,7 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case "rows":
-                        AddUnknownKeyWarning("interactive.rows is deprecated; use interactive.width/interactive.height (pixels)", (int)keyScalar.Start.Line);
+                        AddDeprecationWarning("interactive.rows is deprecated; use interactive.width/interactive.height (pixels)", (int)keyScalar.Start.Line);
                         if (int.TryParse(parser.Consume<Scalar>().Value, out var legacyRows))
                         {
                             options.Rows = legacyRows;
@@ -2585,7 +2650,7 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case "emulation":
-                        AddUnknownKeyWarning("interactive.emulation is deprecated and ignored", (int)keyScalar.Start.Line);
+                        AddDeprecationWarning("interactive.emulation is deprecated and ignored", (int)keyScalar.Start.Line);
                         SkipValue(parser);
                         break;
 
@@ -4128,6 +4193,12 @@ namespace SSH_Helper.Services.Scripting
                 errors.Add(parseError);
             }
 
+            // Typo-class unknown keys are blocking errors (deprecation notices remain warnings).
+            foreach (var keyError in _unknownKeyErrors)
+            {
+                errors.Add(keyError);
+            }
+
             if (script.Library)
             {
                 ValidateLibraryTopLevel(script, errors);
@@ -4289,7 +4360,9 @@ namespace SSH_Helper.Services.Scripting
 
                 if (stepType == StepType.Unknown)
                 {
-                    if (!enforceCanonicalSyntax || step.ParseErrors.Count == 0)
+                    // A misspelled command is already reported (with a did-you-mean suggestion) as this
+                    // step's own "Unknown step key" error, so the generic fallback would be redundant noise.
+                    if (!step.HasUnknownStepKey && (!enforceCanonicalSyntax || step.ParseErrors.Count == 0))
                     {
                         var lineContent = GetLineContent(lines, step.LineNumber);
                         errors.Add($"{prefix}Line {step.LineNumber}: Step has no recognized command{lineContent}");
@@ -4381,6 +4454,31 @@ namespace SSH_Helper.Services.Scripting
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Foreach requires 'do' block{lineContent}");
                         }
+                        if (!string.IsNullOrWhiteSpace(step.Foreach) && !ForeachCommand.IsValidIteratorSyntax(step.Foreach))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Invalid foreach syntax: '{step.Foreach}'. Expected 'item in collection' or 'key, value in map'{lineContent}");
+                        }
+                        if (step.Do != null)
+                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
+                        break;
+
+                    case StepType.Repeat:
+                        if (string.IsNullOrWhiteSpace(step.Until))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Repeat requires 'until' condition{lineContent}");
+                        }
+                        if (step.Do == null || step.Do.Count == 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Repeat requires 'do' block{lineContent}");
+                        }
+                        if (step.MaxIterations.HasValue && step.MaxIterations.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: max_iterations must be greater than 0{lineContent}");
+                        }
                         if (step.Do != null)
                             ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         break;
@@ -4439,12 +4537,22 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case StepType.Set:
+                    {
+                        var lineContent = GetLineContent(lines, step.LineNumber);
                         if (string.IsNullOrEmpty(step.Set) || !step.Set.Contains('='))
                         {
-                            var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Set requires 'variable = value' format{lineContent}");
                         }
+                        else
+                        {
+                            // An empty value after '=' is a valid initialize-to-empty assignment
+                            // (e.g. "x = " resets x to ""), so only a missing name is rejected.
+                            var name = step.Set.Substring(0, step.Set.IndexOf('=')).Trim();
+                            if (name.Length == 0)
+                                errors.Add($"{prefix}Line {step.LineNumber}: Set requires a variable name before '='{lineContent}");
+                        }
                         break;
+                    }
 
                     case StepType.UpdateColumn:
                         if (step.UpdateColumn != null)
@@ -5198,7 +5306,87 @@ namespace SSH_Helper.Services.Scripting
 
         private void AddUnknownKeyWarning(string message, int lineNumber)
         {
+            // Unrecognized (typo-class) keys are always blocking errors, enriched with a did-you-mean
+            // suggestion. Deprecation notices use AddDeprecationWarning instead, so a user-supplied key
+            // name that happens to contain "deprecated" is never silently downgraded to a warning.
+            _unknownKeyErrors.Add($"Line {lineNumber}: {AppendDidYouMean(message)}");
+        }
+
+        /// <summary>
+        /// Records a recognized deprecation notice as a non-fatal warning (never a blocking error).
+        /// </summary>
+        private void AddDeprecationWarning(string message, int lineNumber)
+        {
             _warnings.Add($"Line {lineNumber}: {message}");
+        }
+
+        private static readonly Regex UnknownKeyMessagePattern =
+            new(@"^Unknown (\w+) key '([^']+)'$", RegexOptions.Compiled);
+
+        private static string AppendDidYouMean(string message)
+        {
+            var match = UnknownKeyMessagePattern.Match(message);
+            if (!match.Success)
+                return message;
+
+            var suggestion = SuggestClosest(match.Groups[2].Value, GetCandidateKeys(match.Groups[1].Value));
+            return suggestion == null ? message : $"{message}. Did you mean '{suggestion}'?";
+        }
+
+        private static IEnumerable<string> GetCandidateKeys(string command)
+        {
+            var candidates = new List<string>(CommonStepOptionKeys);
+            if (CommandOptionKeys.TryGetValue(command, out var commandKeys))
+                candidates.AddRange(commandKeys);
+            if (StepRootOptionKeysByCommand.TryGetValue(command, out var rootKeys))
+                candidates.AddRange(rootKeys);
+
+            // At step root ("Unknown step key '...'"), an unrecognized key may be a misspelled
+            // command name, so command names are also valid suggestion candidates.
+            if (string.Equals(command, "step", StringComparison.OrdinalIgnoreCase))
+                candidates.AddRange(KnownStepKeys);
+
+            return candidates;
+        }
+
+        private static string? SuggestClosest(string input, IEnumerable<string> candidates)
+        {
+            // Skip short/ambiguous tokens to avoid noisy suggestions.
+            if (string.IsNullOrEmpty(input) || input.Length <= 2)
+                return null;
+
+            string? best = null;
+            int bestDistance = int.MaxValue;
+            foreach (var candidate in candidates)
+            {
+                if (string.IsNullOrEmpty(candidate))
+                    continue;
+                var distance = LevenshteinDistance(input, candidate);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = candidate;
+                }
+            }
+
+            var threshold = Math.Max(2, input.Length / 3);
+            return bestDistance <= threshold ? best : null;
+        }
+
+        private static int LevenshteinDistance(string a, string b)
+        {
+            var d = new int[a.Length + 1, b.Length + 1];
+            for (int i = 0; i <= a.Length; i++) d[i, 0] = i;
+            for (int j = 0; j <= b.Length; j++) d[0, j] = j;
+            for (int i = 1; i <= a.Length; i++)
+            {
+                for (int j = 1; j <= b.Length; j++)
+                {
+                    var cost = char.ToLowerInvariant(a[i - 1]) == char.ToLowerInvariant(b[j - 1]) ? 0 : 1;
+                    d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + cost);
+                }
+            }
+            return d[a.Length, b.Length];
         }
     }
 

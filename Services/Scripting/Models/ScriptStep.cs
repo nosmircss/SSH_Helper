@@ -35,6 +35,13 @@ namespace SSH_Helper.Services.Scripting.Models
         /// </summary>
         public List<string> ParseErrors { get; } = new();
 
+        /// <summary>
+        /// Set when this step's mapping contained an unrecognized step-root key (reported as an
+        /// "Unknown step key" error). For a step with no recognized command, this means a misspelled
+        /// command was already flagged, so the generic "no recognized command" error is redundant.
+        /// </summary>
+        public bool HasUnknownStepKey { get; set; }
+
         // ===== Command Types =====
         // Only one of these should be set per step
 
@@ -86,6 +93,11 @@ namespace SSH_Helper.Services.Scripting.Models
         /// While loop condition.
         /// </summary>
         public string? While { get; set; }
+
+        /// <summary>
+        /// Repeat-until loop exit condition. The body runs at least once; the loop exits when this becomes true.
+        /// </summary>
+        public string? Until { get; set; }
 
         /// <summary>
         /// Readfile command - reads a text file into a variable.
@@ -371,6 +383,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (!string.IsNullOrEmpty(If)) return StepType.If;
             if (!string.IsNullOrEmpty(Foreach)) return StepType.Foreach;
             if (!string.IsNullOrEmpty(While)) return StepType.While;
+            if (!string.IsNullOrEmpty(Until)) return StepType.Repeat;
             if (Try != null || Catch != null || Finally != null) return StepType.Try;
             if (BreakLoop) return StepType.Break;
             if (ContinueLoop) return StepType.Continue;
@@ -1396,6 +1409,7 @@ namespace SSH_Helper.Services.Scripting.Models
         If,
         Foreach,
         While,
+        Repeat,
         Try,
         Break,
         Continue,

@@ -8,6 +8,8 @@ import {
   BackgroundVariant,
   type Node,
   type Edge,
+  type Connection,
+  type FinalConnectionState,
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -19,6 +21,8 @@ import BaseBlock from './nodes/BaseBlock';
 import CommentNode from './nodes/CommentNode';
 import StartNode from './nodes/StartNode';
 import AnimatedEdge from './nodes/AnimatedEdge';
+import { EdgeMarkers } from './nodes/EdgeMarkers';
+import BranchBandsLayer from './nodes/BranchBandsLayer';
 import Palette from './panels/Palette';
 import Properties from './panels/Properties';
 import RightPanel from './panels/RightPanel';
@@ -27,12 +31,16 @@ import HostBar from './panels/HostBar';
 import VariableInspector from './panels/VariableInspector';
 import OutputPreview from './panels/OutputPreview';
 import DebugPanel from './panels/DebugPanel';
+import ProblemsPanel from './panels/ProblemsPanel';
+import ConnectionNotice from './panels/ConnectionNotice';
 import SearchOverlay from './panels/SearchOverlay';
 import { sendLayoutAutosave } from './utils/layoutAutosave';
 import TimelinePanel from './panels/TimelinePanel';
 import BlockContextMenu from './panels/BlockContextMenu';
 import EdgeContextMenu from './panels/EdgeContextMenu';
 import { blockDefMap, categoryColors } from './blockDefs/registry';
+import { resolveCssVar } from './utils/tokens';
+import { isConnectionAllowed } from './utils/connectionRules';
 
 // Register custom node types
 const nodeTypes = {
@@ -78,11 +86,11 @@ function FlowCanvasInner() {
   const hideEdgeContextMenu = useFlowStore((s) => s.hideEdgeContextMenu);
   const pushSnapshot = useFlowStore((s) => s.pushSnapshot);
   const theme = useFlowStore((s) => s.theme);
+  const reducedMotion = useFlowStore((s) => s.reducedMotion);
   const snapToGrid = useFlowStore((s) => s.snapToGrid);
   const gridSize = useFlowStore((s) => s.gridSize);
   const searchResults = useFlowStore((s) => s.searchResults);
   const searchIndex = useFlowStore((s) => s.searchIndex);
-  const isRunning = useFlowStore((s) => s.isRunning);
   const panelsVisible = useFlowStore((s) => s.panelsVisible);
   const variables = useFlowStore((s) => s.variables);
   const paused = useFlowStore((s) => s.paused);
@@ -106,6 +114,46 @@ function FlowCanvasInner() {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  // Toggle the global reduced-motion kill switch class on <body>.
+  useEffect(() => {
+    document.body.classList.toggle('fc-reduced-motion', reducedMotion);
+  }, [reducedMotion]);
+
+  // Reject illegal drop targets while dragging a connection. Reads getState() so it always
+  // sees current nodes/edges without re-subscribing (returning false aborts the drop in v12).
+  const isValidConnection = useCallback(
+    (conn: Connection | Edge) =>
+      isConnectionAllowed(conn as Connection, useFlowStore.getState().nodes, useFlowStore.getState().edges).ok,
+    [],
+  );
+
+  // When isValidConnection blocks a drop, ReactFlow never calls onConnect — so surface the
+  // specific rejection reason here. v12 fires onConnect (which ADDS the edge) BEFORE
+  // onConnectEnd, so we MUST NOT recompute the verdict for accepted drops: the just-added edge
+  // would trip the duplicate/fan-in checks and flash a false notice. Gate on state.isValid:
+  // it carries isValidConnection's last result, so `=== false` means the drop was rejected and
+  // onConnect never ran (the edge is absent, the recomputed reason is the real one).
+  const onConnectEnd = useCallback((_event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+    if (state.isValid !== false) return; // accepted, or dropped on empty canvas — nothing to explain
+    const { fromHandle, toHandle } = state;
+    if (!fromHandle || !toHandle) return; // no concrete handle pair to describe
+
+    const source = fromHandle.type === 'source' ? fromHandle : toHandle;
+    const target = fromHandle.type === 'source' ? toHandle : fromHandle;
+    const connection: Connection = {
+      source: source.nodeId,
+      target: target.nodeId,
+      sourceHandle: source.id ?? null,
+      targetHandle: target.id ?? null,
+    };
+
+    const store = useFlowStore.getState();
+    const verdict = isConnectionAllowed(connection, store.nodes, store.edges);
+    if (!verdict.ok) {
+      store.showConnectionNotice(verdict.reason ?? 'Connection not allowed.');
+    }
+  }, []);
 
   // Capture one undo snapshot at drag start (pre-move state).
   const onNodeDragStart = useCallback(() => {
@@ -277,20 +325,32 @@ function FlowCanvasInner() {
     ].filter(Boolean).join(' ') || undefined,
   }));
 
-  // Theme-dependent colors
-  const isDark = theme === 'dark';
-  const canvasBg = isDark ? '#1a1a2e' : '#f5f5f8';
-  const controlsBg = isDark ? '#222244' : '#e8e8f0';
-  const controlsBorder = isDark ? '#2a2a4a' : '#d0d0d8';
-  const minimapBg = isDark ? '#12122a' : '#e0e0e8';
-  const minimapMask = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.6)';
-  const dotColor = isDark ? '#2a2a4a' : '#c0c0c8';
+  // Canvas ships dark-only; values come from the token layer (styles/tokens.css).
+  const canvasBg = 'var(--fc-canvas-bg)';
+  const controlsBg = 'var(--fc-surface-1)';
+  const controlsBorder = 'var(--fc-border)';
+  const minimapBg = 'var(--fc-surface-0)';
+  const minimapMask = 'var(--fc-overlay-scrim)';
+  const dotColor = 'var(--fc-grid-dot)';
+  const selectedStroke = 'var(--fc-accent)';
 
-  // Build enhanced edges with animated type when running + selection highlight
-  const selectedStroke = isDark ? '#4a9eff' : '#2563eb';
+  // SVG presentation attributes in WebView2 may not accept var(), so resolve the minimap's
+  // mask/background/node colors to concrete strings once. CSS contexts (Background/Controls)
+  // keep the var() strings above.
+  const minimapColors = useMemo(() => ({
+    mask: resolveCssVar('var(--fc-overlay-scrim)', 'rgba(0,0,0,0.6)'),
+    bg: resolveCssVar('var(--fc-surface-0)', '#12122a'),
+    fallback: resolveCssVar('var(--fc-accent)', '#4a9eff'),
+    byCategory: Object.fromEntries(
+      (Object.keys(categoryColors) as Array<keyof typeof categoryColors>)
+        .map((k) => [k, resolveCssVar(categoryColors[k].border, '#4a9eff')]),
+    ),
+  }), []);
+
+  // Build enhanced edges — all edges use AnimatedEdge (rest + running) + selection highlight
   const displayEdges = edges.map((e) => ({
     ...e,
-    ...(isRunning ? { type: 'animated' } : {}),
+    type: 'animated',
     selected: selectedEdgeIds.has(e.id),
     style: {
       ...e.style,
@@ -302,6 +362,7 @@ function FlowCanvasInner() {
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <EdgeMarkers />
       <Toolbar />
       <HostBar />
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
@@ -314,6 +375,8 @@ function FlowCanvasInner() {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              isValidConnection={isValidConnection}
+              onConnectEnd={onConnectEnd}
               onDragOver={onDragOver}
               onDrop={onDrop}
               onInit={(instance) => { reactFlowInstance.current = instance; }}
@@ -334,23 +397,27 @@ function FlowCanvasInner() {
               fitViewOptions={{ maxZoom: 0.85, padding: 0.15 }}
               proOptions={{ hideAttribution: true }}
               style={{ background: canvasBg }}
-              defaultEdgeOptions={{ type: 'smoothstep', style: { stroke: isDark ? '#555' : '#aaa' } }}
+              defaultEdgeOptions={{ type: 'animated', style: { stroke: 'var(--fc-edge-idle)' } }}
             >
+              <BranchBandsLayer />
               <Controls
                 style={{ background: controlsBg, borderColor: controlsBorder, borderRadius: '6px' }}
               />
               <MiniMap
-                style={{ background: minimapBg, borderColor: controlsBorder, borderRadius: '6px' }}
+                // pointer-events:none so the overview never swallows clicks meant for a node
+                // beneath it (it isn't pannable/zoomable, so this removes no interaction).
+                style={{ background: minimapBg, borderColor: controlsBorder, borderRadius: '6px', pointerEvents: 'none' }}
                 nodeColor={(node) => {
                   const bt = (node.data as any)?.blockType;
                   const def = bt ? blockDefMap.get(bt) : null;
-                  return def ? categoryColors[def.category].border : '#4a9eff';
+                  return def ? minimapColors.byCategory[def.category] ?? minimapColors.fallback : minimapColors.fallback;
                 }}
-                maskColor={minimapMask}
+                maskColor={minimapColors.mask}
               />
               <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={dotColor} />
             </ReactFlow>
             <SearchOverlay />
+            <ConnectionNotice />
             <BlockContextMenu />
             <EdgeContextMenu />
           </div>
@@ -368,6 +435,7 @@ function FlowCanvasInner() {
           {panelsVisible.timeline && <TimelinePanel />}
         </RightPanel>
         <DebugPanel />
+        <ProblemsPanel />
       </div>
     </div>
   );

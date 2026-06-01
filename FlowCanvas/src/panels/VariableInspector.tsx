@@ -31,7 +31,7 @@ export default function VariableInspector() {
 
   return (
     <div style={{
-      borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
+      borderTop: '1px solid var(--fc-panel-border)',
       maxHeight: '40%',
       display: 'flex',
       flexDirection: 'column',
@@ -39,16 +39,16 @@ export default function VariableInspector() {
     }}>
       <div style={{
         padding: '6px 10px',
-        background: 'var(--fc-header-bg, #1a1a3a)',
-        borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)',
+        background: 'var(--fc-header-bg)',
+        borderBottom: '1px solid var(--fc-panel-border)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         flexShrink: 0,
       }}>
-        <span style={{ fontSize: 12, color: 'var(--fc-text-secondary, #888)', fontWeight: 600 }}>Variables</span>
+        <span style={{ fontSize: 12, color: 'var(--fc-text-secondary)', fontWeight: 600 }}>Variables</span>
         <button onClick={() => togglePanel('variables')} style={{
-          background: 'none', border: 'none', color: 'var(--fc-text-muted, #555)',
+          background: 'none', border: 'none', color: 'var(--fc-text-muted)',
           cursor: 'pointer', fontSize: 14, padding: 0,
         }}>&times;</button>
       </div>
@@ -62,10 +62,10 @@ export default function VariableInspector() {
           style={{
             width: '100%',
             padding: '3px 6px',
-            background: 'var(--fc-input-bg, #0d1117)',
-            border: '1px solid var(--fc-panel-border, #2a2a4a)',
+            background: 'var(--fc-input-bg)',
+            border: '1px solid var(--fc-panel-border)',
             borderRadius: 3,
-            color: 'var(--fc-text, #ccc)',
+            color: 'var(--fc-text)',
             fontSize: 11,
             outline: 'none',
           }}
@@ -74,7 +74,7 @@ export default function VariableInspector() {
 
       <div style={{ overflowY: 'auto', flex: 1, padding: '4px 8px' }}>
         {filtered.length === 0 ? (
-          <div style={{ color: 'var(--fc-text-muted, #555)', fontSize: 11, padding: '8px 0', textAlign: 'center' }}>
+          <div style={{ color: 'var(--fc-text-muted)', fontSize: 11, padding: '8px 0', textAlign: 'center' }}>
             {variables.length === 0 ? 'No variables set' : 'No matches'}
           </div>
         ) : (
@@ -93,40 +93,40 @@ export default function VariableInspector() {
                   fontFamily: 'monospace',
                   fontSize: 11,
                   lineHeight: 1.8,
-                  borderBottom: '1px solid var(--fc-canvas-bg, #1a1a2e)',
+                  borderBottom: '1px solid var(--fc-canvas-bg)',
                   padding: '2px 0',
                   transition: 'background-color 0.3s ease',
-                  backgroundColor: v.changed ? 'rgba(224, 192, 64, 0.15)' : 'transparent',
-                  borderLeft: v.changed ? '2px solid #e0c040' : '2px solid transparent',
+                  backgroundColor: v.changed ? 'var(--fc-glow-warning-soft)' : 'transparent',
+                  borderLeft: v.changed ? '2px solid var(--fc-state-warning)' : '2px solid transparent',
                   paddingLeft: v.changed ? 6 : 2,
                   cursor: isTruncated ? 'pointer' : 'default',
                 }}
               >
-                <span style={{ color: '#e0c040' }}>{v.name}</span>
+                <span style={{ color: 'var(--fc-state-warning)' }}>{v.name}</span>
                 {isExpanded && (
-                  <span style={{ color: 'var(--fc-text-muted, #555)', fontSize: 9, marginLeft: 4, cursor: 'pointer' }} title="Click to collapse">▼</span>
+                  <span style={{ color: 'var(--fc-text-muted)', fontSize: 9, marginLeft: 4, cursor: 'pointer' }} title="Click to collapse">▼</span>
                 )}
-                <span style={{ color: 'var(--fc-text-muted, #555)' }}> = </span>
+                <span style={{ color: 'var(--fc-text-muted)' }}> = </span>
                 {!isExpanded ? (
                   <span style={{
-                    color: '#8adb8a',
+                    color: 'var(--fc-state-success)',
                     transition: 'color 0.3s ease',
                     fontWeight: v.changed ? 700 : 400,
                   }}>
                     {shortDisplay}
                     {isTruncated && (
-                      <span style={{ color: 'var(--fc-text-muted, #555)', fontSize: 9, marginLeft: 4 }}>▶</span>
+                      <span style={{ color: 'var(--fc-text-muted)', fontSize: 9, marginLeft: 4 }}>▶</span>
                     )}
                   </span>
                 ) : (
                   <div
                     onClick={(e) => e.stopPropagation()}
                     style={{
-                      color: '#8adb8a',
+                      color: 'var(--fc-state-success)',
                       fontWeight: v.changed ? 700 : 400,
                       marginTop: 2,
                       padding: '4px 6px',
-                      background: 'rgba(0,0,0,0.25)',
+                      background: 'var(--fc-overlay-scrim)',
                       borderRadius: 3,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-all',

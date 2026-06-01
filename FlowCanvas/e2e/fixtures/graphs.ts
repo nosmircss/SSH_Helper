@@ -337,6 +337,90 @@ export function createRequiredMarkersFixture(): GraphFixture {
   };
 }
 
+// Linear chain (__start__ → g-a → g-b → g-c) plus a free node (g-free). Supports the
+// connection-guard gesture cases: self-loop (g-a→g-a), duplicate (g-a→g-b again),
+// second-plain-successor (g-a→g-free, g-a already has g-b), fan-in (g-free→g-b),
+// and cycle (g-c→g-a). The chain is wide enough that handles don't overlap during drags.
+export function createConnectionGuardFixture(): GraphFixture {
+  return {
+    nodes: [
+      {
+        id: '__start__',
+        type: 'start',
+        position: { x: 80, y: 20 },
+        data: { blockType: '_start', label: 'Start', props: {} },
+      },
+      {
+        id: 'g-a',
+        type: 'block',
+        position: { x: 80, y: 160 },
+        data: { blockType: 'print', label: 'A', props: { message: 'a' } },
+      },
+      {
+        id: 'g-b',
+        type: 'block',
+        position: { x: 80, y: 280 },
+        data: { blockType: 'print', label: 'B', props: { message: 'b' } },
+      },
+      {
+        id: 'g-c',
+        type: 'block',
+        position: { x: 80, y: 400 },
+        data: { blockType: 'print', label: 'C', props: { message: 'c' } },
+      },
+      {
+        id: 'g-free',
+        type: 'block',
+        position: { x: 380, y: 160 },
+        data: { blockType: 'print', label: 'Free', props: { message: 'free' } },
+      },
+    ],
+    edges: [
+      { id: 'g-start-a', source: '__start__', target: 'g-a' },
+      { id: 'g-a-b', source: 'g-a', target: 'g-b' },
+      { id: 'g-b-c', source: 'g-b', target: 'g-c' },
+    ],
+  };
+}
+
+// Pre-existing fan-in (two edges into g-sink). Used to prove the guard does NOT gate the
+// load path — an imported graph with fan-in must still load intact (guard runs on new drags only).
+export function createFanInLoadFixture(): GraphFixture {
+  return {
+    nodes: [
+      {
+        id: '__start__',
+        type: 'start',
+        position: { x: 80, y: 20 },
+        data: { blockType: '_start', label: 'Start', props: {} },
+      },
+      {
+        id: 'g-src1',
+        type: 'block',
+        position: { x: 40, y: 160 },
+        data: { blockType: 'print', label: 'Src1', props: { message: 's1' } },
+      },
+      {
+        id: 'g-src2',
+        type: 'block',
+        position: { x: 320, y: 160 },
+        data: { blockType: 'print', label: 'Src2', props: { message: 's2' } },
+      },
+      {
+        id: 'g-sink',
+        type: 'block',
+        position: { x: 180, y: 320 },
+        data: { blockType: 'print', label: 'Sink', props: { message: 'sink' } },
+      },
+    ],
+    edges: [
+      { id: 'g-start-src1', source: '__start__', target: 'g-src1' },
+      { id: 'g-src1-sink', source: 'g-src1', target: 'g-sink' },
+      { id: 'g-src2-sink', source: 'g-src2', target: 'g-sink' },
+    ],
+  };
+}
+
 export function createImportedChildEditingFixture(): GraphFixture {
   return {
     nodes: [
@@ -393,6 +477,30 @@ export function createImportedChildEditingFixture(): GraphFixture {
           branchPath: 'then',
         },
       },
+    ],
+  };
+}
+
+// An IMPORTED if/then/else, faithfully mirroring what FlowCanvasBridge produces: branch edges
+// carry NO data.branchPath — only style.stroke (branch color), a label, and (for else) the
+// "false" sourceHandle. Branch identity lives on the child nodes' props._stepPath / _isChildOf.
+// This exercises the imported-graph correlation path (the primary preset case), not the
+// canvas-built data.branchPath path. A run can light the taken branch and fade the untaken one.
+export function createBranchPathFixture(): GraphFixture {
+  return {
+    nodes: [
+      { id: '__start__', type: 'start', position: { x: 80, y: 20 }, data: { blockType: '_start', label: 'Start', props: {} } },
+      { id: 'if-1', type: 'block', position: { x: 80, y: 160 }, data: { blockType: 'if', label: 'If', props: { condition: '${enabled}', _stepPath: 'steps/0' } } },
+      { id: 'then-1', type: 'block', position: { x: 40, y: 320 }, data: { blockType: 'print', label: 'Then', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/0', _branchLabel: 'then', message: 'then-branch' } } },
+      { id: 'else-1', type: 'block', position: { x: 360, y: 320 }, data: { blockType: 'print', label: 'Else', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/else/0', _branchLabel: 'else', message: 'else-branch' } } },
+    ],
+    edges: [
+      // Spine edge mirrors FlowCanvasBridge: imported plain edges carry a literal grey hex
+      // (#666 for start→first), NOT the idle token — guards the cyan promotion path for imports.
+      { id: 'edge-start-if', source: '__start__', target: 'if-1', style: { stroke: '#666' } },
+      // Imported branch edges: branch color in style.stroke, label, no data.branchPath.
+      { id: 'edge-if-then', source: 'if-1', target: 'then-1', label: 'then', style: { stroke: 'var(--fc-branch-then)' } },
+      { id: 'edge-if-else', source: 'if-1', target: 'else-1', sourceHandle: 'false', label: 'else', style: { stroke: 'var(--fc-branch-else)' } },
     ],
   };
 }

@@ -5,6 +5,8 @@ import { useFlowStore } from '../stores/useFlowStore';
 import { messageBus } from '../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import type { DataBlockTestResult } from '../stores/slices/executionSlice';
+import { mix } from '../utils/tokens';
+import { branchColorVar } from '../utils/branchBands';
 
 /**
  * Buffered text-like input state that avoids stale blur commits.
@@ -317,9 +319,9 @@ function ChoiceOptionsEditor({
           style={{
             padding: '3px 8px',
             borderRadius: 4,
-            border: `1px solid ${state.mode === 'source' ? colors.border : '#2a2a4a'}`,
-            background: state.mode === 'source' ? '#1d2f4a' : '#141b2c',
-            color: state.mode === 'source' ? '#d4e6ff' : 'var(--fc-text-secondary, #888)',
+            border: `1px solid ${state.mode === 'source' ? colors.border : 'var(--fc-border)'}`,
+            background: state.mode === 'source' ? 'var(--fc-accent-surface)' : 'var(--fc-surface-2)',
+            color: state.mode === 'source' ? 'var(--fc-accent-text)' : 'var(--fc-text-secondary)',
             fontSize: 11,
             cursor: 'pointer',
           }}
@@ -334,9 +336,9 @@ function ChoiceOptionsEditor({
           style={{
             padding: '3px 8px',
             borderRadius: 4,
-            border: `1px solid ${state.mode === 'static' ? colors.border : '#2a2a4a'}`,
-            background: state.mode === 'static' ? '#1d2f4a' : '#141b2c',
-            color: state.mode === 'static' ? '#d4e6ff' : 'var(--fc-text-secondary, #888)',
+            border: `1px solid ${state.mode === 'static' ? colors.border : 'var(--fc-border)'}`,
+            background: state.mode === 'static' ? 'var(--fc-accent-surface)' : 'var(--fc-surface-2)',
+            color: state.mode === 'static' ? 'var(--fc-accent-text)' : 'var(--fc-text-secondary)',
             fontSize: 11,
             cursor: 'pointer',
           }}
@@ -358,10 +360,10 @@ function ChoiceOptionsEditor({
             style={{
               width: '100%',
               padding: '4px 6px',
-              background: 'var(--fc-input-bg, #0d1117)',
-              border: `1px solid ${(error ? '#e74c3c' : `${colors.border}44`)}`,
+              background: 'var(--fc-input-bg)',
+              border: `1px solid ${error ? 'var(--fc-state-error)' : mix(colors.border, 27)}`,
               borderRadius: 4,
-              color: 'var(--fc-text, #ccc)',
+              color: 'var(--fc-text)',
               fontSize: 12,
               outline: 'none',
               fontFamily: 'monospace',
@@ -381,10 +383,10 @@ function ChoiceOptionsEditor({
                 style={{
                   minWidth: 160,
                   padding: '2px 6px',
-                  background: 'var(--fc-input-bg, #0d1117)',
-                  border: '1px solid #2a2a4a',
+                  background: 'var(--fc-input-bg)',
+                  border: '1px solid var(--fc-border)',
                   borderRadius: 4,
-                  color: 'var(--fc-text-secondary, #aaa)',
+                  color: 'var(--fc-text-secondary)',
                   fontSize: 11,
                   outline: 'none',
                 }}
@@ -416,10 +418,10 @@ function ChoiceOptionsEditor({
                 style={{
                   width: '100%',
                   padding: '4px 6px',
-                  background: 'var(--fc-input-bg, #0d1117)',
-                  border: `1px solid ${(error ? '#e74c3c' : `${colors.border}44`)}`,
+                  background: 'var(--fc-input-bg)',
+                  border: `1px solid ${error ? 'var(--fc-state-error)' : mix(colors.border, 27)}`,
                   borderRadius: 4,
-                  color: 'var(--fc-text, #ccc)',
+                  color: 'var(--fc-text)',
                   fontSize: 12,
                   outline: 'none',
                 }}
@@ -433,10 +435,10 @@ function ChoiceOptionsEditor({
                 style={{
                   width: '100%',
                   padding: '4px 6px',
-                  background: 'var(--fc-input-bg, #0d1117)',
-                  border: `1px solid ${(error ? '#e74c3c' : `${colors.border}44`)}`,
+                  background: 'var(--fc-input-bg)',
+                  border: `1px solid ${error ? 'var(--fc-state-error)' : mix(colors.border, 27)}`,
                   borderRadius: 4,
-                  color: 'var(--fc-text, #ccc)',
+                  color: 'var(--fc-text)',
                   fontSize: 12,
                   outline: 'none',
                 }}
@@ -481,10 +483,10 @@ function ChoiceOptionsEditor({
             style={{
               alignSelf: 'flex-start',
               padding: '4px 8px',
-              border: `1px solid ${colors.border}66`,
+              border: `1px solid ${mix(colors.border, 40)}`,
               borderRadius: 4,
-              background: '#1f2937',
-              color: 'var(--fc-text, #ccc)',
+              background: 'var(--fc-button-bg)',
+              color: 'var(--fc-text)',
               fontSize: 11,
               cursor: 'pointer',
             }}
@@ -497,7 +499,7 @@ function ChoiceOptionsEditor({
       {error && (
         <div
           data-testid={`${fieldTestId}-error`}
-          style={{ color: '#e74c3c', fontSize: 11 }}
+          style={{ color: 'var(--fc-state-error)', fontSize: 11 }}
         >
           {error}
         </div>
@@ -540,10 +542,10 @@ function PropertyField({
   const inputStyle: React.CSSProperties = {
     width: '100%',
     padding: '4px 6px',
-    background: 'var(--fc-input-bg, #0d1117)',
-    border: `1px solid ${invalid ? '#e74c3c' : `${colors.border}44`}`,
+    background: 'var(--fc-input-bg)',
+    border: `1px solid ${invalid ? 'var(--fc-state-error)' : mix(colors.border, 27)}`,
     borderRadius: 4,
-    color: 'var(--fc-text, #ccc)',
+    color: 'var(--fc-text)',
     fontSize: 12,
     fontFamily: def.type === 'code' ? 'monospace' : 'inherit',
     outline: 'none',
@@ -627,10 +629,10 @@ function PropertyField({
           style={{
             minWidth: 160,
             padding: '2px 6px',
-            background: 'var(--fc-input-bg, #0d1117)',
-            border: '1px solid #2a2a4a',
+            background: 'var(--fc-input-bg)',
+            border: '1px solid var(--fc-border)',
             borderRadius: 4,
-            color: 'var(--fc-text-secondary, #aaa)',
+            color: 'var(--fc-text-secondary)',
             fontSize: 11,
             outline: 'none',
           }}
@@ -659,7 +661,7 @@ function PropertyField({
   switch (def.type) {
     case 'boolean':
       return (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fc-text-secondary, #aaa)', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fc-text-secondary)', cursor: 'pointer' }}>
           <input
             data-testid={`${fieldTestId}-input`}
             type="checkbox"
@@ -756,10 +758,10 @@ function PropertyField({
                 onClick={requestPathBrowse}
                 style={{
                   padding: '4px 8px',
-                  background: 'var(--fc-button-bg, #1f2937)',
-                  border: `1px solid ${colors.border}66`,
+                  background: 'var(--fc-button-bg)',
+                  border: `1px solid ${mix(colors.border, 40)}`,
                   borderRadius: 4,
-                  color: 'var(--fc-text, #ccc)',
+                  color: 'var(--fc-text)',
                   fontSize: 11,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
@@ -1091,7 +1093,7 @@ function TestDataBlockSection({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ borderTop: '1px solid var(--fc-panel-border, #2a2a4a)', paddingTop: 10 }}>
+      <div style={{ borderTop: '1px solid var(--fc-panel-border)', paddingTop: 10 }}>
         <button
           data-testid="test-data-block-btn"
           onClick={handleTest}
@@ -1104,8 +1106,8 @@ function TestDataBlockSection({
           style={{
             width: '100%',
             padding: '6px 10px',
-            background: disabled ? '#333' : colors.badge,
-            color: disabled ? '#666' : colors.border === '#9b59b6' ? '#fff' : '#000',
+            background: disabled ? 'var(--fc-surface-disabled)' : colors.badge,
+            color: disabled ? 'var(--fc-text-faint)' : colors.border === 'var(--fc-cat-data-border)' ? 'var(--fc-border-selected)' : 'var(--fc-on-accent)',
             border: 'none',
             borderRadius: 4,
             fontSize: 12,
@@ -1127,8 +1129,8 @@ function TestDataBlockSection({
 }
 
 function TestResultDisplay({ result, onDismiss }: { result: DataBlockTestResult; onDismiss: () => void }) {
-  const borderColor = result.success ? '#2ecc71' : '#e74c3c';
-  const bgColor = result.success ? 'rgba(46, 204, 113, 0.08)' : 'rgba(231, 76, 60, 0.08)';
+  const borderColor = result.success ? 'var(--fc-state-success)' : 'var(--fc-state-error)';
+  const bgColor = result.success ? 'var(--fc-glow-success)' : 'var(--fc-glow-error)';
 
   return (
     <div style={{
@@ -1144,7 +1146,7 @@ function TestResultDisplay({ result, onDismiss }: { result: DataBlockTestResult;
           {result.success ? 'Success' : 'Failed'}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 10, color: 'var(--fc-text-muted, #555)' }}>
+          <span style={{ fontSize: 10, color: 'var(--fc-text-muted)' }}>
             {timeAgo(result.timestamp)}
           </span>
           <button
@@ -1152,7 +1154,7 @@ function TestResultDisplay({ result, onDismiss }: { result: DataBlockTestResult;
             style={{
               background: 'none',
               border: 'none',
-              color: 'var(--fc-text-muted, #555)',
+              color: 'var(--fc-text-muted)',
               cursor: 'pointer',
               fontSize: 14,
               padding: 0,
@@ -1165,7 +1167,7 @@ function TestResultDisplay({ result, onDismiss }: { result: DataBlockTestResult;
       </div>
 
       {result.error && (
-        <div style={{ color: '#e74c3c', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <div style={{ color: 'var(--fc-state-error)', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
           {result.error}
         </div>
       )}
@@ -1174,7 +1176,7 @@ function TestResultDisplay({ result, onDismiss }: { result: DataBlockTestResult;
         <div style={{
           fontFamily: 'monospace',
           fontSize: 11,
-          color: 'var(--fc-text, #ccc)',
+          color: 'var(--fc-text)',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           maxHeight: 150,
@@ -1189,12 +1191,12 @@ function TestResultDisplay({ result, onDismiss }: { result: DataBlockTestResult;
         <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {result.changedKeys.filter((k) => k !== '_timestamp').map((key) => (
             <span key={key} style={{
-              background: 'rgba(224, 192, 64, 0.15)',
-              border: '1px solid rgba(224, 192, 64, 0.3)',
+              background: 'var(--fc-glow-warning-soft)',
+              border: '1px solid var(--fc-glow-warning)',
               borderRadius: 3,
               padding: '1px 5px',
               fontSize: 10,
-              color: '#e0c040',
+              color: 'var(--fc-state-warning)',
               fontFamily: 'monospace',
             }}>
               {key}
@@ -1272,15 +1274,15 @@ function StartProperties({
     (val) => onPropChange('subroutines_yaml', val.length > 0 ? val : undefined),
   );
 
-  const colors = { text: '#80d4a0', border: '#2ecc71', bg: '#0d2a1a' };
+  const colors = { text: 'var(--fc-start-chip-text)', border: 'var(--fc-start-accent)', bg: 'var(--fc-start-grad-to)' };
 
   const inputStyle: React.CSSProperties = {
     width: '100%',
     padding: '4px 6px',
-    background: 'var(--fc-input-bg, #0d1117)',
-    border: `1px solid ${colors.border}44`,
+    background: 'var(--fc-input-bg)',
+    border: `1px solid ${mix(colors.border, 27)}`,
     borderRadius: 4,
-    color: 'var(--fc-text, #ccc)',
+    color: 'var(--fc-text)',
     fontSize: 12,
     outline: 'none',
   };
@@ -1306,11 +1308,11 @@ function StartProperties({
         alignItems: 'center',
         gap: 6,
         paddingBottom: 8,
-        borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)',
+        borderBottom: '1px solid var(--fc-panel-border)',
       }}>
         <span style={{
-          background: '#2ecc71',
-          color: '#000',
+          background: 'var(--fc-start-accent)',
+          color: 'var(--fc-on-accent)',
           fontSize: 10,
           fontWeight: 700,
           padding: '2px 6px',
@@ -1319,14 +1321,14 @@ function StartProperties({
         }}>
           START
         </span>
-        <span style={{ color: 'var(--fc-text, #ccc)', fontSize: 12, fontWeight: 600 }}>
+        <span style={{ color: 'var(--fc-text)', fontSize: 12, fontWeight: 600 }}>
           Script Settings
         </span>
       </div>
 
       {/* Name */}
       <div>
-        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted)', display: 'block', marginBottom: 3 }}>
           Name
         </label>
         <input
@@ -1343,7 +1345,7 @@ function StartProperties({
 
       {/* Description */}
       <div>
-        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted)', display: 'block', marginBottom: 3 }}>
           Description
         </label>
         <textarea
@@ -1360,7 +1362,7 @@ function StartProperties({
 
       {/* Environment */}
       <div>
-        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted)', display: 'block', marginBottom: 3 }}>
           Environment
         </label>
         <input
@@ -1377,7 +1379,7 @@ function StartProperties({
 
       {/* Version */}
       <div>
-        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted)', display: 'block', marginBottom: 3 }}>
           Version
         </label>
         <input
@@ -1394,13 +1396,13 @@ function StartProperties({
 
       {/* Boolean flags */}
       <div style={{
-        borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
+        borderTop: '1px solid var(--fc-panel-border)',
         paddingTop: 10,
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
       }}>
-        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)' }}>Flags</label>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted)' }}>Flags</label>
         {START_BOOL_FIELDS.map((field) => (
           <label
             key={field.key}
@@ -1409,7 +1411,7 @@ function StartProperties({
               alignItems: 'center',
               gap: 6,
               fontSize: 12,
-              color: 'var(--fc-text-secondary, #aaa)',
+              color: 'var(--fc-text-secondary)',
               cursor: 'pointer',
             }}
           >
@@ -1418,7 +1420,7 @@ function StartProperties({
               type="checkbox"
               checked={!!props[field.key]}
               onChange={(e) => onPropChange(field.key, e.target.checked)}
-              style={{ accentColor: '#2ecc71' }}
+              style={{ accentColor: 'var(--fc-start-accent)' }}
             />
             {field.label}
           </label>
@@ -1427,16 +1429,16 @@ function StartProperties({
 
       {/* Advanced YAML sections */}
       <div style={{
-        borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
+        borderTop: '1px solid var(--fc-panel-border)',
         paddingTop: 10,
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
       }}>
-        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)' }}>Advanced Sections (YAML)</label>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted)' }}>Advanced Sections (YAML)</label>
 
         <div>
-          <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+          <label style={{ fontSize: 11, color: 'var(--fc-text-muted)', display: 'block', marginBottom: 3 }}>
             vars
           </label>
           <textarea
@@ -1452,7 +1454,7 @@ function StartProperties({
         </div>
 
         <div>
-          <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+          <label style={{ fontSize: 11, color: 'var(--fc-text-muted)', display: 'block', marginBottom: 3 }}>
             imports
           </label>
           <textarea
@@ -1468,7 +1470,7 @@ function StartProperties({
         </div>
 
         <div>
-          <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+          <label style={{ fontSize: 11, color: 'var(--fc-text-muted)', display: 'block', marginBottom: 3 }}>
             subroutines
           </label>
           <textarea
@@ -1487,19 +1489,19 @@ function StartProperties({
       {/* Read-only summaries for vars and imports */}
       {(varsCount > 0 || importsCount > 0) && (
         <div style={{
-          borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
+          borderTop: '1px solid var(--fc-panel-border)',
           paddingTop: 10,
           display: 'flex',
           flexDirection: 'column',
           gap: 4,
         }}>
           {varsCount > 0 && (
-            <div style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)' }}>
+            <div style={{ fontSize: 11, color: 'var(--fc-text-muted)' }}>
               {varsCount} variable{varsCount !== 1 ? 's' : ''} defined
             </div>
           )}
           {importsCount > 0 && (
-            <div style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)' }}>
+            <div style={{ fontSize: 11, color: 'var(--fc-text-muted)' }}>
               {importsCount} import{importsCount !== 1 ? 's' : ''}
             </div>
           )}
@@ -1510,9 +1512,9 @@ function StartProperties({
       <div style={{
         marginTop: 'auto',
         paddingTop: 12,
-        borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
+        borderTop: '1px solid var(--fc-panel-border)',
         fontSize: 11,
-        color: 'var(--fc-text-muted, #555)',
+        color: 'var(--fc-text-muted)',
         lineHeight: 1.5,
       }}>
         Script-level settings that control execution behavior. These appear in the YAML preamble above the steps.
@@ -1582,7 +1584,7 @@ export default function Properties() {
           justifyContent: 'center',
         }}
       >
-        <span style={{ color: 'var(--fc-text-muted, #555)', fontSize: 12, textAlign: 'center' }}>
+        <span style={{ color: 'var(--fc-text-muted)', fontSize: 12, textAlign: 'center' }}>
           {selectedNodeIds.size} blocks selected
         </span>
       </div>
@@ -1614,7 +1616,7 @@ export default function Properties() {
           justifyContent: 'center',
         }}
       >
-        <span style={{ color: 'var(--fc-text-muted, #555)', fontSize: 12, textAlign: 'center' }}>
+        <span style={{ color: 'var(--fc-text-muted)', fontSize: 12, textAlign: 'center' }}>
           Select a block to edit its properties
         </span>
       </div>
@@ -1623,7 +1625,13 @@ export default function Properties() {
 
   const colors = categoryColors[def.category as BlockCategory];
   const branchLabel = blockData.props?.['_branchLabel'] as string | undefined;
-  const branchColor = blockData.props?.['_branchColor'] as string | undefined;
+  const branchStepPath = blockData.props?.['_stepPath'] as string | undefined;
+  const branchTint = branchColorVar(
+    branchStepPath
+      ? // reuse the same parse as the band layer via the label as a cheap proxy when present
+        (branchLabel ?? branchStepPath)
+      : branchLabel,
+  );
   const groupedProperties: Record<PropertyPaneGroup, PropertyDef[]> = {
     core: [],
     advanced: [],
@@ -1655,9 +1663,9 @@ export default function Properties() {
     return (
       <div key={`${selectedNodeId}-${propDef.key}`} data-testid={fieldTestId}>
         {propDef.type !== 'boolean' && (
-          <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+          <label style={{ fontSize: 11, color: 'var(--fc-text-muted)', display: 'block', marginBottom: 3 }}>
             {propDef.label}
-            {required && <span style={{ color: '#e74c3c', marginLeft: 2 }}>*</span>}
+            {required && <span style={{ color: 'var(--fc-state-error)', marginLeft: 2 }}>*</span>}
           </label>
         )}
         <PropertyField
@@ -1672,14 +1680,14 @@ export default function Properties() {
           invalid={invalid}
         />
         {propDef.helpText && (
-          <div style={{ marginTop: 4, fontSize: 10, color: 'var(--fc-text-muted, #666)' }}>
+          <div style={{ marginTop: 4, fontSize: 10, color: 'var(--fc-text-muted)' }}>
             {propDef.helpText}
           </div>
         )}
         {showInlineError && (
           <div
             data-testid={`${fieldTestId}-error`}
-            style={{ marginTop: 4, color: '#e74c3c', fontSize: 11 }}
+            style={{ marginTop: 4, color: 'var(--fc-state-error)', fontSize: 11 }}
           >
             {validationMessage}
           </div>
@@ -1687,7 +1695,7 @@ export default function Properties() {
         {warningMessage && (
           <div
             data-testid={`${fieldTestId}-warning`}
-            style={{ marginTop: 4, color: '#f1c40f', fontSize: 11 }}
+            style={{ marginTop: 4, color: 'var(--fc-state-warning)', fontSize: 11 }}
           >
             {warningMessage}
           </div>
@@ -1708,7 +1716,7 @@ export default function Properties() {
         gap: 12,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--fc-panel-border)' }}>
         <span style={{
           background: colors.badge,
           color: colors.badgeText,
@@ -1720,7 +1728,7 @@ export default function Properties() {
         }}>
           {def.type}
         </span>
-        <span style={{ color: 'var(--fc-text, #ccc)', fontSize: 12, fontWeight: 600 }}>
+        <span style={{ color: 'var(--fc-text)', fontSize: 12, fontWeight: 600 }}>
           {def.label}
         </span>
       </div>
@@ -1731,14 +1739,14 @@ export default function Properties() {
           alignItems: 'center',
           gap: 6,
           padding: '4px 8px',
-          background: `${branchColor || '#555'}15`,
+          background: mix(branchTint, 8),
           borderRadius: 4,
-          borderLeft: `2px solid ${branchColor || '#555'}`,
+          borderLeft: `2px solid ${branchTint}`,
         }}>
-          <span style={{ fontSize: 10, color: branchColor || '#888', fontWeight: 600, textTransform: 'uppercase' }}>
+          <span style={{ fontSize: 10, color: branchTint, fontWeight: 600, textTransform: 'uppercase' }}>
             {branchLabel}
           </span>
-          <span style={{ fontSize: 10, color: 'var(--fc-text-muted, #666)' }}>branch</span>
+          <span style={{ fontSize: 10, color: 'var(--fc-text-muted)' }}>branch</span>
         </div>
       )}
 
@@ -1753,13 +1761,13 @@ export default function Properties() {
               flexDirection: 'column',
               gap: 8,
               paddingTop: isFirstVisibleSection ? 0 : 8,
-              borderTop: isFirstVisibleSection ? undefined : '1px solid var(--fc-panel-border, #2a2a4a)',
+              borderTop: isFirstVisibleSection ? undefined : '1px solid var(--fc-panel-border)',
             }}
           >
             <div
               style={{
                 fontSize: 10,
-                color: 'var(--fc-text-muted, #666)',
+                color: 'var(--fc-text-muted)',
                 textTransform: 'uppercase',
                 fontWeight: 600,
                 letterSpacing: '0.04em',
@@ -1784,9 +1792,9 @@ export default function Properties() {
       <div style={{
         marginTop: 'auto',
         paddingTop: 12,
-        borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
+        borderTop: '1px solid var(--fc-panel-border)',
         fontSize: 11,
-        color: 'var(--fc-text-muted, #555)',
+        color: 'var(--fc-text-muted)',
         lineHeight: 1.5,
       }}>
         {def.description}

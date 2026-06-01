@@ -7,12 +7,20 @@ import { useFlowStore } from './useFlowStore';
 import type { Node, Edge } from '@xyflow/react';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import type { BlockExecState } from './slices/executionSlice';
+import type { NodeDiagnostic } from './slices/uiSlice';
+import { isConnectionAllowed } from '../utils/connectionRules';
+import type { ConnectionVerdict } from '../utils/connectionRules';
+import type { Connection } from '@xyflow/react';
+import { computeHierarchicalLayout } from '../utils/layout/hierarchicalLayout';
 
 interface FlowCanvasTestHooks {
   onOutgoingMessage?: (msg: unknown) => void;
   setGraphViaActions?: (graph: { nodes?: unknown[]; edges?: unknown[] }) => void;
   clearGraphViaActions?: () => void;
   getGraphSnapshot?: () => { nodes: unknown[]; edges: unknown[] };
+  isConnectionAllowed?: (conn: Connection, nodes: Node[], edges: Edge[]) => ConnectionVerdict;
+  connectViaActions?: (conn: Connection) => void;
+  getConnectionNotice?: () => { message: string; nonce: number } | null;
 }
 
 function cloneForTest<T>(value: T): T {
@@ -97,6 +105,16 @@ function installFlowCanvasTestHooks(store: typeof useFlowStore): void {
     });
   };
 
+  hooks.isConnectionAllowed = (conn, nodes, edges) => isConnectionAllowed(conn, nodes, edges);
+
+  // Drives the real store onConnect path (same code real drags hit) so tests can assert
+  // the guard lets valid connections through and produces identical edge metadata.
+  hooks.connectViaActions = (conn) => store.getState().onConnect(conn);
+
+  // Exposes the live connectionNotice slice so gesture tests can assert a VALID drag never
+  // flashes a notice (regression guard: v12 adds the edge before onConnectEnd runs).
+  hooks.getConnectionNotice = () => store.getState().connectionNotice;
+
   globalWindow.__FLOWCANVAS_TEST_HOOKS__ = hooks;
 }
 
@@ -111,6 +129,15 @@ export function initMessageBridge(): () => void {
         store.getState().setNodes(msg.nodes as Node[]);
         store.getState().setEdges(msg.edges as Edge[]);
         ensureStartNodeExists(store);
+
+        // No saved arrangement → lay it out with the structure-aware engine. Compute then
+        // setNodes once (synchronous, before paint) so there is no flash of raw positions.
+        const hasUserLayout = (msg as { hasUserLayout?: boolean }).hasUserLayout === true;
+        if (!hasUserLayout) {
+          const s = store.getState();
+          store.getState().setNodes(computeHierarchicalLayout(s.nodes, s.edges));
+        }
+
         resetGraphSessionState(store);
 
         // Restore disabled block state from loaded node data
@@ -139,6 +166,14 @@ export function initMessageBridge(): () => void {
         errors,
         warnings,
       });
+
+      const rawDiag = Array.isArray(msg.diagnostics) ? msg.diagnostics : [];
+      const parsed: NodeDiagnostic[] = rawDiag.map((d: any) => ({
+        nodeId: d.nodeId != null ? String(d.nodeId) : undefined,
+        severity: d.severity === 'error' ? 'error' : 'warning',
+        message: String(d.message ?? ''),
+      }));
+      store.getState().setDiagnostics(parsed);
 
       if (!success && errors.length > 0) {
         messageBus.send({ type: 'show-error', message: `Flow Canvas export failed:\n\n${errors.join('\n')}` });
@@ -182,6 +217,7 @@ export function initMessageBridge(): () => void {
 
       // Timeline entry
       if (execState === 'running') {
+        state.setBlockTiming(stepId, Date.now());
         const node = state.nodes.find((n) => n.id === stepId);
         state.addTimelineEntry({
           nodeId: stepId,
@@ -194,6 +230,9 @@ export function initMessageBridge(): () => void {
           ),
         });
       } else if (execState === 'success' || execState === 'error' || execState === 'skipped') {
+        const now = Date.now();
+        const dur = msg.duration != null ? Number(msg.duration) : undefined;
+        state.setBlockTiming(stepId, dur != null ? now - dur : now, now);
         state.updateTimelineEntry(stepId, {
           state: execState,
           endTime: Date.now(),
@@ -205,6 +244,18 @@ export function initMessageBridge(): () => void {
       if (msg.variables && typeof msg.variables === 'object') {
         const changedKeys = Array.isArray(msg.changedKeys) ? msg.changedKeys as string[] : undefined;
         state.setVariablesWithChanges(msg.variables as Record<string, unknown>, changedKeys);
+      }
+
+      // Loop & branch instrumentation (final/summary; arrives with the completion message).
+      // Stored in transient executionSlice Maps — never written onto node.data, so export is unaffected.
+      if (msg.iterationCount != null) {
+        const n = Number(msg.iterationCount);
+        if (Number.isFinite(n) && n >= 0) {
+          state.setLoopIteration(stepId, n);
+        }
+      }
+      if (typeof msg.branchTaken === 'string' && msg.branchTaken.trim().length > 0) {
+        state.setBranchTaken(stepId, msg.branchTaken.trim());
       }
     }),
 
@@ -330,8 +381,24 @@ export function initMessageBridge(): () => void {
         }
         store.getState().restorePanelSizes(sizes);
       }
+      if (typeof msg.heatmapEnabled === 'boolean') {
+        store.getState().restoreHeatmapEnabled(msg.heatmapEnabled);
+      }
+    }),
+
+    // Restore UI prefs from WinForms persisted settings (no echo back to host)
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.prefRestore, (msg) => {
+      if (typeof msg.reducedMotion === 'boolean') {
+        store.getState().restoreReducedMotion(msg.reducedMotion);
+      }
     }),
   ];
+
+  // Seed reduced-motion from the OS preference before announcing readiness so the
+  // body class is correct on first paint. A host `pref-restore` arrives after `ready`
+  // and overrides this seed (explicit toggle stays load-bearing).
+  const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  if (prefersReduced) store.getState().restoreReducedMotion(true);
 
   // Signal ready
   messageBus.sendReady();

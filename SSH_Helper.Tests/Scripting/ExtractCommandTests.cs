@@ -213,4 +213,51 @@ public class ExtractCommandTests
         debugMessages.Should().Contain(msg => msg.Contains("Extract: captured = '") && msg.Contains(longValue));
         debugMessages.Should().NotContain(msg => msg.StartsWith("Extract: captured = '") && msg.Contains("..."));
     }
+
+    [Fact]
+    public async Task ExecuteAsync_NamedGroups_PopulateNamedVariables()
+    {
+        var step = new ScriptStep
+        {
+            Extract = new ExtractOptions
+            {
+                From = "iface_line",
+                Pattern = "(?<iface>\\w+)\\s+(?<state>\\w+)",
+                Into = "full"
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("iface_line", "eth0 up");
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("iface").Should().Be("eth0");
+        context.GetVariableString("state").Should().Be("up");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoNamedGroups_DoesNotCreateStrayVariables()
+    {
+        var step = new ScriptStep
+        {
+            Extract = new ExtractOptions
+            {
+                From = "src",
+                Pattern = "(\\w+)",
+                Into = "captured"
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("src", "hello");
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("captured").Should().Be("hello");
+        context.HasVariable("0").Should().BeFalse();
+        context.HasVariable("1").Should().BeFalse();
+    }
 }
