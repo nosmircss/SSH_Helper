@@ -32,7 +32,7 @@ export function branchColorVar(key: string | undefined): string {
 
 /** Parse the branch segment from a child _stepPath relative to its parent. e.g.
  *  "steps/3/then/0" → "then", "steps/1/cases/0/do/0" → "case", "steps/2/else/0" → "else". */
-function branchKeyFromStepPath(stepPath: string | undefined, branchLabel: string | undefined): string {
+export function branchKeyFromStepPath(stepPath: string | undefined, branchLabel: string | undefined): string {
   if (stepPath) {
     const segs = stepPath.split('/');
     for (let i = segs.length - 1; i >= 0; i--) {
