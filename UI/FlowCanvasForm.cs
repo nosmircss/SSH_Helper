@@ -325,10 +325,13 @@ namespace SSH_Helper.UI
 
         /// <summary>
         /// Sends a load-graph message to display nodes and edges.
+        /// <paramref name="hasUserLayout"/> tells the canvas whether the positions are a
+        /// saved user arrangement (true → keep) or algorithmic defaults (false → the canvas
+        /// will run its hierarchical auto-layout).
         /// </summary>
-        public void LoadGraph(object nodes, object edges)
+        public void LoadGraph(object nodes, object edges, bool hasUserLayout = false)
         {
-            SendMessage(new { type = "load-graph", nodes, edges });
+            SendMessage(new { type = "load-graph", nodes, edges, hasUserLayout });
         }
 
         // Events for messages from the React app

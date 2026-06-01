@@ -6822,7 +6822,8 @@ namespace SSH_Helper
                 var bridge = new FlowCanvasBridge();
                 var (nodes, edges) = bridge.TextToGraph(scriptText);
 
-                // Merge stored canvas layout if the script structure hasn't changed
+                // Merge stored canvas layout if the script structure hasn't changed.
+                bool hasUserLayout = false;
                 if (!string.IsNullOrEmpty(_activePresetName))
                 {
                     var preset = _presetManager.Get(_activePresetName);
@@ -6833,11 +6834,12 @@ namespace SSH_Helper
                         if (string.Equals(currentHash, layout.StructureHash, StringComparison.Ordinal))
                         {
                             FlowCanvasBridge.MergeLayout(nodes, layout);
+                            hasUserLayout = true;
                         }
                     }
                 }
 
-                _flowCanvasForm.LoadGraph(nodes, edges);
+                _flowCanvasForm.LoadGraph(nodes, edges, hasUserLayout);
             }
             catch
             {
