@@ -38,7 +38,10 @@ test.describe('Flow Canvas Live Wires', () => {
 
   test('every edge renders a tokenized arrowhead marker', async ({ page }) => {
     await loadGraphFixture(page, edgeFixture('var(--fc-edge-idle)'));
-    await expect(edgePath(page)).toBeVisible();
+    // Auto-layout stacks src/dst on the spine, so the edge is a purely-vertical (zero-width)
+    // path that getBoundingClientRect reports as hidden. Assert DOM presence; the marker
+    // token below is the actual subject of this test.
+    await expect(edgePath(page)).toHaveCount(1);
     expect(await edgePath(page).getAttribute('marker-end')).toBe('url(#fc-arrow-idle)');
     await expect(page.locator('#fc-arrow-idle')).toHaveCount(1);
   });

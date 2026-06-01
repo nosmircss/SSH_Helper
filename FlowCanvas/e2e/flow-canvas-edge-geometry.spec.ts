@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { GraphFixture } from './fixtures/graphs';
 import {
-  clearOutgoingMessages, installHostMessageCapture, loadGraphFixture, waitForOutgoingMessage,
+  clearOutgoingMessages, installHostMessageCapture, loadGraphFixture, postHostMessage, waitForOutgoingMessage,
 } from './support/harness';
 
 const SHORT = 'Hi';
@@ -69,9 +69,14 @@ test.describe('Flow Canvas Edge Geometry', () => {
   });
 
   test('an X-offset edge keeps its orthogonal (smoothstep) routing', async ({ page }) => {
-    await loadGraphFixture(page, {
+    // hasUserLayout:true keeps the hand-placed X-offset; without it the auto-layout engine
+    // snaps both blocks onto the spine column and collapses the edge to a straight vertical
+    // line (that aligned case is covered by the test above).
+    await postHostMessage(page, {
+      type: 'load-graph',
       nodes: [block('a', 200, 80, SHORT), block('b', 600, 360, SHORT)],
       edges: [{ id: 'e2', source: 'a', target: 'b' }],
+      hasUserLayout: true,
     });
     await expect(page.locator('path#e2')).toBeVisible();
     // smoothstep with borderRadius:8 emits a quadratic-curved corner (Q) on any real bend.

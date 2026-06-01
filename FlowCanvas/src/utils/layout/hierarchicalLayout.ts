@@ -126,13 +126,31 @@ export function placeTree(tree: LayoutTree): Map<string, Point> {
 }
 
 /**
+ * Comments are excluded from the layout tree (see treeBuilder), so once the blocks are
+ * snapped onto the spine the comments keep their pre-import coordinates — which can leave a
+ * comment sitting on top of a block, where its DOM then swallows clicks meant for that block.
+ * Park comments in a gutter to the right of the widest placed node so they never overlap.
+ */
+function placeComments(nodes: Node[], pos: Map<string, Point>): void {
+  const comments = nodes.filter((n) => n.type === 'comment');
+  if (comments.length === 0 || pos.size === 0) return;
+  const gutterX = Math.max(...[...pos.values()].map((p) => p.x)) + LAYOUT.BASE_COLUMN_WIDTH;
+  let y = LAYOUT.NODE_START_Y;
+  for (const c of comments) {
+    pos.set(c.id, { x: gutterX, y });
+    y += LAYOUT.NODE_SPACING_Y;
+  }
+}
+
+/**
  * Structure-aware layout: rebuild the container/branch tree and position it with the
  * smart-hybrid rules. Returns new node objects with updated positions; nodes not in the
- * tree (the start node, comments, orphans the builder left unplaced) keep their position.
+ * tree (the start node, orphans the builder left unplaced) keep their position.
  */
 export function computeHierarchicalLayout(nodes: Node[], edges: Edge[]): Node[] {
   const tree = buildLayoutTree(nodes, edges);
   const pos = placeTree(tree);
+  placeComments(nodes, pos);
   return nodes.map((n) => {
     const p = pos.get(n.id);
     return p ? { ...n, position: p } : n;

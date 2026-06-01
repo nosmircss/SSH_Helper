@@ -404,7 +404,9 @@ function FlowCanvasInner() {
                 style={{ background: controlsBg, borderColor: controlsBorder, borderRadius: '6px' }}
               />
               <MiniMap
-                style={{ background: minimapBg, borderColor: controlsBorder, borderRadius: '6px' }}
+                // pointer-events:none so the overview never swallows clicks meant for a node
+                // beneath it (it isn't pannable/zoomable, so this removes no interaction).
+                style={{ background: minimapBg, borderColor: controlsBorder, borderRadius: '6px', pointerEvents: 'none' }}
                 nodeColor={(node) => {
                   const bt = (node.data as any)?.blockType;
                   const def = bt ? blockDefMap.get(bt) : null;
