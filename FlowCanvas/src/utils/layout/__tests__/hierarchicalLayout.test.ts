@@ -63,3 +63,40 @@ describe('placeTree — multi-branch (fans into side-by-side columns)', () => {
     expect(pos.get('deep')!.y).toBeGreaterThan(pos.get('inner')!.y);
   });
 });
+
+import type { Edge, Node } from '@xyflow/react';
+
+function importedIfElse(): { nodes: Node[]; edges: Edge[] } {
+  const nodes: Node[] = [
+    { id: '__start__', type: 'start', position: { x: 999, y: 999 }, data: { blockType: '_start' } } as Node,
+    { id: 'if-1', type: 'block', position: { x: 7, y: 7 }, data: { blockType: 'if', props: { _stepPath: 'steps/0' } } } as Node,
+    { id: 'then-1', type: 'block', position: { x: 7, y: 7 }, data: { blockType: 'print', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/0', _branchLabel: 'then' } } } as Node,
+    { id: 'else-1', type: 'block', position: { x: 7, y: 7 }, data: { blockType: 'print', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/else/0', _branchLabel: 'else' } } } as Node,
+  ];
+  const edges: Edge[] = [
+    { id: 'e0', source: '__start__', target: 'if-1' } as Edge,
+    { id: 'e1', source: 'if-1', target: 'then-1' } as Edge,
+    { id: 'e2', source: 'if-1', target: 'else-1', sourceHandle: 'false' } as Edge,
+  ];
+  return { nodes, edges };
+}
+
+describe('computeHierarchicalLayout', () => {
+  it('repositions layoutable nodes and leaves the start node untouched', () => {
+    const { nodes, edges } = importedIfElse();
+    const out = computeHierarchicalLayout(nodes, edges);
+    const start = out.find((n) => n.id === '__start__')!;
+    expect(start.position).toEqual({ x: 999, y: 999 }); // start node not in spine, untouched
+    const ifNode = out.find((n) => n.id === 'if-1')!;
+    expect(ifNode.position.x).toBe(LAYOUT.NODE_START_X);
+  });
+
+  it('produces no overlapping branch children', () => {
+    const { nodes, edges } = importedIfElse();
+    const out = computeHierarchicalLayout(nodes, edges);
+    const t = out.find((n) => n.id === 'then-1')!.position;
+    const e = out.find((n) => n.id === 'else-1')!.position;
+    // Different columns, far enough apart to not overlap (>= one node width).
+    expect(Math.abs(t.x - e.x)).toBeGreaterThanOrEqual(LAYOUT.CHILD_NODE_MAX_WIDTH);
+  });
+});

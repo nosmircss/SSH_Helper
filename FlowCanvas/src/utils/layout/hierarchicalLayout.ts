@@ -120,3 +120,17 @@ export function placeTree(tree: LayoutTree): Map<string, Point> {
   }
   return pos;
 }
+
+/**
+ * Structure-aware layout: rebuild the container/branch tree and position it with the
+ * smart-hybrid rules. Returns new node objects with updated positions; nodes not in the
+ * tree (the start node, comments, orphans the builder left unplaced) keep their position.
+ */
+export function computeHierarchicalLayout(nodes: Node[], edges: Edge[]): Node[] {
+  const tree = buildLayoutTree(nodes, edges);
+  const pos = placeTree(tree);
+  return nodes.map((n) => {
+    const p = pos.get(n.id);
+    return p ? { ...n, position: p } : n;
+  });
+}
