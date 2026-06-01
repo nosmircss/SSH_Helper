@@ -11,6 +11,7 @@ import type { NodeDiagnostic } from './slices/uiSlice';
 import { isConnectionAllowed } from '../utils/connectionRules';
 import type { ConnectionVerdict } from '../utils/connectionRules';
 import type { Connection } from '@xyflow/react';
+import { computeHierarchicalLayout } from '../utils/layout/hierarchicalLayout';
 
 interface FlowCanvasTestHooks {
   onOutgoingMessage?: (msg: unknown) => void;
@@ -128,6 +129,15 @@ export function initMessageBridge(): () => void {
         store.getState().setNodes(msg.nodes as Node[]);
         store.getState().setEdges(msg.edges as Edge[]);
         ensureStartNodeExists(store);
+
+        // No saved arrangement → lay it out with the structure-aware engine. Compute then
+        // setNodes once (synchronous, before paint) so there is no flash of raw positions.
+        const hasUserLayout = (msg as { hasUserLayout?: boolean }).hasUserLayout === true;
+        if (!hasUserLayout) {
+          const s = store.getState();
+          store.getState().setNodes(computeHierarchicalLayout(s.nodes, s.edges));
+        }
+
         resetGraphSessionState(store);
 
         // Restore disabled block state from loaded node data

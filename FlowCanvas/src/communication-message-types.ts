@@ -1,3 +1,9 @@
+/**
+ * Note: the host also sends a `load-graph` message (handled directly in messageBridge.ts):
+ *   { type: 'load-graph', nodes, edges, hasUserLayout?: boolean }
+ * `hasUserLayout` true = positions are a saved user arrangement (keep them);
+ * false/absent = the canvas runs computeHierarchicalLayout() on import.
+ */
 export const CANVAS_HOST_MESSAGES = {
   incoming: {
     applyResult: 'apply-result',
