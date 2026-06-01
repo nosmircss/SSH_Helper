@@ -60,7 +60,7 @@ namespace SSH_Helper.Services
                     .ToList();
         }
 
-        private const double NodeSpacingY = 85;
+        private const double NodeSpacingY = 106;  // ~25% looser than the original 85 for more breathing room
         private const double SingleBranchChildOffset = 70;
         private const double NodeStartX = 250;
         private const double NodeStartY = 40;
@@ -72,10 +72,7 @@ namespace SSH_Helper.Services
         // MinColumnWidth must be >= max child node width + gap to prevent overlap
         private const double ChildNodeMaxWidth = 260;
         private const double ColumnGap = 30;
-        private const double BaseColumnWidth = ChildNodeMaxWidth + ColumnGap;  // 290
-        private const double ColumnWidthDecay = 0.92;
         private const double MinColumnWidth = ChildNodeMaxWidth + ColumnGap;   // 290 — never narrower than a node
-        private const double MaxSpreadWidth = 1400;
 
         // Branch edge colors
         private const string ColorThen = "#2ecc71";
@@ -564,47 +561,20 @@ namespace SSH_Helper.Services
             JArray nodes,
             JArray edges)
         {
-            // Pass 1: Measure each branch width
-            var branchSizes = new List<SubtreeSize>();
-            foreach (var branch in branches)
-                branchSizes.Add(MeasureSteps(branch.Steps));
-
-            int totalColumns = branchSizes.Sum(s => s.Columns);
-            double colWidth = GetColumnWidth(depth);
-            double totalPixelWidth = totalColumns * colWidth;
-
-            // Cap total spread
-            if (totalPixelWidth > MaxSpreadWidth)
-            {
-                colWidth = MaxSpreadWidth / totalColumns;
-                totalPixelWidth = MaxSpreadWidth;
-            }
-
-            // Calculate X positions for each branch, centered around centerX
-            double leftEdge = centerX - totalPixelWidth / 2.0;
+            // Positions are placeholders only — the canvas recomputes layout on import.
+            // Keep branches in distinct columns so a host-only (no-canvas) render is still legible.
             var branchStartY = currentY;
             var maxBranchEndY = currentY;
             var branchEndNodes = new List<string>();
-
-            for (int i = 0; i < branches.Count; i++)
+            double columnX = centerX;
+            foreach (var branch in branches)
             {
-                var branch = branches[i];
-                var branchSize = branchSizes[i];
-
-                // Each branch gets its proportional horizontal share
-                double branchPixelWidth = branchSize.Columns * colWidth;
-                double branchCenterX = leftEdge + branchPixelWidth / 2.0;
-
-                // Each branch starts at the same Y (independent tracking)
                 var branchY = branchStartY;
-                var lastNodeId = PlaceBranchSteps(branch, parentNodeId, parentStepPath, ref branchY, depth, branchCenterX, branchCenterX, nodes, edges);
-
+                var lastNodeId = PlaceBranchSteps(branch, parentNodeId, parentStepPath, ref branchY, depth, columnX, columnX, nodes, edges);
                 branchEndNodes.Add(lastNodeId);
                 maxBranchEndY = Math.Max(maxBranchEndY, branchY);
-                leftEdge += branchPixelWidth;
+                columnX += MinColumnWidth;
             }
-
-            // Advance past the tallest branch
             currentY = maxBranchEndY;
             return branchEndNodes;
         }
@@ -879,64 +849,6 @@ namespace SSH_Helper.Services
             }
         }
 
-        #region Subtree Measurement (Pass 1)
-
-        /// <summary>
-        /// Measures the dimensions of a list of steps for layout purposes.
-        /// Width = number of columns needed, Height = number of rows needed.
-        /// </summary>
-        private sealed class SubtreeSize
-        {
-            public int Columns { get; set; } = 1;
-            public int Rows { get; set; }
-        }
-
-        /// <summary>
-        /// Measures the subtree size for a list of steps.
-        /// </summary>
-        private SubtreeSize MeasureSteps(List<ScriptStep> steps)
-        {
-            var size = new SubtreeSize();
-
-            foreach (var step in steps)
-            {
-                var stepType = step.GetStepType();
-                size.Rows += 1; // the step itself
-
-                if (IsContainerStep(stepType))
-                {
-                    var branches = GetBranches(step, stepType);
-                    if (IsMultiBranch(branches))
-                    {
-                        int totalBranchCols = 0;
-                        int maxBranchRows = 0;
-                        foreach (var branch in branches)
-                        {
-                            if (branch.Steps == null || branch.Steps.Count == 0) continue;
-                            var branchSize = MeasureSteps(branch.Steps);
-                            totalBranchCols += branchSize.Columns;
-                            maxBranchRows = Math.Max(maxBranchRows, branchSize.Rows);
-                        }
-                        size.Columns = Math.Max(size.Columns, Math.Max(2, totalBranchCols));
-                        size.Rows += maxBranchRows;
-                    }
-                    else
-                    {
-                        // Single branch — takes 1 column, height adds to parent
-                        foreach (var branch in branches)
-                        {
-                            if (branch.Steps == null || branch.Steps.Count == 0) continue;
-                            var branchSize = MeasureSteps(branch.Steps);
-                            size.Columns = Math.Max(size.Columns, branchSize.Columns);
-                            size.Rows += branchSize.Rows;
-                        }
-                    }
-                }
-            }
-
-            return size;
-        }
-
         /// <summary>
         /// Returns true when a container has 2+ non-empty branches (needs side-by-side layout).
         /// </summary>
@@ -944,17 +856,6 @@ namespace SSH_Helper.Services
         {
             return branches.Count(b => b.Steps != null && b.Steps.Count > 0) >= 2;
         }
-
-        /// <summary>
-        /// Calculates the column width in pixels for a given nesting depth.
-        /// Deeper nesting = narrower columns to prevent extreme horizontal spread.
-        /// </summary>
-        private static double GetColumnWidth(int depth)
-        {
-            return Math.Max(MinColumnWidth, BaseColumnWidth * Math.Pow(ColumnWidthDecay, depth));
-        }
-
-        #endregion
 
         /// <summary>
         /// Converts a parsed Script model into graph JSON (fallback when raw text isn't available).
