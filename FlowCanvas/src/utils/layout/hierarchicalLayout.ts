@@ -23,6 +23,10 @@ function nonEmptyBranches(node: LayoutTreeNode): LayoutBranch[] {
   return node.branches.filter((b) => b.children.length > 0);
 }
 
+// NOTE: MIN_COLUMN_WIDTH currently equals BASE_COLUMN_WIDTH (290), so the depth decay is
+// always clamped away and every column is a fixed 290px — this intentionally matches the
+// original C# behaviour. The decay/base/max-spread knobs are retained for parity; lower
+// MIN_COLUMN_WIDTH if you want depth-decay to actually take effect.
 function getColumnWidth(depth: number): number {
   return Math.max(LAYOUT.MIN_COLUMN_WIDTH, LAYOUT.BASE_COLUMN_WIDTH * Math.pow(LAYOUT.COLUMN_WIDTH_DECAY, depth));
 }

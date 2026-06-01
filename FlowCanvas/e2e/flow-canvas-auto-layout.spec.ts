@@ -3,7 +3,6 @@ import {
   clearOutgoingMessages,
   getGraphSnapshot,
   installHostMessageCapture,
-  loadGraphFixture,
   postHostMessage,
   waitForOutgoingMessage,
 } from './support/harness';
@@ -60,7 +59,6 @@ test.describe('Flow Canvas Auto-Organize (hierarchical)', () => {
     expect((await posById(page, 'if-1')).x).toBe(500); // kept as-is
 
     // ...until the user presses the button, which re-lays everything.
-    await loadGraphFixture; // (no-op import guard; keep lint happy if unused)
     await page.getByRole('button', { name: /Auto-organize|Layout/ }).click();
 
     expect((await posById(page, 'if-1')).x).toBe(250); // NODE_START_X
