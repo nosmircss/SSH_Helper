@@ -215,7 +215,12 @@ test.describe('Flow Canvas Required Markers', () => {
     await page.goto('/');
     await waitForOutgoingMessage(page, 'ready');
     await clearOutgoingMessages(page);
-    await loadGraphFixture(page, createRequiredMarkersFixture());
+    // hasUserLayout:true keeps the fixture's authored grid. Without it the auto-layout engine
+    // stacks all 11 disconnected nodes into one tall column, and the bottom node
+    // (node-interactive-required) ends up off-screen behind the Output panel where its click
+    // can't select it — a framing that depends on font-metric node heights, so it passes on
+    // Windows but fails on the Linux CI runner.
+    await postHostMessage(page, { type: 'load-graph', ...createRequiredMarkersFixture(), hasUserLayout: true });
 
     await expect(nodeById(page, 'node-extract')).toBeVisible();
   });
