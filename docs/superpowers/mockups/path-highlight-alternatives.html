@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flow Canvas — Path Highlight Alternatives</title>
+<style>
+  :root {
+    /* Real Flow Canvas tokens (subset, from src/styles/tokens.css) */
+    --fc-surface-0: oklch(18% 0.03 275);
+    --fc-surface-1: oklch(22% 0.035 275);
+    --fc-surface-2: oklch(26% 0.04 275);
+    --fc-node-surface: oklch(22% 0.02 275);
+    --fc-border: oklch(34% 0.04 275);
+    --fc-text: oklch(85% 0.01 275);
+    --fc-text-secondary: oklch(72% 0.01 275);
+    --fc-text-muted: oklch(60% 0.01 275);
+
+    --fc-cat-ssh-border: oklch(62% 0.13 255);
+    --fc-cat-control-flow-border: oklch(62% 0.13 90);
+    --fc-start-accent: oklch(72% 0.17 150);
+
+    --fc-state-success: oklch(72% 0.17 150);
+    --fc-state-error: oklch(60% 0.20 25);
+    --fc-branch-then: var(--fc-state-success);
+    --fc-branch-else: var(--fc-state-error);
+
+    --fc-edge-idle: oklch(48% 0.01 275);
+    --fc-edge-packet: oklch(95% 0.03 200);
+
+    /* shipped today */
+    --fc-edge-traversed: oklch(72% 0.17 200);
+    --fc-edge-traversed-glow: oklch(70% 0.13 200 / 0.5);
+
+    /* brighter variants for the mockups */
+    --fc-edge-traversed-bright: oklch(80% 0.16 200);
+    --fc-edge-traversed-core: oklch(94% 0.06 200);
+    --fc-glow-strong: oklch(75% 0.16 200 / 0.75);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--fc-surface-0);
+    color: var(--fc-text);
+    font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    padding: 28px 28px 60px;
+  }
+  header { max-width: 1200px; margin: 0 auto 18px; }
+  h1 { font-size: 20px; margin: 0 0 6px; font-weight: 650; }
+  header p { margin: 0; color: var(--fc-text-secondary); font-size: 13px; line-height: 1.5; max-width: 760px; }
+
+  .controls { max-width: 1200px; margin: 0 auto 18px; display: flex; gap: 10px; align-items: center; }
+  .controls button {
+    background: var(--fc-surface-2); color: var(--fc-text); border: 1px solid var(--fc-border);
+    border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  .controls button.active { border-color: var(--fc-state-success); color: var(--fc-state-success); }
+  .legend { display: flex; gap: 16px; align-items: center; font-size: 12px; color: var(--fc-text-muted); margin-left: auto; }
+  .legend i { display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+
+  .grid {
+    max-width: 1200px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+  }
+  @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--fc-surface-1);
+    border: 1px solid var(--fc-border);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .card .badge { font-size: 11px; color: var(--fc-text-muted); padding: 10px 14px 0; }
+  .card h3 { font-size: 15px; margin: 4px 14px 0; font-weight: 600; }
+  .card p { font-size: 12px; line-height: 1.5; color: var(--fc-text-secondary); margin: 6px 14px 14px; }
+  .stage { padding: 6px 6px 0; }
+  .canvas { background: var(--fc-surface-1); border-radius: 8px; display: block; width: 100%; height: auto; }
+
+  /* ── shared node + edge base ───────────────────────────────────── */
+  .node-body { fill: var(--fc-node-surface); stroke-width: 1.5; rx: 7; }
+  .n-start { stroke: var(--fc-start-accent); }
+  .n-ssh   { stroke: var(--fc-cat-ssh-border); }
+  .n-if    { stroke: var(--fc-cat-control-flow-border); }
+  .n-plain { stroke: var(--fc-border); }
+  .node-label { fill: var(--fc-text); font-size: 11px; font-weight: 600; text-anchor: middle; dominant-baseline: middle; font-family: ui-monospace, monospace; }
+  .branch-tag { font-size: 9px; font-weight: 700; text-anchor: middle; font-family: ui-monospace, monospace; }
+  .tag-then { fill: var(--fc-branch-then); }
+  .tag-else { fill: var(--fc-branch-else); }
+
+  .edge { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .edge.spine { stroke: var(--fc-edge-idle); }
+  .edge.branch-then { stroke: var(--fc-branch-then); }
+  .edge.branch-else { stroke: var(--fc-branch-else); }
+  .edge.idle { stroke: var(--fc-edge-idle); }
+
+  /* ============================================================== */
+  /*  VARIANT 1 — CURRENT (shipped: Neon Halo, branch hues kept)     */
+  /* ============================================================== */
+  .v-current .edge.onpath { stroke-width: 2.5; }
+  .v-current .edge.onpath.spine {
+    stroke: color-mix(in oklch, var(--fc-edge-traversed), white 30%);
+    filter: drop-shadow(0 0 1px var(--fc-edge-traversed)) drop-shadow(0 0 4px color-mix(in oklch, var(--fc-edge-traversed) 70%, transparent)) drop-shadow(0 0 9px color-mix(in oklch, var(--fc-edge-traversed) 45%, transparent));
+  }
+  .v-current .edge.onpath.branch-then {
+    stroke: color-mix(in oklch, var(--fc-branch-then), white 30%);
+    filter: drop-shadow(0 0 1px var(--fc-branch-then)) drop-shadow(0 0 4px color-mix(in oklch, var(--fc-branch-then) 70%, transparent)) drop-shadow(0 0 9px color-mix(in oklch, var(--fc-branch-then) 45%, transparent));
+  }
+  .v-current .edge.untaken { opacity: 0.35; }
+
+  /* ============================================================== */
+  /*  VARIANT 2 — BOLDER GLOW (same idea, turned up)                 */
+  /* ============================================================== */
+  .v-bold .edge.onpath.spine { stroke: var(--fc-edge-traversed-bright); stroke-width: 4; filter: drop-shadow(0 0 6px var(--fc-glow-strong)) drop-shadow(0 0 2px var(--fc-glow-strong)); }
+  .v-bold .edge.onpath.branch-then { stroke-width: 4; filter: drop-shadow(0 0 6px oklch(72% 0.17 150 / 0.7)) drop-shadow(0 0 2px oklch(72% 0.17 150 / 0.7)); }
+  .v-bold .edge.untaken { opacity: 0.3; }
+
+  /* ============================================================== */
+  /*  VARIANT 3 — MARCHING FLOW (animated dashes travel the path)    */
+  /* ============================================================== */
+  .v-flow .edge.onpath { stroke-width: 3; filter: drop-shadow(0 0 3px var(--fc-edge-traversed-glow)); stroke-dasharray: 9 7; animation: march 0.7s linear infinite; }
+  .v-flow .edge.onpath.spine { stroke: var(--fc-edge-traversed-bright); }
+  .v-flow .edge.untaken { opacity: 0.3; }
+  @keyframes march { from { stroke-dashoffset: 16; } to { stroke-dashoffset: 0; } }
+  body.reduce-motion .v-flow .edge.onpath { animation: none; stroke-dasharray: none; stroke-width: 4; }
+
+  /* ============================================================== */
+  /*  VARIANT 4 — CONTRAST DIM (dim idle AND untaken hard)           */
+  /* ============================================================== */
+  .v-dim .edge.onpath.spine { stroke: var(--fc-edge-traversed-bright); stroke-width: 3.5; filter: drop-shadow(0 0 3px var(--fc-glow-strong)); }
+  .v-dim .edge.onpath.branch-then { stroke-width: 3.5; filter: drop-shadow(0 0 3px oklch(72% 0.17 150 / 0.6)); }
+  .v-dim .edge.untaken { opacity: 0.12; }
+  .v-dim .edge.idle { opacity: 0.12; }
+
+  /* ============================================================== */
+  /*  VARIANT 5 — NEON HALO (bright core + layered outer bloom)      */
+  /* ============================================================== */
+  .v-halo .edge.onpath { stroke-width: 2.25; }
+  .v-halo .edge.onpath.spine {
+    stroke: var(--fc-edge-traversed-core);
+    filter: drop-shadow(0 0 1px var(--fc-edge-traversed-bright)) drop-shadow(0 0 4px var(--fc-glow-strong)) drop-shadow(0 0 9px var(--fc-edge-traversed-glow));
+  }
+  .v-halo .edge.onpath.branch-then {
+    stroke: oklch(92% 0.10 150);
+    filter: drop-shadow(0 0 1px oklch(78% 0.17 150)) drop-shadow(0 0 4px oklch(72% 0.17 150 / 0.7)) drop-shadow(0 0 9px oklch(72% 0.17 150 / 0.45));
+  }
+  .v-halo .edge.untaken { opacity: 0.3; }
+
+  /* ============================================================== */
+  /*  VARIANT 6 — UNIFIED ROUTE (one vivid color for the whole path) */
+  /* ============================================================== */
+  .v-unified .edge.onpath { stroke: var(--fc-edge-traversed-bright) !important; stroke-width: 3.5; filter: drop-shadow(0 0 5px var(--fc-glow-strong)); }
+  .v-unified .edge.untaken { opacity: 0.35; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Flow Canvas — execution path highlight: alternative looks</h1>
+  <p>Same graph in every panel: a run that took the <b>then</b> branch. Lit = traversed (on-path), faint red = the <b>else</b> branch that didn't fire (untaken), grey = never reached (idle). Panel&nbsp;1 is what ships today; the rest are alternatives to make the path read more clearly. Captions list the exact CSS knobs.</p>
+</header>
+
+<div class="controls">
+  <button id="rm">⏸ Preview reduced-motion</button>
+  <div class="legend">
+    <span><i style="border-color: var(--fc-edge-traversed-bright)"></i>on-path</span>
+    <span><i style="border-color: var(--fc-branch-else); opacity:.5"></i>untaken</span>
+    <span><i style="border-color: var(--fc-edge-idle)"></i>idle</span>
+  </div>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const GRAPH = `
+<svg class="canvas" viewBox="0 0 300 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="graph mockup">
+  <!-- edges first (under nodes) -->
+  <path class="edge spine onpath"       d="M150,44 L150,72" />
+  <path class="edge spine onpath"       d="M150,104 L150,132" />
+  <path class="edge branch-then onpath" d="M150,164 L150,188 L80,188 L80,212" />
+  <path class="edge branch-else untaken" d="M150,164 L150,188 L220,188 L220,212" />
+  <path class="edge spine onpath"       d="M80,244 L80,284" />
+  <path class="edge spine idle"         d="M220,244 L220,284" />
+
+  <!-- nodes -->
+  <g>
+    <rect class="node-body n-start" x="105" y="12" width="90" height="32" rx="7" />
+    <text class="node-label" x="150" y="28">▶ Start</text>
+
+    <rect class="node-body n-ssh" x="105" y="72" width="90" height="32" rx="7" />
+    <text class="node-label" x="150" y="88">ssh</text>
+
+    <rect class="node-body n-if" x="110" y="132" width="80" height="32" rx="7" />
+    <text class="node-label" x="150" y="148">if</text>
+
+    <rect class="node-body n-plain" x="35" y="212" width="90" height="32" rx="7" />
+    <text class="node-label" x="80" y="228">then</text>
+    <text class="branch-tag tag-then" x="96" y="200">then ✓</text>
+
+    <rect class="node-body n-plain" x="175" y="212" width="90" height="32" rx="7" style="opacity:.55" />
+    <text class="node-label" x="220" y="228" style="opacity:.55">else</text>
+    <text class="branch-tag tag-else" x="236" y="200" style="opacity:.6">else ✗</text>
+
+    <rect class="node-body n-plain" x="35" y="284" width="90" height="30" rx="7" />
+    <text class="node-label" x="80" y="299">print</text>
+
+    <rect class="node-body n-plain" x="175" y="284" width="90" height="30" rx="7" style="opacity:.4" />
+    <text class="node-label" x="220" y="299" style="opacity:.4">print</text>
+  </g>
+</svg>`;
+
+const VARIANTS = [
+  { key: 'current', n: '1', title: 'Current (shipped — Neon Halo)',
+    desc: 'Now shipped: a neon halo — a bright, saturated core (a slight lift toward white — kept short of washing out, or low-chroma cyan reads grey) wrapped in a 3-layer colored bloom (1·4·9px) that tracks each branch hue (cyan spine, green then). Branch hues kept; untaken 0.35 so surrounding structure stays readable.' },
+  { key: 'bold', n: '2', title: 'Bolder Glow',
+    desc: 'Same idea, turned up: stroke 4px, brighter color, layered 6px+2px glow. Lowest-risk change — just more presence. Untaken 0.30.' },
+  { key: 'flow', n: '3', title: 'Marching Flow',
+    desc: 'Animated dashes travel toward the target — the universal "this path is live" cue; motion grabs the eye instantly. Falls back to a solid 4px line under reduced-motion.' },
+  { key: 'dim', n: '4', title: 'Contrast Dim',
+    desc: 'Clarity by contrast: the lit path is the ONLY bright thing — idle AND untaken edges drop to opacity 0.12. Reads clearly even on a busy graph.' },
+  { key: 'halo', n: '5', title: 'Neon Halo',
+    desc: 'A bright near-white core with a layered outer bloom (1px + 4px + 9px glows) = a glowing wire. Strong "lit" feel without just thickening the line.' },
+  { key: 'unified', n: '6', title: 'Unified Route',
+    desc: 'The whole taken path is one vivid cyan (branch hue dropped on lit edges) so the route reads as a single continuous wire. Untaken else still shows faded-red, so branch meaning is kept.' },
+];
+
+const grid = document.getElementById('grid');
+for (const v of VARIANTS) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML =
+    `<div class="badge">Option ${v.n}</div>` +
+    `<h3>${v.title}</h3>` +
+    `<div class="stage"><div class="v-${v.key}">${GRAPH}</div></div>` +
+    `<p>${v.desc}</p>`;
+  grid.appendChild(card);
+}
+
+const rm = document.getElementById('rm');
+rm.addEventListener('click', () => {
+  document.body.classList.toggle('reduce-motion');
+  rm.classList.toggle('active');
+  rm.textContent = document.body.classList.contains('reduce-motion')
+    ? '▶ Motion on' : '⏸ Preview reduced-motion';
+});
+</script>
+</body>
+</html>

@@ -16,17 +16,18 @@ function nodeById(page: Page, nodeId: string): Locator {
   return page.locator(`.react-flow__node[data-id="${nodeId}"]`);
 }
 
-// Resolve a --fc-* token to Chromium's serialized <color>, so we can compare it to a path's
-// computed `stroke` (both go through the same color serialization).
-async function resolveVar(page: Page, name: string): Promise<string> {
-  return page.evaluate((varName) => {
+// Resolve any CSS <color> expression (a --fc-* token via var(), or a color-mix(...)) to
+// Chromium's serialized <color>, so we can compare it to a path's computed `stroke` (both go
+// through the same color serialization).
+async function resolveColor(page: Page, expr: string): Promise<string> {
+  return page.evaluate((value) => {
     const probe = document.createElement('div');
-    probe.style.color = `var(${varName})`;
+    probe.style.color = value;
     document.body.appendChild(probe);
-    const value = getComputedStyle(probe).color;
+    const out = getComputedStyle(probe).color;
     probe.remove();
-    return value;
-  }, name);
+    return out;
+  }, expr);
 }
 async function strokeOf(page: Page, edgeId: string): Promise<string> {
   return edgePath(page, edgeId).evaluate((el) => getComputedStyle(el as Element).stroke);
@@ -60,10 +61,23 @@ test.describe('Flow Canvas Execution Path Highlight', () => {
     // The start edge lights once its target (if-1) has run.
     await expect(edgePath(page, 'edge-start-if')).toHaveClass(/fc-edge-onpath/);
 
-    // Color choice: a plain/spine traversed edge promotes to the traversed token; an on-path
-    // branch edge keeps its branch hue.
-    expect(await strokeOf(page, 'edge-start-if')).toBe(await resolveVar(page, '--fc-edge-traversed'));
-    expect(await strokeOf(page, 'edge-if-then')).toBe(await resolveVar(page, '--fc-branch-then'));
+    // Color: each lit wire is a bright near-white CORE (color-mix toward white) — mirrors the
+    // core mix in AnimatedEdge. A plain/spine edge's hue promotes to the cyan traversed token;
+    // an on-path branch edge keeps its branch hue (then=green). Both are brightened identically.
+    expect(await strokeOf(page, 'edge-start-if')).toBe(
+      await resolveColor(page, 'color-mix(in oklch, var(--fc-edge-traversed), white 30%)'),
+    );
+    expect(await strokeOf(page, 'edge-if-then')).toBe(
+      await resolveColor(page, 'color-mix(in oklch, var(--fc-branch-then), white 30%)'),
+    );
+
+    // The arrowhead matches the glow hue (a per-edge marker), not the idle grey — spine arrow is
+    // the traversed cyan, branch arrow keeps the branch hue, so the lit tip reads as one wire.
+    expect(await edgePath(page, 'edge-start-if').getAttribute('marker-end')).toContain('fc-arrow-onpath-edge-start-if');
+    expect(await edgePath(page, 'edge-if-then').getAttribute('marker-end')).toContain('fc-arrow-onpath-edge-if-then');
+    const arrowFill = (sel: string) => page.locator(sel).evaluate((el) => getComputedStyle(el as Element).fill);
+    expect(await arrowFill('#fc-arrow-onpath-edge-start-if path')).toBe(await resolveColor(page, 'var(--fc-edge-traversed)'));
+    expect(await arrowFill('#fc-arrow-onpath-edge-if-then path')).toBe(await resolveColor(page, 'var(--fc-branch-then)'));
 
     // The untaken branch is visibly faded (real Chromium resolves the class opacity).
     const untakenOpacity = await edgePath(page, 'edge-if-else').evaluate(

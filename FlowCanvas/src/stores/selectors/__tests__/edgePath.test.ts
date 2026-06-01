@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
-import { selectEdgePathStatus } from '../edgePath';
+import { selectEdgePathStatus, selectEdgeIsBranch } from '../edgePath';
 import { START_NODE_ID } from '../../slices/graphSlice';
 
 // Minimal stand-in for the FlowStore: the selector only reads these fields.
@@ -251,5 +251,38 @@ describe('selectEdgePathStatus', () => {
     const state = makeState({ nodes, edges, blockStates: new Map([['par', 'success']]) });
     expect(selectEdgePathStatus(state, 'e-p0')).toBe('on-path');
     expect(selectEdgePathStatus(state, 'e-p1')).toBe('on-path');
+  });
+});
+
+describe('selectEdgeIsBranch', () => {
+  it('returns false for an unknown edge id', () => {
+    expect(selectEdgeIsBranch(makeState({}), 'nope')).toBe(false);
+  });
+
+  // The regression: imported plain edges carry a literal grey hex (FlowCanvasBridge #555/#666),
+  // not the idle token. The hue promotion must key on structure, not the stroke color, or these
+  // spines stay grey and color-mix toward white.
+  it('a plain successor with an imported grey hex stroke is NOT a branch', () => {
+    const edges: Edge[] = [{ id: 'e1', source: 'a', target: 'b', style: { stroke: '#555' } } as Edge];
+    expect(selectEdgeIsBranch(makeState({ edges }), 'e1')).toBe(false);
+  });
+
+  it('a canvas-built branch edge (data.branchPath) is a branch', () => {
+    const edges: Edge[] = [{ id: 'then', source: 'if-1', target: 't', data: { branchPath: 'then' } } as Edge];
+    expect(selectEdgeIsBranch(makeState({ edges, nodes: [ifNode] }), 'then')).toBe(true);
+  });
+
+  it('an imported branch edge (target props._isChildOf === source) is a branch', () => {
+    const child: Node = { id: 't', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { _isChildOf: 'iif' } } } as Node;
+    const container: Node = { id: 'iif', position: { x: 0, y: 0 }, data: { blockType: 'if' } } as Node;
+    const edges: Edge[] = [{ id: 'e-then', source: 'iif', target: 't', style: { stroke: 'green' } } as Edge];
+    expect(selectEdgeIsBranch(makeState({ edges, nodes: [container, child] }), 'e-then')).toBe(true);
+  });
+
+  it('a container continuation edge (sourceHandle "continue") is NOT a branch', () => {
+    const edges: Edge[] = [
+      { id: 'cont', source: 'if-1', target: 'after', sourceHandle: 'continue', data: { branchPath: 'then' } } as Edge,
+    ];
+    expect(selectEdgeIsBranch(makeState({ edges, nodes: [ifNode] }), 'cont')).toBe(false);
   });
 });

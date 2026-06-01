@@ -47,6 +47,29 @@ function childInTakenScope(childStepPath: string, containerStepPath: string, tak
 }
 
 /**
+ * Is this edge one of the source container's branch arms (vs a plain successor / spine /
+ * continuation)? Dual-origin, same as the status logic: canvas-built edges carry
+ * `data.branchPath`; imported preset edges carry none, so their branch identity is the target
+ * being a visual child of the source (`props._isChildOf === source`). Shared by both the path
+ * status and the lit-wire hue — branch arms keep their branch color, everything else promotes to
+ * the cyan traversed token. NB: this is keyed on structure, not stroke color, precisely because
+ * imported edges use literal grey hex (`#555`/`#666` from FlowCanvasBridge), not the idle token.
+ */
+function edgeIsBranch(edge: Edge, targetNode: Node | undefined): boolean {
+  const branchPath = branchPathOf(edge);
+  const isInCanvasBranch = !!branchPath && edge.sourceHandle !== 'continue';
+  const isImportedBranch = strProp(targetNode, '_isChildOf') === edge.source;
+  return isInCanvasBranch || isImportedBranch;
+}
+
+export function selectEdgeIsBranch(state: FlowStore, edgeId: string): boolean {
+  const edge = state.edges.find((e) => e.id === edgeId);
+  if (!edge) return false;
+  const targetNode = state.nodes.find((n) => n.id === edge.target);
+  return edgeIsBranch(edge, targetNode);
+}
+
+/**
  * Classify an edge against the last/current run: 'on-path' (traversed), 'untaken'
  * (a sibling branch that did not fire — faded), or 'idle' (never reached / hidden).
  *
@@ -80,16 +103,12 @@ export function selectEdgePathStatus(state: FlowStore, edgeId: string): EdgePath
   const targetNode = state.nodes.find((n) => n.id === edge.target);
   const blockType = blockTypeOf(sourceNode);
 
-  // Branch detection — an edge entering one of the source container's branches:
-  //  - canvas-built: carries data.branchPath and isn't the 'continue' handle; or
-  //  - imported: the target is a visual child of the source (props._isChildOf === source).
-  // Only the FIRST edge of each branch (container → first child) satisfies the imported test;
-  // within-branch child→child edges have _isChildOf pointing at the container, not the source.
+  // Branch detection (shared with selectEdgeIsBranch). Only the FIRST edge of each branch
+  // (container → first child) satisfies the imported test; within-branch child→child edges have
+  // _isChildOf pointing at the container, not the source. branchPath is reused below to match the
+  // specific arm against branchTaken.
   const branchPath = branchPathOf(edge);
-  const targetChildOf = strProp(targetNode, '_isChildOf');
-  const isInCanvasBranch = !!branchPath && edge.sourceHandle !== 'continue';
-  const isImportedBranch = targetChildOf === edge.source;
-  const isBranch = isInCanvasBranch || isImportedBranch;
+  const isBranch = edgeIsBranch(edge, targetNode);
 
   if (!isBranch) {
     // Plain successor / container continuation: traversed only if the source completed

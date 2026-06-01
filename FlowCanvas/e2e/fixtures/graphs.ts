@@ -495,7 +495,9 @@ export function createBranchPathFixture(): GraphFixture {
       { id: 'else-1', type: 'block', position: { x: 360, y: 320 }, data: { blockType: 'print', label: 'Else', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/else/0', _branchLabel: 'else', message: 'else-branch' } } },
     ],
     edges: [
-      { id: 'edge-start-if', source: '__start__', target: 'if-1' },
+      // Spine edge mirrors FlowCanvasBridge: imported plain edges carry a literal grey hex
+      // (#666 for start→first), NOT the idle token — guards the cyan promotion path for imports.
+      { id: 'edge-start-if', source: '__start__', target: 'if-1', style: { stroke: '#666' } },
       // Imported branch edges: branch color in style.stroke, label, no data.branchPath.
       { id: 'edge-if-then', source: 'if-1', target: 'then-1', label: 'then', style: { stroke: 'var(--fc-branch-then)' } },
       { id: 'edge-if-else', source: 'if-1', target: 'else-1', sourceHandle: 'false', label: 'else', style: { stroke: 'var(--fc-branch-else)' } },

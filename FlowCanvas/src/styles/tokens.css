@@ -170,8 +170,7 @@
   /* ── Execution path highlight (persists after a run; see execution-path design doc) ──
      Cyan trail (hue 200, harmonizing with the bright packet above), distinct from idle grey
      and from success-green so a traversed wire reads as "traveled", not "succeeded". */
-  --fc-edge-traversed: oklch(70% 0.13 200);
-  --fc-edge-traversed-glow: oklch(70% 0.13 200 / 0.5);
+  --fc-edge-traversed: oklch(72% 0.17 200);
   --fc-grid-dot: oklch(34% 0.04 275);
   --fc-search-outline: oklch(82% 0.15 90);
   --fc-comment-ink: oklch(20% 0 0);

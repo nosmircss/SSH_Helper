@@ -1,9 +1,9 @@
-import { memo } from 'react';
+import { memo, type CSSProperties } from 'react';
 import { BaseEdge, getSmoothStepPath, getStraightPath, type EdgeProps } from '@xyflow/react';
 import { mix } from '../utils/tokens';
 import { markerIdForStroke } from './EdgeMarkers';
 import { useFlowStore } from '../stores/useFlowStore';
-import { selectEdgePathStatus } from '../stores/selectors/edgePath';
+import { selectEdgePathStatus, selectEdgeIsBranch } from '../stores/selectors/edgePath';
 import './animatededge.css';
 
 function AnimatedEdge(props: EdgeProps) {
@@ -14,6 +14,8 @@ function AnimatedEdge(props: EdgeProps) {
   const reducedMotion = useFlowStore((s) => s.reducedMotion);
   // Path overlay status. Returns a string → referentially stable, no extra renders.
   const pathStatus = useFlowStore((s) => selectEdgePathStatus(s, id));
+  // Branch arm (keeps its own hue) vs spine/plain/continuation (promotes to traversed cyan).
+  const isBranch = useFlowStore((s) => selectEdgeIsBranch(s, id));
 
   // Geometry (not data.branchPath / sourceHandle) is the discriminator: imported branch edges
   // carry no branchPath, so metadata would misclassify them. Aligned, downward edges (the
@@ -41,19 +43,27 @@ function AnimatedEdge(props: EdgeProps) {
   const gradientId = `fc-grad-${id}`;
 
   // ── Execution-path overlay (persists after the run; decoupled from isRunning) ──
-  // on-path: full-strength stroke + soft glow. Idle-grey spine edges promote to the traversed
-  //   token so a traveled wire actually reads as lit; branch edges keep their branch color.
-  // untaken: a branch that did not fire — faded via the .fc-edge-untaken class.
+  // on-path = a neon-halo wire: a bright, saturated core stroke wrapped in a 3-layer colored
+  //   bloom (.fc-edge-onpath). The bloom reads --fc-onpath, so each lit edge glows in its own
+  //   hue — idle-grey spine edges promote to the cyan traversed token; branch edges keep their
+  //   branch color (then=green, catch/else=red). untaken: a branch that did not fire, faded.
   const onPath = pathStatus === 'on-path';
   const untaken = pathStatus === 'untaken';
-  const onPathStroke = color === 'var(--fc-edge-idle)' ? 'var(--fc-edge-traversed)' : color;
+  // The lit hue: branch arms keep their own color; every spine/plain/continuation edge promotes
+  // to the traversed cyan. Keyed on the STRUCTURAL branch test, not the stroke color — imported
+  // preset edges carry literal grey hex (#555/#666 from FlowCanvasBridge), not the idle token, so
+  // a color check left them grey and `color-mix(... white)` washed them to near-white spines.
+  // Drives both the brightened core stroke and the colored bloom (via --fc-onpath below).
+  const onPathHue = isBranch ? color : 'var(--fc-edge-traversed)';
 
   let stroke: string;
   let strokeWidth: number;
   let edgeClass: string | undefined;
   if (onPath) {
-    stroke = onPathStroke;
-    strokeWidth = typeof style?.strokeWidth === 'number' ? style.strokeWidth : 3;
+    // Bright, saturated core (a slight lift toward white — keep it well short of washing the
+    // hue out, or low-chroma cyan spines read as grey); the colored bloom in CSS does the glow.
+    stroke = `color-mix(in oklch, ${onPathHue}, white 30%)`;
+    strokeWidth = typeof style?.strokeWidth === 'number' ? style.strokeWidth : 2.5;
     edgeClass = 'fc-edge-onpath';
   } else if (untaken) {
     stroke = color;
@@ -66,6 +76,17 @@ function AnimatedEdge(props: EdgeProps) {
     edgeClass = undefined;
   }
 
+  // The bloom color tracks the lit hue through this custom property (consumed by .fc-edge-onpath).
+  const edgeStyle: CSSProperties = { ...style, stroke, strokeWidth };
+  if (onPath) (edgeStyle as Record<string, string>)['--fc-onpath'] = onPathHue;
+
+  // On the lit path the arrowhead matches the glow hue via a per-edge marker — the shared token
+  // markers have no traversed/cyan variant and can't match imported hex strokes, so a per-edge
+  // marker (like the gradient above) is the only thing that colors every lit tip correctly.
+  // Off-path edges keep their shared token marker.
+  const onPathMarkerId = `fc-arrow-onpath-${id}`;
+  const markerEnd = onPath ? `url(#${onPathMarkerId})` : `url(#${markerId})`;
+
   return (
     <>
       <defs>
@@ -74,13 +95,26 @@ function AnimatedEdge(props: EdgeProps) {
           <stop offset="0%" stopColor={mix(color, 30)} />
           <stop offset="100%" stopColor={color} />
         </linearGradient>
+        {onPath && (
+          <marker
+            id={onPathMarkerId}
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M0 0 L10 5 L0 10 z" fill={onPathHue} />
+          </marker>
+        )}
       </defs>
       <BaseEdge
         id={id}
         className={edgeClass}
         path={edgePath}
-        markerEnd={`url(#${markerId})`}
-        style={{ ...style, stroke, strokeWidth }}
+        markerEnd={markerEnd}
+        style={edgeStyle}
       />
       {active && !reducedMotion && (
         <circle

@@ -20,10 +20,16 @@
 }
 
 /* Execution-path overlay (Wave 2b → execution path). Static styling only — no animation — so
- * it is safe under reduced motion and persists after the run finishes. on-path = soft glow on
- * top of the (full-strength) stroke; untaken = a branch that did not fire, faded back. */
+ * it is safe under reduced motion and persists after the run finishes. on-path = a neon halo:
+ * the stroke is a bright, saturated core (set inline by AnimatedEdge) and this 3-layer bloom
+ * supplies the glow. --fc-onpath (set inline per edge) carries the lit hue, so the bloom matches
+ * each branch's color — cyan spine, green then, red catch/else. untaken = a branch that did not
+ * fire, faded back. The var() fallback keeps the bloom sane if --fc-onpath is ever absent. */
 .fc-edge-onpath {
-  filter: drop-shadow(0 0 2px var(--fc-edge-traversed-glow));
+  filter:
+    drop-shadow(0 0 1px var(--fc-onpath, var(--fc-edge-traversed)))
+    drop-shadow(0 0 4px color-mix(in oklch, var(--fc-onpath, var(--fc-edge-traversed)) 70%, transparent))
+    drop-shadow(0 0 9px color-mix(in oklch, var(--fc-onpath, var(--fc-edge-traversed)) 45%, transparent));
 }
 .fc-edge-untaken {
   opacity: 0.35;
