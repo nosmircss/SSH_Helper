@@ -35,6 +35,33 @@ public class ForeachCommandTests
         collected.Should().Equal("one", "two");
     }
 
+    [Theory]
+    [InlineData("item in selections")]
+    [InlineData("item in ${selections}")]
+    [InlineData("item in {{selections}}")]
+    public async Task ExecuteAsync_ListCollectionExpressions_IterateEachSelectedValue(string foreachExpression)
+    {
+        var executor = new ScriptExecutor();
+        var command = new ForeachCommand(executor);
+        var context = new ScriptContext();
+        context.SetVariable("selections", new List<string> { "syslogd3", "syslogd4" });
+
+        var step = new ScriptStep
+        {
+            Foreach = foreachExpression,
+            Do = new List<ScriptStep>
+            {
+                new() { Set = "collected = push(collected, item)" }
+            }
+        };
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariable("collected")
+            .Should().BeEquivalentTo(new List<string> { "syslogd3", "syslogd4" }, options => options.WithStrictOrdering());
+    }
+
     [Fact]
     public async Task ExecuteAsync_SplitExpression_IteratesResolvedValues()
     {
