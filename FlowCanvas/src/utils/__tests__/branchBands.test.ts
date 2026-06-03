@@ -35,4 +35,14 @@ describe('branchBands', () => {
     const b = computeBranchBands([child('c2', 'q', 'steps/0/then/0/else/0', 0, 0)])[0];
     expect(b.depth).toBeGreaterThanOrEqual(1);
   });
+
+  it('grows the band for an expanded child', () => {
+    const collapsed = computeBranchBands([child('c', 'p', 'steps/1/then/0', 100, 200)])[0];
+    const expNode = child('c', 'p', 'steps/1/then/0', 100, 200);
+    (expNode.data as any).blockType = 'send';
+    (expNode.data as any).expanded = true;
+    (expNode.data as any).props = { command: 'a', capture: 'b', _isChildOf: 'p', _stepPath: 'steps/1/then/0' };
+    const expanded = computeBranchBands([expNode])[0];
+    expect(expanded.height).toBeGreaterThan(collapsed.height);
+  });
 });

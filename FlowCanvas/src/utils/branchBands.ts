@@ -2,7 +2,7 @@
 // Round-trip-safe branch-band derivation. Reads ONLY existing transient metadata
 // (_isChildOf, _stepPath, _branchLabel) + node.position; writes nothing to node.data.
 import type { Node } from '@xyflow/react';
-import { CHILD_WIDTH, COLLAPSED_HEIGHT } from './nodeSize';
+import { CHILD_WIDTH, COLLAPSED_HEIGHT, estimateNodeHeight } from './nodeSize';
 
 export interface BranchBand {
   id: string;
@@ -73,10 +73,12 @@ function branchDepth(stepPath: string | undefined): number {
   return Math.max(0, count - 1);
 }
 
-/** Per-node box used for band geometry. Width is fixed per role; height is the COLLAPSED
- *  estimate here — Phase 5 swaps in the expanded estimate so lanes wrap expanded children. */
-function nodeBox(_n: Node): { w: number; h: number } {
-  return { w: CHILD_WIDTH, h: COLLAPSED_HEIGHT };
+/** Per-node box used for band geometry. Width is fixed per role; height uses the expanded
+ *  estimate when the node is expanded, or COLLAPSED_HEIGHT otherwise. */
+function nodeBox(n: Node): { w: number; h: number } {
+  const data = (n.data ?? {}) as { blockType?: string; expanded?: boolean; props?: Record<string, unknown> };
+  const h = data.expanded ? estimateNodeHeight(data.blockType ?? '', data.props ?? {}, true) : COLLAPSED_HEIGHT;
+  return { w: CHILD_WIDTH, h };
 }
 
 export function computeBranchBands(nodes: Node[]): BranchBand[] {
