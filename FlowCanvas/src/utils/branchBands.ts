@@ -123,7 +123,19 @@ export function computeBranchBands(nodes: Node[]): BranchBand[] {
     groups.get(groupId)!.nodes.push(n);
   }
 
-  const bands: BranchBand[] = [];
+  // Pass 1 — per band: the node-only content box (no nesting awareness yet) plus the metadata
+  // needed to (a) detect which other bands nest inside it and (b) size it in pass 2.
+  interface Prelim {
+    id: string;
+    parentId: string;
+    branchKey: string;
+    depth: number;
+    leftInset: number;
+    memberIds: string[];
+    memberSet: Set<string>;
+    nMinX: number; nMinY: number; nMaxX: number; nMaxY: number;
+  }
+  const prelims: Prelim[] = [];
   for (const [groupId, g] of groups) {
     // A lane must wrap the whole branch SUBTREE: nested-branch bodies are indented to the right
     // and live in their own (child-parent) groups, so a direct-children-only box would clip them.
@@ -145,22 +157,68 @@ export function computeBranchBands(nodes: Node[]): BranchBand[] {
     const depth = branchDepth(firstProps?.['_stepPath'] as string | undefined);
     // Pull nested bands inward by depth on the LEFT ONLY, so a band that shares its parent's left
     // edge (e.g. a multi-branch first arm sitting at the container's own X) doesn't paint over the
-    // parent's left accent — without that inset the nesting reads as one band changing color. Top,
-    // right and bottom keep full BAND_PAD so the pill label clears the first block and the bottom
-    // isn't crowded. Capped at BAND_PAD - 4 so the band still clears its leftmost child.
+    // parent's left accent — without that inset the nesting reads as one band changing color.
+    // Capped at BAND_PAD - 4 so the band still clears its leftmost child.
     const leftInset = Math.min(depth * NESTED_BAND_INSET, BAND_PAD - 4);
-    bands.push({
-      id: groupId,
-      parentId: g.parentId,
-      branchKey: g.branchKey,
-      x: minX - BAND_PAD + leftInset,
-      y: minY - BAND_PAD - BAND_LABEL_HEADROOM,
-      width: (maxX - minX) + BAND_PAD * 2 - leftInset,
-      height: (maxY - minY) + BAND_PAD * 2 + BAND_LABEL_HEADROOM,
-      colorVar: branchColorVar(g.branchKey),
-      depth,
-      memberIds: boxNodes.map((n) => n.id),
+    const memberIds = boxNodes.map((n) => n.id);
+    prelims.push({
+      id: groupId, parentId: g.parentId, branchKey: g.branchKey, depth, leftInset,
+      memberIds, memberSet: new Set(memberIds),
+      nMinX: minX, nMinY: minY, nMaxX: maxX, nMaxY: maxY,
     });
   }
-  return bands;
+
+  // A band B nests inside band A when B's container node (B.parentId) is one of A's members.
+  const childBands = new Map<string, Prelim[]>();
+  for (const a of prelims) {
+    childBands.set(a.id, prelims.filter((b) => b !== a && a.memberSet.has(b.parentId)));
+  }
+
+  // Pass 2 — bottom-up sizing. A band must wrap its nested bands with the SAME BAND_PAD it gives
+  // blocks, so nested lanes never paint their border flush against the parent's (the right/bottom
+  // "touching" the user sees: both edges otherwise land at sharedChildMax + BAND_PAD). Each band's
+  // box therefore unions its nested bands' (already-grown) full rects — which carry their own pad
+  // and top label headroom — before adding BAND_PAD all round. Nesting runs several levels deep, so
+  // relax until nothing changes (rects only ever grow; the cap is a safety net, not the exit).
+  const rect = new Map<string, { x: number; y: number; w: number; h: number }>();
+  const sizeFrom = (p: Prelim, minX: number, minY: number, maxX: number, maxY: number) => ({
+    x: minX - BAND_PAD + p.leftInset,
+    y: minY - BAND_PAD - BAND_LABEL_HEADROOM,
+    w: (maxX - minX) + BAND_PAD * 2 - p.leftInset,
+    h: (maxY - minY) + BAND_PAD * 2 + BAND_LABEL_HEADROOM,
+  });
+  for (const p of prelims) rect.set(p.id, sizeFrom(p, p.nMinX, p.nMinY, p.nMaxX, p.nMaxY));
+  for (let pass = 0; pass <= prelims.length; pass++) {
+    let changed = false;
+    for (const p of prelims) {
+      let minX = p.nMinX, minY = p.nMinY, maxX = p.nMaxX, maxY = p.nMaxY;
+      for (const c of childBands.get(p.id)!) {
+        const r = rect.get(c.id)!;
+        minX = Math.min(minX, r.x);
+        minY = Math.min(minY, r.y);
+        maxX = Math.max(maxX, r.x + r.w);
+        maxY = Math.max(maxY, r.y + r.h);
+      }
+      const next = sizeFrom(p, minX, minY, maxX, maxY);
+      const cur = rect.get(p.id)!;
+      if (next.x !== cur.x || next.y !== cur.y || next.w !== cur.w || next.h !== cur.h) {
+        rect.set(p.id, next);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  return prelims.map((p) => {
+    const r = rect.get(p.id)!;
+    return {
+      id: p.id,
+      parentId: p.parentId,
+      branchKey: p.branchKey,
+      x: r.x, y: r.y, width: r.w, height: r.h,
+      colorVar: branchColorVar(p.branchKey),
+      depth: p.depth,
+      memberIds: p.memberIds,
+    };
+  });
 }

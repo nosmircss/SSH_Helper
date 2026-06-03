@@ -76,6 +76,20 @@ describe('branchBands', () => {
     expect(nested.x + nested.width).toBeLessThan(outer.x + outer.width + 1);
   });
 
+  it('wraps nested bands with BAND_PAD so their borders never touch the parent band', () => {
+    // Outer THEN whose LAST child is a nested IF; the nested THEN body is the bottom-right extreme,
+    // so before the fix the outer lane's right/bottom edge landed flush against the nested lane's.
+    const lead = child('lead', 'p', 'steps/0/then/0', 100, 100);
+    const nestedIf = child('nif', 'p', 'steps/0/then/1', 100, 200);
+    const nestedBody = child('g', 'nif', 'steps/0/then/1/then/0', 320, 300); // indented right + lowest
+    const bands = computeBranchBands([lead, nestedIf, nestedBody]);
+    const outer = bands.find((b) => b.id === 'p::then')!;
+    const nested = bands.find((b) => b.id === 'nif::then')!;
+    // The nested lane now sits a full BAND_PAD inside the parent on the right AND the bottom.
+    expect(outer.x + outer.width).toBe(nested.x + nested.width + BAND_PAD);
+    expect(outer.y + outer.height).toBe(nested.y + nested.height + BAND_PAD);
+  });
+
   it('groups all switch cases into one lane that spans every case body', () => {
     const c0 = child('a', 'sw', 'steps/0/cases/0/0', 100, 100);
     const c1 = child('b', 'sw', 'steps/0/cases/1/0', 500, 200); // a later case, further right
