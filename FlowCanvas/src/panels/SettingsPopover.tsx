@@ -13,7 +13,7 @@ function Segmented<T extends string | number>(props: {
   onChange: (v: T) => void;
 }) {
   return (
-    <div style={{ padding: '5px 0' }}>
+    <div style={{ padding: '5px 0' }} data-testid={`setting-${props.label.toLowerCase().replace(/\s+/g, '-')}`}>
       <div style={{ ...labStyle, marginBottom: 4 }}>{props.label}</div>
       <div style={{ display: 'flex', width: '100%', border: '1px solid var(--fc-border)', borderRadius: 6, overflow: 'hidden' }}>
         {props.options.map((o, i) => {
