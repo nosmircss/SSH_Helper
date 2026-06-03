@@ -90,4 +90,17 @@ describe('branchBands', () => {
     expect(b.y).toBe(200 - BAND_PAD - BAND_LABEL_HEADROOM);
     expect(b.y + b.height).toBe(200 + COLLAPSED_HEIGHT + BAND_PAD);
   });
+
+  it('exposes memberIds for every node in the branch subtree, including nested bodies', () => {
+    const direct = child('d', 'p', 'steps/0/then/0', 100, 100);
+    const nestedIf = child('nif', 'p', 'steps/0/then/1', 100, 200);
+    const nestedBody = child('g', 'nif', 'steps/0/then/1/then/0', 280, 300); // indented nested THEN body
+    const bands = computeBranchBands([direct, nestedIf, nestedBody]);
+
+    const outer = bands.find((b) => b.id === 'p::then')!;
+    expect([...outer.memberIds].sort()).toEqual(['d', 'g', 'nif']); // whole subtree
+
+    const nested = bands.find((b) => b.id === 'nif::then')!;
+    expect(nested.memberIds).toEqual(['g']); // just its own body
+  });
 });

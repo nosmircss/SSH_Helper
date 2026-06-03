@@ -21,6 +21,8 @@ export interface BranchBand {
   height: number;
   colorVar: string;
   depth: number;
+  /** Ids of every node this band wraps (the boxed subtree). Drives "drag the band to move it". */
+  memberIds: string[];
 }
 
 const BRANCH_KEYS = [
@@ -157,6 +159,7 @@ export function computeBranchBands(nodes: Node[]): BranchBand[] {
       height: (maxY - minY) + BAND_PAD * 2 + BAND_LABEL_HEADROOM,
       colorVar: branchColorVar(g.branchKey),
       depth,
+      memberIds: boxNodes.map((n) => n.id),
     });
   }
   return bands;
