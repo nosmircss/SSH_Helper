@@ -2,7 +2,6 @@ import { memo, type CSSProperties, useCallback, useEffect, useState } from 'reac
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { blockDefMap, categoryColors, type BlockCategory } from '../blockDefs/registry';
 import { useFlowStore } from '../stores/useFlowStore';
-import { selectIsSingleBranchContainer } from '../stores/selectors/containerBranch';
 import { mix } from '../utils/tokens';
 import { nodeBorderColor, resolveNodeShadow } from '../utils/nodeStyle';
 import { summarizeBlock } from '../utils/blockSummary';
@@ -96,9 +95,6 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const isExpanded = useFlowStore((s) => s.isExpanded(id));
   const toggleExpanded = useFlowStore((s) => s.toggleExpanded);
   const selectNode = useFlowStore((s) => s.selectNode);
-  // Single-branch containers (then-only IF, loop) route the continuation straight down the spine
-  // (handle at bottom-center); multi-branch containers keep the bottom-left corridor.
-  const continueStraight = useFlowStore((s) => selectIsSingleBranchContainer(s, id));
 
   const handleBreakpointToggle = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -378,15 +374,16 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         </div>
       ) : null}
 
-      {/* Output handle (bottom). For a single-branch container this is the THEN/body source, and
-          the continuation diamond sits at bottom-center — so shift this handle right (toward the
-          indented body) to keep the two from stacking and being indistinguishable to drag. */}
+      {/* Output handle (bottom). For a CONTAINER this is the THEN/body branch source and the
+          continuation diamond sits at bottom-center, so shift this handle right (toward the indented
+          body) to keep the two from stacking. A plain block's single successor stays centered so its
+          spine edge renders as a straight vertical line. */}
       <Handle
         type="source"
         position={Position.Bottom}
         style={{
           background: colors.border, width: 8, height: 8, border: 'none',
-          ...(continueStraight ? { left: '75%' } : {}),
+          ...(def.isContainer ? { left: '75%' } : {}),
         }}
       />
 
@@ -403,30 +400,18 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         />
       )}
 
-      {/* Continuation handle for container blocks (accent diamond). For a single-branch
-          container (then-only IF, loop) the body is indented clear of the spine, so the
-          continuation leaves the bottom-CENTER and runs straight down. For a multi-branch
-          container the first branch sits under the spine, so the handle stays on the
-          bottom-LEFT where Position.Left routes the corridor leftward to clear it. */}
+      {/* Continuation handle for container blocks (accent diamond). EVERY container now indents its
+          branches clear of the spine, so the continuation leaves the bottom-CENTER and runs straight
+          down the spine gutter. A centered, NON-rotated marker keeps React Flow's connection point
+          dead-center — a rotate(45deg) diamond inflates the bounding box and offsets the point ~2px,
+          enough to fail the isSpine test and bend the "straight" continuation (proven via the
+          edge-geometry e2e). */}
       {def.isContainer && (
         <Handle
           type="source"
-          position={continueStraight ? Position.Bottom : Position.Left}
+          position={Position.Bottom}
           id="continue"
-          style={
-            continueStraight
-              // Single-branch: a centered, NON-rotated marker. A rotate(45deg) diamond inflates the
-              // handle's bounding box, and React Flow anchors the connection point off-center by ~2px
-              // — enough to fail the isSpine test and bend the "straight" continuation (proven via the
-              // edge-geometry e2e). Letting RF center an un-rotated handle keeps it dead-center.
-              ? { background: 'var(--fc-accent)', width: 10, height: 10, border: 'none', borderRadius: 3 }
-              // Multi-branch: bottom-left diamond corridor. The continuation is a smoothstep here, so
-              // the rotated handle's small offset doesn't matter.
-              : {
-                  background: 'var(--fc-accent)', width: 10, height: 10, border: 'none', borderRadius: 2,
-                  left: -5, top: 'auto', bottom: -2, transform: 'rotate(45deg)', boxShadow: '0 0 0 5px transparent',
-                }
-          }
+          style={{ background: 'var(--fc-accent)', width: 10, height: 10, border: 'none', borderRadius: 3 }}
         />
       )}
     </div>

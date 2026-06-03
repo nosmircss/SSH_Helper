@@ -6,12 +6,14 @@ import { estimateNodeHeight, COLLAPSED_HEIGHT, BAND_PAD } from '../nodeSize';
 /** Single source of truth for layout spacing (ported from FlowCanvasBridge.cs). */
 export const LAYOUT = {
   NODE_SPACING_Y: 106,
-  // A single-branch container (then-only IF, loop, single-case switch) routes its continuation
-  // straight down the spine from the bottom-CENTER handle (x = node.x + SPINE_WIDTH/2). For that
-  // wire to stay clear of the branch band, the body must indent far enough that the band's left
-  // wall (childX - BAND_PAD) lands right of the wire — i.e. offset > SPINE_WIDTH/2 + BAND_PAD = 183.
-  // 220 leaves a comfortable gutter. (Multi-branch containers keep the bottom-LEFT corridor.)
-  SINGLE_BRANCH_CHILD_OFFSET: 220,
+  // EVERY container indents its branches right of the spine by this offset and routes its
+  // continuation straight down the spine gutter from the bottom-CENTER handle (x = node.x +
+  // SPINE_WIDTH/2). For that wire to clear the branch band, the body must indent far enough that the
+  // band's left wall (childX - BAND_PAD) lands right of the wire — i.e. offset > SPINE_WIDTH/2 +
+  // BAND_PAD = 183. 220 leaves a comfortable gutter. (Multi-branch containers used to anchor their
+  // first branch under the container with a bottom-LEFT continuation corridor that escaped the band;
+  // they now indent like single-branch ones — one routing rule for all.)
+  BRANCH_CHILD_OFFSET: 220,
   NODE_START_X: 250,
   NODE_START_Y: 40,
   CHILD_NODE_MAX_WIDTH: 300,
@@ -49,10 +51,10 @@ function getColumnWidth(depth: number): number {
 }
 
 /** Mirrors C# MeasureSteps: column count + row count of a branch subtree, plus `indent` — the
- *  maximum rightward pixel offset that single-branch nesting (loops / single-then ifs, which shift
- *  their body by SINGLE_BRANCH_CHILD_OFFSET each level) adds within the subtree. Multi-branch
- *  containers add columns (not indent); single-branch ones add indent. The branch slot width uses
- *  `indent` so a sibling branch is placed clear of deeply-indented nested content. */
+ *  maximum rightward pixel offset that container nesting adds within the subtree. Every container
+ *  shifts its branches right by BRANCH_CHILD_OFFSET each level; multi-branch containers ALSO add
+ *  columns for their side-by-side arms. The branch slot width uses `indent` so a sibling branch is
+ *  placed clear of deeply-indented nested content. */
 function measureSteps(children: LayoutTreeNode[]): SubtreeSize {
   let columns = 1;
   let rows = 0;
@@ -73,13 +75,15 @@ function measureSteps(children: LayoutTreeNode[]): SubtreeSize {
       }
       columns = Math.max(columns, Math.max(2, totalCols));
       rows += maxRows;
-      indent = Math.max(indent, maxIndent);
+      // This container shifts its own arms right by the offset too (like the single-branch case
+      // below), so reserve it — otherwise a sibling lane would overlap the shifted multi-branch body.
+      indent = Math.max(indent, LAYOUT.BRANCH_CHILD_OFFSET + maxIndent);
     } else {
       for (const b of branches) {
         const s = measureSteps(b.children);
         columns = Math.max(columns, s.columns);
         rows += s.rows;
-        indent = Math.max(indent, LAYOUT.SINGLE_BRANCH_CHILD_OFFSET + s.indent);
+        indent = Math.max(indent, LAYOUT.BRANCH_CHILD_OFFSET + s.indent);
       }
     }
   }
@@ -113,26 +117,28 @@ function placeBranchSteps(
 }
 
 function placeSingleBranch(branch: LayoutBranch, depth: number, centerX: number, startY: number, pos: Map<string, Point>): number {
-  const childX = centerX + LAYOUT.SINGLE_BRANCH_CHILD_OFFSET;
+  const childX = centerX + LAYOUT.BRANCH_CHILD_OFFSET;
   return placeBranchSteps(branch.children, depth, childX, childX, startY, pos);
 }
 
 function placeMultiBranch(branches: LayoutBranch[], depth: number, centerX: number, startY: number, pos: Map<string, Point>): number {
   const sizes = branches.map((b) => measureSteps(b.children));
   const totalColumns = sizes.reduce((sum, s) => sum + s.columns, 0);
-  // Fixed extra width per branch (nested indent + lane padding + inter-lane gap) is independent of
-  // colWidth; only the column part scales when clamping to MAX_SPREAD_WIDTH. Mirrors branchSlotWidth.
-  const extra = sizes.reduce((sum, s) => sum + s.indent + 2 * BAND_PAD + LAYOUT.LANE_GAP, 0);
+  // Fixed extra width (the container's own branch indent + per-branch nested indent + lane padding +
+  // inter-lane gap) is independent of colWidth; only the column part scales when clamping to
+  // MAX_SPREAD_WIDTH. Mirrors leftX's starting offset + branchSlotWidth.
+  const extra = LAYOUT.BRANCH_CHILD_OFFSET + sizes.reduce((sum, s) => sum + s.indent + 2 * BAND_PAD + LAYOUT.LANE_GAP, 0);
   let colWidth = getColumnWidth(depth);
   if (totalColumns > 0 && totalColumns * colWidth + extra > LAYOUT.MAX_SPREAD_WIDTH) {
     colWidth = Math.max(LAYOUT.CHILD_NODE_MAX_WIDTH, (LAYOUT.MAX_SPREAD_WIDTH - extra) / totalColumns);
   }
-  // Anchor the FIRST (primary: then/do/try/case-0) branch's LEFT edge directly under the container
+  // Indent the FIRST (primary: then/do/try/case-0) branch right of the container by
+  // BRANCH_CHILD_OFFSET — opening the spine gutter so the straight continuation clears the band —
   // and lay the remaining branches out to the right. Each branch reserves its TRUE content width
-  // (columns + single-branch nested indent + lane padding), so a sibling never overlaps a branch
-  // whose nested bodies are indented far to the right (and the first branch staying at centerX keeps
-  // nested bodies aligned under the container — issue #45 import layout).
-  let leftX = centerX;
+  // (columns + nested indent + lane padding), so a sibling never overlaps a branch whose nested
+  // bodies are indented far to the right. (#45: a nested body only ever moves further RIGHT, never
+  // left of its parent's column.)
+  let leftX = centerX + LAYOUT.BRANCH_CHILD_OFFSET;
   let maxEndY = startY;
   for (let i = 0; i < branches.length; i++) {
     const endY = placeBranchSteps(branches[i].children, depth, leftX, leftX, startY, pos);

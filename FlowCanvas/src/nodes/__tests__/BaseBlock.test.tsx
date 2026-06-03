@@ -108,13 +108,16 @@ describe('BaseBlock — container continuation handle', () => {
     expect(screen.getByTestId('handle-source-continue').style.transform).toBe('');
   });
 
-  it('keeps the continue handle on the left for a multi-branch (then+else) IF', () => {
+  it('also puts the continue handle at bottom-center for a multi-branch (then+else) IF (unified straight routing)', () => {
+    // Option B: every container indents its branches right of the spine, so even a multi-branch IF
+    // routes its continuation straight down the gutter from bottom-center — no more bottom-left
+    // corridor that escaped the band.
     mock.state.nodes = [
       { id: 'if-2', data: { blockType: 'if', props: { _stepPath: 'steps/0' } } },
       { id: 't', data: { props: { _isChildOf: 'if-2', _stepPath: 'steps/0/then/0' } } },
       { id: 'e', data: { props: { _isChildOf: 'if-2', _stepPath: 'steps/0/else/0' } } },
     ];
     renderNode({ id: 'if-2', data: { blockType: 'if', label: 'If', props: { _stepPath: 'steps/0' } } as any });
-    expect(screen.getByTestId('handle-source-continue').getAttribute('data-position')).toBe('left');
+    expect(screen.getByTestId('handle-source-continue').getAttribute('data-position')).toBe('bottom');
   });
 });

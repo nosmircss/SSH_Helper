@@ -22,7 +22,7 @@ describe('placeTree — single-branch container (loop indents right)', () => {
       branches: [{ scope: 'do', sortRank: 0, children: [leaf('body1'), leaf('body2')] }],
     };
     const pos = placeTree({ spine: [loop] });
-    expect(pos.get('body1')!.x).toBe(LAYOUT.NODE_START_X + LAYOUT.SINGLE_BRANCH_CHILD_OFFSET);
+    expect(pos.get('body1')!.x).toBe(LAYOUT.NODE_START_X + LAYOUT.BRANCH_CHILD_OFFSET);
     expect(pos.get('body2')!.y).toBeGreaterThan(pos.get('body1')!.y);
   });
 });
@@ -31,7 +31,7 @@ import { buildLayoutTree } from '../treeBuilder';
 import { computeHierarchicalLayout } from '../hierarchicalLayout';
 
 describe('placeTree — multi-branch (fans into side-by-side columns)', () => {
-  it('anchors the first branch under the container and spreads the rest to the right', () => {
+  it('indents every branch right of the spine, opening a clear continuation gutter', () => {
     const ifNode: LayoutTreeNode = {
       id: 'if', node: { id: 'if' } as never, isContainer: true,
       branches: [
@@ -44,14 +44,17 @@ describe('placeTree — multi-branch (fans into side-by-side columns)', () => {
     expect(pos.get('t1')!.y).toBe(pos.get('e1')!.y);
     // then is left of else.
     expect(pos.get('t1')!.x).toBeLessThan(pos.get('e1')!.x);
-    // The primary (then) branch stays directly under the container's X; else is offset right.
-    // This keeps a multi-branch container nested inside another container from shoving its body
-    // left of the parent's column (issue #45 import layout).
-    expect(pos.get('t1')!.x).toBeCloseTo(LAYOUT.NODE_START_X, 5);
-    expect(pos.get('e1')!.x).toBeGreaterThan(LAYOUT.NODE_START_X);
+    // Like single-branch containers, the FIRST branch is indented right of the container so the
+    // continuation runs straight down the spine gutter on the left, clear of the band (Option B —
+    // unifies multi- and single-branch routing; the former "anchored under the container" choice
+    // sent the continuation down the bottom-left corridor that escaped the band).
+    expect(pos.get('t1')!.x).toBeCloseTo(LAYOUT.NODE_START_X + LAYOUT.BRANCH_CHILD_OFFSET, 5);
+    expect(pos.get('e1')!.x).toBeGreaterThan(pos.get('t1')!.x);
+    // The band's left wall lands right of the straight spine continuation (no overlap / no escape).
+    expect(pos.get('t1')!.x - BAND_PAD).toBeGreaterThan(LAYOUT.NODE_START_X + SPINE_WIDTH / 2);
   });
 
-  it('keeps a multi-branch container nested in a single-branch container aligned under it (issue #45)', () => {
+  it('keeps a multi-branch container nested in a single-branch container right of the spine (issue #45: never left of it)', () => {
     // foreach { do: [ if { then: [t], else: [e] } ] }
     const inner: LayoutTreeNode = {
       id: 'if', node: { id: 'if' } as never, isContainer: true,
@@ -66,11 +69,12 @@ describe('placeTree — multi-branch (fans into side-by-side columns)', () => {
     };
     const pos = placeTree({ spine: [loop] });
 
-    const loopBodyX = LAYOUT.NODE_START_X + LAYOUT.SINGLE_BRANCH_CHILD_OFFSET; // where the if sits
-    // The if's primary (then) branch stays in the loop body's column, NOT shoved left of it.
+    const loopBodyX = LAYOUT.NODE_START_X + LAYOUT.BRANCH_CHILD_OFFSET; // where the if sits
+    // The if itself sits in the loop body's column…
     expect(pos.get('if')!.x).toBeCloseTo(loopBodyX, 5);
-    expect(pos.get('t1')!.x).toBeCloseTo(loopBodyX, 5);
-    expect(pos.get('t1')!.x).toBeGreaterThanOrEqual(LAYOUT.NODE_START_X); // never left of the spine
+    // …and its own branches indent one level further right (never left of the loop body — #45).
+    expect(pos.get('t1')!.x).toBeCloseTo(loopBodyX + LAYOUT.BRANCH_CHILD_OFFSET, 5);
+    expect(pos.get('t1')!.x).toBeGreaterThanOrEqual(loopBodyX);
     // else spreads to the right of the then column.
     expect(pos.get('e1')!.x).toBeGreaterThan(pos.get('t1')!.x);
   });

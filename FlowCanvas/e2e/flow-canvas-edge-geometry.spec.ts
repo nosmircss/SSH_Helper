@@ -88,6 +88,31 @@ test.describe('Flow Canvas Edge Geometry', () => {
     await expect(page.locator('path#e-cont')).toHaveAttribute('d', /^M[\s\d.,-]+L[\s\d.,-]+$/);
   });
 
+  test('a MULTI-branch IF continuation also renders as a straight vertical line', async ({ page }) => {
+    // Option B: multi-branch containers (if/else) now indent their branches right of the spine and
+    // route the continuation straight down the gutter from bottom-center — so the continue edge is a
+    // clean straight line, not the bottom-left corridor that used to escape the THEN band.
+    await loadGraphFixture(page, {
+      nodes: [
+        { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', label: 'S', props: {} } },
+        { id: 'if-1', type: 'block', position: { x: 9, y: 9 }, data: { blockType: 'if', label: 'If', props: { condition: 'x == 1', _stepPath: 'steps/0' } } },
+        { id: 'then-1', type: 'block', position: { x: 9, y: 9 }, data: { blockType: 'send', label: 'Y', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/0', _branchLabel: 'then', command: 'y' } } },
+        { id: 'else-1', type: 'block', position: { x: 9, y: 9 }, data: { blockType: 'send', label: 'N', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/else/0', _branchLabel: 'else', command: 'n' } } },
+        { id: 'after-1', type: 'block', position: { x: 9, y: 9 }, data: { blockType: 'send', label: 'After', props: { command: 'next' } } },
+      ],
+      edges: [
+        { id: 'e-start', source: '__start__', target: 'if-1' },
+        { id: 'e-then', source: 'if-1', target: 'then-1', label: 'then' },
+        { id: 'e-else', source: 'if-1', target: 'else-1', sourceHandle: 'false', label: 'else' },
+        { id: 'e-cont', source: 'if-1', target: 'after-1', sourceHandle: 'continue' },
+      ],
+    });
+    await expect(page.locator('.react-flow__node[data-id="after-1"]')).toBeVisible();
+    await expect(page.locator('path#e-cont')).toHaveCount(1);
+    // Straight = getStraightPath's single "M x,y L x,y"; a smoothstep bend would add Q corners.
+    await expect(page.locator('path#e-cont')).toHaveAttribute('d', /^M[\s\d.,-]+L[\s\d.,-]+$/);
+  });
+
   test('an X-offset edge keeps its orthogonal (smoothstep) routing', async ({ page }) => {
     // hasUserLayout:true keeps the hand-placed X-offset; without it the auto-layout engine
     // snaps both blocks onto the spine column and collapses the edge to a straight vertical
