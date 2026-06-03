@@ -3,6 +3,7 @@ import { ViewportPortal, useReactFlow } from '@xyflow/react';
 import { useRef, type PointerEvent } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
 import { computeBranchBands, branchPillLabel, type BranchBand } from '../utils/branchBands';
+import { BLOCK_WIDTH_INSET } from '../utils/nodeSize';
 import { mix } from '../utils/tokens';
 import { sendLayoutAutosave } from '../utils/layoutAutosave';
 import './bandlayer.css';
@@ -10,11 +11,12 @@ import './bandlayer.css';
 export default function BranchBandsLayer() {
   const nodes = useFlowStore((s) => s.nodes);
   const enabled = useFlowStore((s) => s.branchBandsEnabled);
+  const blockWidth = useFlowStore((s) => s.blockWidth);
   const { screenToFlowPosition } = useReactFlow();
   const drag = useRef<{ memberIds: string[]; lastX: number; lastY: number } | null>(null);
 
   if (!enabled) return null;
-  const bands = computeBranchBands(nodes);
+  const bands = computeBranchBands(nodes, blockWidth - BLOCK_WIDTH_INSET);
   if (bands.length === 0) return null;
 
   const startDrag = (e: PointerEvent<HTMLDivElement>, band: BranchBand) => {
