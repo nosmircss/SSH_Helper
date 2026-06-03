@@ -45,4 +45,26 @@ describe('branchBands', () => {
     const expanded = computeBranchBands([expNode])[0];
     expect(expanded.height).toBeGreaterThan(collapsed.height);
   });
+
+  it('wraps the whole branch subtree, including nested-branch bodies indented to the right', () => {
+    // outer THEN: a direct child + a nested IF (direct child) whose THEN body is indented right.
+    const direct = child('d', 'p', 'steps/0/then/0', 100, 100);
+    const nestedIf = child('nif', 'p', 'steps/0/then/1', 100, 200);
+    const nestedBody = child('g', 'nif', 'steps/0/then/1/then/0', 280, 300); // indented +180 right
+    const bands = computeBranchBands([direct, nestedIf, nestedBody]);
+    const outer = bands.find((b) => b.id === 'p::then')!;
+    // Outer lane right edge must cover the indented nested body (280 + 300 child width + 18 pad).
+    expect(outer.x + outer.width).toBeGreaterThanOrEqual(280 + 300 + 18);
+    // The nested lane itself stays tight around just its own body.
+    const nested = bands.find((b) => b.id === 'nif::then')!;
+    expect(nested.x + nested.width).toBeLessThan(outer.x + outer.width + 1);
+  });
+
+  it('groups all switch cases into one lane that spans every case body', () => {
+    const c0 = child('a', 'sw', 'steps/0/cases/0/0', 100, 100);
+    const c1 = child('b', 'sw', 'steps/0/cases/1/0', 500, 200); // a later case, further right
+    const bands = computeBranchBands([c0, c1]);
+    const caseBand = bands.find((b) => b.branchKey === 'case')!;
+    expect(caseBand.x + caseBand.width).toBeGreaterThanOrEqual(500 + 300 + 18);
+  });
 });

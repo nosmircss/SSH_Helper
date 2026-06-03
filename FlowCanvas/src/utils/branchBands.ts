@@ -81,6 +81,26 @@ function nodeBox(n: Node): { w: number; h: number } {
   return { w: CHILD_WIDTH, h };
 }
 
+function stepPathOf(n: Node): string | undefined {
+  return ((n.data as { props?: Record<string, unknown> } | undefined)?.props?.['_stepPath']) as string | undefined;
+}
+
+/** The stepPath prefix that identifies a branch's whole subtree, up to and including the branch
+ *  keyword segment. "steps/0/then/0" → "steps/0/then"; "steps/0/then/2/then/0" → "steps/0/then/2/then";
+ *  "steps/1/cases/0/0" → "steps/1/cases" (so all switch cases share one lane). Returns undefined when
+ *  no branch keyword is present (caller then falls back to the group's direct children). */
+function branchSubtreePrefix(stepPath: string | undefined): string | undefined {
+  if (!stepPath) return undefined;
+  const segs = stepPath.split('/');
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const s = segs[i].toLowerCase();
+    if (s === 'cases' || (BRANCH_KEYS as readonly string[]).includes(s)) {
+      return segs.slice(0, i + 1).join('/');
+    }
+  }
+  return undefined;
+}
+
 export function computeBranchBands(nodes: Node[]): BranchBand[] {
   const groups = new Map<string, { parentId: string; branchKey: string; nodes: Node[] }>();
   for (const n of nodes) {
@@ -98,8 +118,16 @@ export function computeBranchBands(nodes: Node[]): BranchBand[] {
 
   const bands: BranchBand[] = [];
   for (const [groupId, g] of groups) {
+    // A lane must wrap the whole branch SUBTREE: nested-branch bodies are indented to the right
+    // and live in their own (child-parent) groups, so a direct-children-only box would clip them.
+    // Box over every node whose stepPath falls under this branch's prefix; fall back to direct
+    // children when no usable prefix exists.
+    const prefix = branchSubtreePrefix(stepPathOf(g.nodes[0]));
+    const boxNodes = prefix
+      ? nodes.filter((n) => { const sp = stepPathOf(n); return sp != null && sp.startsWith(`${prefix}/`); })
+      : g.nodes;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const n of g.nodes) {
+    for (const n of boxNodes) {
       const { w, h } = nodeBox(n);
       minX = Math.min(minX, n.position.x);
       minY = Math.min(minY, n.position.y);
