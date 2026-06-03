@@ -133,3 +133,12 @@ describe('column width tracks child width', () => {
     expect(LAYOUT.MIN_COLUMN_WIDTH).toBe(330);
   });
 });
+
+describe('placeTree — height-aware vertical spacing', () => {
+  it('advances further past an expanded node than a collapsed one', () => {
+    const exp: LayoutTreeNode = { id: 'x', node: { id: 'x', data: { blockType: 'send', expanded: true, props: { command: 'a', capture: 'b' } } } as never, isContainer: false, branches: [] };
+    const after = leaf('after');
+    const pos = placeTree({ spine: [exp, after] });
+    expect(pos.get('after')!.y - pos.get('x')!.y).toBeGreaterThan(LAYOUT.NODE_SPACING_Y);
+  });
+});

@@ -1,6 +1,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import { buildLayoutTree } from './treeBuilder';
 import type { LayoutBranch, LayoutTree, LayoutTreeNode, Point } from './types';
+import { estimateNodeHeight, COLLAPSED_HEIGHT } from '../nodeSize';
 
 /** Single source of truth for layout spacing (ported from FlowCanvasBridge.cs). */
 export const LAYOUT = {
@@ -16,6 +17,14 @@ export const LAYOUT = {
   MAX_SPREAD_WIDTH: 1400,
   MAX_NESTING_DEPTH: 5,
 } as const;
+
+const VERTICAL_GAP = LAYOUT.NODE_SPACING_Y - COLLAPSED_HEIGHT; // 54 — preserves collapsed spacing
+
+function advanceFor(n: LayoutTreeNode): number {
+  const data = (n.node?.data ?? {}) as { blockType?: string; expanded?: boolean; props?: Record<string, unknown> };
+  if (!data.expanded) return LAYOUT.NODE_SPACING_Y;
+  return estimateNodeHeight(data.blockType ?? '', data.props ?? {}, true) + VERTICAL_GAP;
+}
 
 interface SubtreeSize { columns: number; rows: number; }
 
@@ -71,7 +80,7 @@ function placeBranchSteps(
   let y = startY;
   for (const child of children) {
     pos.set(child.id, { x: childX, y });
-    y += LAYOUT.NODE_SPACING_Y;
+    y += advanceFor(child);
     if (child.isContainer && depth < LAYOUT.MAX_NESTING_DEPTH && nonEmptyBranches(child).length > 0) {
       y = placeContainer(child, depth + 1, centerX, y, pos);
     }
@@ -124,7 +133,7 @@ export function placeTree(tree: LayoutTree): Map<string, Point> {
   let currentY = LAYOUT.NODE_START_Y + LAYOUT.NODE_SPACING_Y;
   for (const node of tree.spine) {
     pos.set(node.id, { x: LAYOUT.NODE_START_X, y: currentY });
-    currentY += LAYOUT.NODE_SPACING_Y;
+    currentY += advanceFor(node);
     if (node.isContainer && nonEmptyBranches(node).length > 0) {
       currentY = placeContainer(node, 1, LAYOUT.NODE_START_X, currentY, pos);
     }
