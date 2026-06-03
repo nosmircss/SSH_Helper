@@ -48,7 +48,8 @@ test.describe('Flow Canvas Auto-Organize (hierarchical)', () => {
     expect(then.y).toBe(els.y);                       // sibling columns start level
     expect(then.x).toBeLessThan(els.x);               // then left of else
     expect(Math.abs(then.x - els.x)).toBeGreaterThanOrEqual(260); // no overlap
-    expect((then.x + els.x) / 2).toBeCloseTo(ifp.x, 0); // columns centered on the container
+    expect(then.x).toBeCloseTo(ifp.x, 0);             // primary branch anchored under the container
+    expect(els.x).toBeGreaterThan(ifp.x);             // additional branches spread to the right
     expect(then.y).toBeGreaterThan(ifp.y);            // children below the container
   });
 

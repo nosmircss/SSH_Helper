@@ -93,7 +93,14 @@ function placeMultiBranch(branches: LayoutBranch[], depth: number, centerX: numb
     colWidth = LAYOUT.MAX_SPREAD_WIDTH / totalColumns;
     totalPixelWidth = LAYOUT.MAX_SPREAD_WIDTH;
   }
-  let leftEdge = centerX - totalPixelWidth / 2;
+  // Anchor the FIRST (primary: then/do/try/case-0) branch directly under the container and
+  // spread the remaining branches to the right — matching the C# reference layout. Centering
+  // all branches symmetrically (centerX - totalPixelWidth/2) pushed the primary branch left of
+  // the container, which for a multi-branch container nested inside another container shoved
+  // its body left of the parent's column and overlapped the parent's branch band (issue #45
+  // import layout). The first branch staying at centerX keeps nested bodies aligned and clear.
+  const firstBranchWidth = sizes[0].columns * colWidth;
+  let leftEdge = centerX - firstBranchWidth / 2;
   let maxEndY = startY;
   for (let i = 0; i < branches.length; i++) {
     const branchPixelWidth = sizes[i].columns * colWidth;

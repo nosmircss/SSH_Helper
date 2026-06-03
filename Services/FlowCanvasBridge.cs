@@ -596,7 +596,9 @@ namespace SSH_Helper.Services
         {
             string prevNodeId = parentNodeId;
             string? sourceHandle = branch.SourceHandle;
+            string edgeColor = branch.Color;
             bool isFirstInBranch = true;
+            bool isContinuation = false;
 
             for (int childIndex = 0; childIndex < branch.Steps.Count; childIndex++)
             {
@@ -636,11 +638,11 @@ namespace SSH_Helper.Services
                 // Create edge from previous node to this child
                 var edge = new JObject
                 {
-                    ["id"] = $"e-{prevNodeId}-{childNodeId}",
+                    ["id"] = $"e-{prevNodeId}-{childNodeId}" + (sourceHandle != null ? "-" + sourceHandle : ""),
                     ["source"] = prevNodeId,
                     ["target"] = childNodeId,
                     ["type"] = "smoothstep",
-                    ["style"] = new JObject { ["stroke"] = branch.Color },
+                    ["style"] = new JObject { ["stroke"] = edgeColor },
                 };
 
                 if (sourceHandle != null)
@@ -652,17 +654,30 @@ namespace SSH_Helper.Services
                     edge["label"] = branch.Label;
                     edge["labelStyle"] = new JObject
                     {
-                        ["fill"] = branch.Color,
+                        ["fill"] = edgeColor,
                         ["fontSize"] = 11,
                         ["fontWeight"] = 600,
                     };
                     edge["style"]!["strokeDasharray"] = "5,5";
                 }
+                else if (isContinuation)
+                {
+                    // Continuation edge out of a nested container's 'continue' handle.
+                    edge["label"] = "next";
+                    edge["labelStyle"] = new JObject
+                    {
+                        ["fill"] = edgeColor,
+                        ["fontSize"] = 11,
+                        ["fontWeight"] = 600,
+                    };
+                }
 
                 edges.Add(edge);
                 prevNodeId = childNodeId;
                 sourceHandle = null;
+                edgeColor = branch.Color;
                 isFirstInBranch = false;
+                isContinuation = false;
                 currentY += NodeSpacingY;
 
                 // Recursively expand if this child is also a container
@@ -673,7 +688,15 @@ namespace SSH_Helper.Services
 
                     if (nestedBranchEnds.Count > 0)
                     {
-                        prevNodeId = nestedBranchEnds[nestedBranchEnds.Count - 1];
+                        // The continuation after a nested container flows from the container's own
+                        // 'continue' handle — exactly like a top-level container — NOT from its branch
+                        // end. This keeps the nested body terminal (e.g. an inner if's `then` ends at
+                        // its last step instead of flowing into the next sibling) and routes the spine
+                        // straight from the container down to the following step. (issue #45)
+                        // prevNodeId intentionally stays = childNodeId (the container node).
+                        sourceHandle = "continue";
+                        edgeColor = ColorContinue;
+                        isContinuation = true;
                     }
                 }
             }
@@ -1387,35 +1410,79 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Collects a linear chain of nodes belonging to a branch, starting from the given node.
-        /// Stops when the chain ends, a node is already visited, or a convergence point is reached
-        /// (a node with more than one incoming edge, indicating it's a continuation after the container).
+        /// Collects the ordered list of nodes that make up a single container branch.
+        ///
+        /// For imported / metadata-tagged graphs every branch child carries an "_isChildOf"
+        /// pointer to its owning container and a hierarchical "_stepPath"
+        /// (e.g. "steps/1/do/8/then/3"). That metadata is the authoritative, unambiguous branch
+        /// definition: the branch is exactly the set of nodes whose _isChildOf is the owning
+        /// container and whose _stepPath is an IMMEDIATE child of the branch's scope path,
+        /// ordered by step index. Descendants of nested containers (deeper _stepPath) are
+        /// excluded here and emitted by their own container's regeneration.
+        ///
+        /// This replaces reconstructing structure from the linear edge chain, which is ambiguous
+        /// across nested-branch boundaries: following plain edges either over-collected (swallowed
+        /// the parent branch's following siblings) or, for a nested MULTI-branch container,
+        /// dead-ended inside its first branch and silently dropped following siblings (issue #45).
+        ///
+        /// For purely canvas-authored containers whose children carry no "_isChildOf" metadata
+        /// (nesting lives only on the edges) the original edge-following behaviour is preserved:
+        /// follow the linear chain and stop at a convergence point (a node with more than one
+        /// incoming edge, marking the continuation after the container).
         /// </summary>
         private List<string> CollectBranchChain(
             string startNodeId,
             Dictionary<string, List<EdgeInfo>> outgoing,
             Dictionary<string, int> incomingCount,
-            HashSet<string> branchVisited)
+            HashSet<string> branchVisited,
+            Dictionary<string, JToken> nodeMap)
         {
-            var chain = new List<string>();
-            var currentId = startNodeId;
+            var ownerContainer = GetNodeParentId(startNodeId, nodeMap);
+            var startPath = GetNodeStepPath(startNodeId, nodeMap);
 
+            // Metadata-driven collection for imported / metadata-tagged branches.
+            if (ownerContainer != null && !string.IsNullOrEmpty(startPath))
+            {
+                var branchScope = GetParentScopePath(startPath!);
+                var members = new List<KeyValuePair<int, string>>();
+                foreach (var entry in nodeMap)
+                {
+                    var id = entry.Key;
+                    if (branchVisited.Contains(id))
+                        continue;
+                    if (!string.Equals(GetNodeParentId(id, nodeMap), ownerContainer, StringComparison.Ordinal))
+                        continue;
+                    if (!TryGetDirectChildIndex(GetNodeStepPath(id, nodeMap), branchScope, out var index))
+                        continue;
+                    members.Add(new KeyValuePair<int, string>(index, id));
+                }
+
+                members.Sort((a, b) => a.Key.CompareTo(b.Key));
+
+                var orderedChain = new List<string>(members.Count);
+                foreach (var member in members)
+                {
+                    branchVisited.Add(member.Value);
+                    orderedChain.Add(member.Value);
+                }
+                return orderedChain;
+            }
+
+            // Canvas-authored fallback: structure lives on the edges, not on node metadata.
+            // Follow the linear chain and stop at a convergence point (continuation after the
+            // container) or when another branch already claimed the node.
+            var chain = new List<string>();
+            string? currentId = startNodeId;
             while (currentId != null)
             {
-                // Stop if already visited (convergence with another branch)
                 if (branchVisited.Contains(currentId))
                     break;
-
-                // Stop if this node has multiple incoming edges (convergence point — continuation after container)
-                // Exception: the first node in the chain is always included even with multiple incoming edges,
-                // because it's directly connected from the container's branch handle.
                 if (chain.Count > 0 && incomingCount.TryGetValue(currentId, out var count) && count > 1)
                     break;
 
                 branchVisited.Add(currentId);
                 chain.Add(currentId);
 
-                // Follow the default (non-false-handle) outgoing edge to continue the chain
                 string? nextId = null;
                 if (outgoing.TryGetValue(currentId, out var edges))
                 {
@@ -1433,6 +1500,51 @@ namespace SSH_Helper.Services
             }
 
             return chain;
+        }
+
+        /// <summary>
+        /// Reads a node's "_isChildOf" parent-container id, or null for top-level / metadata-less nodes.
+        /// </summary>
+        private static string? GetNodeParentId(string nodeId, Dictionary<string, JToken> nodeMap)
+        {
+            if (!nodeMap.TryGetValue(nodeId, out var node))
+                return null;
+            var parentId = (node["data"]?["props"] as JObject)?["_isChildOf"]?.ToString();
+            return string.IsNullOrEmpty(parentId) ? null : parentId;
+        }
+
+        /// <summary>Reads a node's hierarchical "_stepPath" (e.g. "steps/1/do/8/then/3"), or null.</summary>
+        private static string? GetNodeStepPath(string nodeId, Dictionary<string, JToken> nodeMap)
+        {
+            if (!nodeMap.TryGetValue(nodeId, out var node))
+                return null;
+            return (node["data"]?["props"] as JObject)?["_stepPath"]?.ToString();
+        }
+
+        /// <summary>Returns a child step path with its final "/index" segment removed (its branch scope).</summary>
+        private static string GetParentScopePath(string stepPath)
+        {
+            var slash = stepPath.LastIndexOf('/');
+            return slash > 0 ? stepPath.Substring(0, slash) : stepPath;
+        }
+
+        /// <summary>
+        /// True when childStepPath is an IMMEDIATE child of branchScope (i.e. "branchScope/&lt;int&gt;"),
+        /// yielding that integer index. Deeper descendants ("branchScope/x/...") are rejected so a
+        /// nested container's own descendants are not pulled into the parent branch.
+        /// </summary>
+        private static bool TryGetDirectChildIndex(string? childStepPath, string branchScope, out int index)
+        {
+            index = -1;
+            if (string.IsNullOrEmpty(childStepPath))
+                return false;
+            var prefix = branchScope + "/";
+            if (!childStepPath!.StartsWith(prefix, StringComparison.Ordinal))
+                return false;
+            var remainder = childStepPath.Substring(prefix.Length);
+            if (remainder.Length == 0 || remainder.IndexOf('/') >= 0)
+                return false;
+            return int.TryParse(remainder, out index);
         }
 
         private sealed class BranchExportInfo
@@ -1535,7 +1647,7 @@ namespace SSH_Helper.Services
                     return false;
                 }
 
-                var thenChain = CollectBranchChain(thenTarget, outgoing, incomingCount, branchVisited);
+                var thenChain = CollectBranchChain(thenTarget, outgoing, incomingCount, branchVisited, nodeMap);
                 if (thenChain.Count == 0)
                 {
                     sb.AppendLine("    then: []");
@@ -1557,7 +1669,7 @@ namespace SSH_Helper.Services
                     {
                         var elifCondition = string.IsNullOrWhiteSpace(elif.Condition) ? "false" : elif.Condition!;
                         sb.AppendLine($"      - condition: {EscapeYamlString(elifCondition)}");
-                        var elifChain = CollectBranchChain(elif.TargetId, outgoing, incomingCount, branchVisited);
+                        var elifChain = CollectBranchChain(elif.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
                         if (elifChain.Count == 0)
                         {
                             sb.AppendLine("        then: []");
@@ -1576,7 +1688,7 @@ namespace SSH_Helper.Services
 
                 if (elseTarget != null)
                 {
-                    var elseChain = CollectBranchChain(elseTarget, outgoing, incomingCount, branchVisited);
+                    var elseChain = CollectBranchChain(elseTarget, outgoing, incomingCount, branchVisited, nodeMap);
                     if (elseChain.Count == 0)
                     {
                         sb.AppendLine("    else: []");
@@ -1609,7 +1721,7 @@ namespace SSH_Helper.Services
                     return false;
                 }
 
-                var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited);
+                var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
                 if (doChain.Count == 0)
                 {
                     sb.AppendLine("    do: []");
@@ -1665,7 +1777,7 @@ namespace SSH_Helper.Services
                     return false;
                 }
 
-                var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited);
+                var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
                 if (doChain.Count == 0)
                 {
                     sb.AppendLine("    do: []");
@@ -1682,7 +1794,7 @@ namespace SSH_Helper.Services
 
                 if (catchEdge != null)
                 {
-                    var catchChain = CollectBranchChain(catchEdge.TargetId, outgoing, incomingCount, branchVisited);
+                    var catchChain = CollectBranchChain(catchEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
                     if (catchChain.Count == 0)
                     {
                         sb.AppendLine("    catch: []");
@@ -1700,7 +1812,7 @@ namespace SSH_Helper.Services
 
                 if (finallyEdge != null)
                 {
-                    var finallyChain = CollectBranchChain(finallyEdge.TargetId, outgoing, incomingCount, branchVisited);
+                    var finallyChain = CollectBranchChain(finallyEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
                     if (finallyChain.Count == 0)
                     {
                         sb.AppendLine("    finally: []");
@@ -1724,8 +1836,13 @@ namespace SSH_Helper.Services
 
                 foreach (var edge in nodeEdges)
                 {
+                    // Imported switch edges carry the branch as a label ("default") with no
+                    // branchPath; canvas-authored edges carry data.branchPath. Recognize both so
+                    // the default branch is not mistaken for an anonymous fallback case.
                     if (string.Equals(edge.BranchPath, "default", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(edge.BranchPath, "else", StringComparison.OrdinalIgnoreCase))
+                        string.Equals(edge.BranchPath, "else", StringComparison.OrdinalIgnoreCase) ||
+                        (string.IsNullOrEmpty(edge.BranchPath) &&
+                         string.Equals(edge.Label?.Trim(), "default", StringComparison.OrdinalIgnoreCase)))
                     {
                         defaultTarget ??= edge.TargetId;
                         continue;
@@ -1762,7 +1879,7 @@ namespace SSH_Helper.Services
                 sb.AppendLine("    cases:");
                 foreach (var branch in caseBranches.OrderBy(b => b.Index))
                 {
-                    var caseChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited);
+                    var caseChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
                     sb.AppendLine($"      - value: {EscapeYamlString(branch.CaseValue ?? $"case_{branch.Index + 1}")}");
                     if (caseChain.Count == 0)
                     {
@@ -1781,7 +1898,7 @@ namespace SSH_Helper.Services
 
                 if (defaultTarget != null)
                 {
-                    var defaultChain = CollectBranchChain(defaultTarget, outgoing, incomingCount, branchVisited);
+                    var defaultChain = CollectBranchChain(defaultTarget, outgoing, incomingCount, branchVisited, nodeMap);
                     if (defaultChain.Count == 0)
                     {
                         sb.AppendLine("    default: []");
@@ -1826,7 +1943,7 @@ namespace SSH_Helper.Services
                 sb.AppendLine("    steps:");
                 foreach (var branch in branches.OrderBy(b => b.Index))
                 {
-                    var branchChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited);
+                    var branchChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
                     if (branchChain.Count == 0)
                     {
                         continue;
