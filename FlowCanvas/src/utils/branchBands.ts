@@ -2,7 +2,7 @@
 // Round-trip-safe branch-band derivation. Reads ONLY existing transient metadata
 // (_isChildOf, _stepPath, _branchLabel) + node.position; writes nothing to node.data.
 import type { Node } from '@xyflow/react';
-import { CHILD_WIDTH, COLLAPSED_HEIGHT, estimateNodeHeight, BAND_PAD } from './nodeSize';
+import { CHILD_WIDTH, COLLAPSED_HEIGHT, estimateNodeHeight, BAND_PAD, BAND_LABEL_HEADROOM } from './nodeSize';
 
 // Re-exported for back-compat: BAND_PAD now lives in nodeSize (shared with the layout engine).
 export { BAND_PAD };
@@ -152,9 +152,9 @@ export function computeBranchBands(nodes: Node[]): BranchBand[] {
       parentId: g.parentId,
       branchKey: g.branchKey,
       x: minX - BAND_PAD + leftInset,
-      y: minY - BAND_PAD,
+      y: minY - BAND_PAD - BAND_LABEL_HEADROOM,
       width: (maxX - minX) + BAND_PAD * 2 - leftInset,
-      height: (maxY - minY) + BAND_PAD * 2,
+      height: (maxY - minY) + BAND_PAD * 2 + BAND_LABEL_HEADROOM,
       colorVar: branchColorVar(g.branchKey),
       depth,
     });

@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { computeBranchBands, branchPillLabel, BAND_PAD } from '../branchBands';
+import { BAND_LABEL_HEADROOM, COLLAPSED_HEIGHT } from '../nodeSize';
 
 function child(id: string, parent: string, stepPath: string, x: number, y: number): Node {
   return { id, position: { x, y }, data: { props: { _isChildOf: parent, _stepPath: stepPath } } } as Node;
@@ -37,9 +38,9 @@ describe('branchBands', () => {
     const nested = computeBranchBands([child('g', 'q', 'steps/0/then/0/else/0', 100, 100)])[0];
     expect(nested.depth).toBeGreaterThanOrEqual(1);
     expect(nested.x).toBeGreaterThan(100 - 18);           // left pulled inward (reveals parent accent)
-    expect(nested.y).toBe(100 - 18);                      // top NOT inset (pill clears the first block)
+    expect(nested.y).toBe(100 - 18 - 12);                 // top extended by headroom (pill clears the first block)
     expect(nested.x + nested.width).toBe(100 + 300 + 18); // right NOT inset (full padding)
-    expect(nested.y + nested.height).toBe(100 + 52 + 18); // bottom NOT inset (full padding)
+    expect(nested.y + nested.height).toBe(100 + 52 + 18); // bottom unchanged (headroom is top-only)
   });
 
   it('marks the outermost branch depth 0', () => {
@@ -81,5 +82,12 @@ describe('branchBands', () => {
     const bands = computeBranchBands([c0, c1]);
     const caseBand = bands.find((b) => b.branchKey === 'case')!;
     expect(caseBand.x + caseBand.width).toBeGreaterThanOrEqual(500 + 300 + 18);
+  });
+
+  it('adds top-only headroom so the draggable label pill clears the first block', () => {
+    const b = computeBranchBands([child('c1', 'p', 'steps/1/then/0', 100, 200)])[0];
+    // Top is extended by BAND_PAD + BAND_LABEL_HEADROOM; the bottom keeps BAND_PAD only.
+    expect(b.y).toBe(200 - BAND_PAD - BAND_LABEL_HEADROOM);
+    expect(b.y + b.height).toBe(200 + COLLAPSED_HEIGHT + BAND_PAD);
   });
 });

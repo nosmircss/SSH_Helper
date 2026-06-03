@@ -15,6 +15,10 @@ export const COLLAPSED_HEIGHT = 52;
  *  band layer. The layout and the band geometry MUST use the same value. */
 export const BAND_PAD = 18;
 
+/** Extra vertical room added to the TOP of a branch band only (render-only — NOT consumed by
+ *  the hierarchical layout engine) so the draggable label pill clears the first child block. */
+export const BAND_LABEL_HEADROOM = 12;
+
 /** Expanded summary metrics (mirror BaseBlock's summary layout). */
 export const SUMMARY_PAD = 14;     // top+bottom padding of the summary body
 export const SUMMARY_ROW_H = 20;   // one label:value row
