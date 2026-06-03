@@ -70,7 +70,7 @@ namespace SSH_Helper.Services
 
         // Multi-branch horizontal layout constants
         // MinColumnWidth must be >= max child node width + gap to prevent overlap
-        private const double ChildNodeMaxWidth = 260;
+        private const double ChildNodeMaxWidth = 300;
         private const double ColumnGap = 30;
         private const double MinColumnWidth = ChildNodeMaxWidth + ColumnGap;   // 290 — never narrower than a node
 
