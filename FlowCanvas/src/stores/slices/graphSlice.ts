@@ -202,6 +202,8 @@ export interface GraphSlice {
   updateNodeProp: (id: string, key: string, value: unknown) => void;
   updateEdgeBranchMetadata: (id: string, metadata: BranchMetadata) => void;
   updateNodePosition: (id: string, position: { x: number; y: number }) => void;
+  /** Shift several nodes by the same delta in one batched update (drag a band by its label). */
+  translateNodesBy: (ids: string[], dx: number, dy: number) => void;
   selectNode: (id: string | null) => void;
   toggleNodeSelection: (id: string) => void;
   selectNodes: (ids: string[]) => void;
@@ -485,6 +487,16 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   updateNodePosition: (id, position) => {
     set((state) => ({
       nodes: state.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
+      ...clearedExportStatusState(),
+    }));
+  },
+
+  translateNodesBy: (ids, dx, dy) => {
+    const idSet = new Set(ids);
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        idSet.has(n.id) ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } } : n,
+      ),
       ...clearedExportStatusState(),
     }));
   },
