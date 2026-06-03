@@ -10,6 +10,7 @@ export interface DebugSlice {
   callStack: string[];
   breakpoints: Set<string>;
   disabledBlocks: Set<string>;
+  expandedNodes: Set<string>;
   stepMode: boolean;
 
   toggleBreakpoint: (nodeId: string) => void;
@@ -19,6 +20,9 @@ export interface DebugSlice {
   restoreDisabledBlocks: (nodeIds: string[]) => void;
   isDisabled: (nodeId: string) => boolean;
   hasBreakpoint: (nodeId: string) => boolean;
+  toggleExpanded: (nodeId: string) => void;
+  restoreExpandedNodes: (nodeIds: string[]) => void;
+  isExpanded: (nodeId: string) => boolean;
 }
 
 export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (set, get) => ({
@@ -27,6 +31,7 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
   callStack: [],
   breakpoints: new Set<string>(),
   disabledBlocks: new Set<string>(),
+  expandedNodes: new Set<string>(),
   stepMode: false,
 
   toggleBreakpoint: (nodeId) => {
@@ -66,6 +71,23 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
     sendLayoutAutosave();
   },
 
+  toggleExpanded: (nodeId) => {
+    let nowExpanded = false;
+    set((s) => {
+      const next = new Set(s.expandedNodes);
+      nowExpanded = !next.has(nodeId);
+      if (nowExpanded) next.add(nodeId); else next.delete(nodeId);
+      return { expandedNodes: next };
+    });
+    // Carrier flag for layout/persistence (NOT node.data.props — never leaks to YAML).
+    get().updateNodeData(nodeId, { expanded: nowExpanded });
+    sendLayoutAutosave();
+  },
+  restoreExpandedNodes: (nodeIds) => {
+    set({ expandedNodes: new Set(nodeIds) });
+    for (const id of nodeIds) get().updateNodeData(id, { expanded: true });
+  },
+
   setPaused: (paused, nodeId, callStack) => {
     set({
       paused,
@@ -98,4 +120,5 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
 
   isDisabled: (nodeId) => get().disabledBlocks.has(nodeId),
   hasBreakpoint: (nodeId) => get().breakpoints.has(nodeId),
+  isExpanded: (nodeId) => get().expandedNodes.has(nodeId),
 });
