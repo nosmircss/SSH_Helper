@@ -5,6 +5,7 @@ import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
 import { isConnectionAllowed } from '../../utils/connectionRules';
 import { branchColorVar } from '../../utils/branchBands';
+import { deriveChildMembership, applyChildMembership, clearConnectAuthoredMembership } from '../../utils/childMembership';
 
 export const START_NODE_ID = '__start__';
 
@@ -246,11 +247,18 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
 
   onEdgesChange: (changes) => {
     const hasStructuralChange = changes.some((c) => c.type === 'remove' || c.type === 'add');
-    set((state) => ({
-      edges: applyEdgeChanges(changes, state.edges),
-      ...(hasStructuralChange ? { isDirty: true } : {}),
-      ...(changes.length > 0 ? clearedExportStatusState() : {}),
-    }));
+    set((state) => {
+      // Deleting a wire that conferred band membership releases the block back to the spine.
+      const removedIds = new Set(changes.filter((c) => c.type === 'remove').map((c) => c.id));
+      const removed = removedIds.size > 0 ? state.edges.filter((e) => removedIds.has(e.id)) : [];
+      const nextNodes = removed.length > 0 ? clearConnectAuthoredMembership(state.nodes, removed) : state.nodes;
+      return {
+        ...(nextNodes !== state.nodes ? { nodes: nextNodes } : {}),
+        edges: applyEdgeChanges(changes, state.edges),
+        ...(hasStructuralChange ? { isDirty: true } : {}),
+        ...(changes.length > 0 ? clearedExportStatusState() : {}),
+      };
+    });
   },
 
   onConnect: (connection) => {
@@ -284,6 +292,15 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
         ...connection,
       };
 
+      // Wiring a fresh block into a container (a continue handle, a leaf's bottom handle, or a
+      // branch handle) confers band membership: write the _isChildOf/_stepPath metadata import would
+      // have produced so layout, bands and the YAML exporter treat it as a real member instead of
+      // orphaning it at the spine. Returns null (and leaves nodes untouched) for gestures that don't
+      // nest — top-level successors, canvas-authored containers, already-nested targets.
+      let nextNodes = state.nodes;
+      const membership = deriveChildMembership(state.nodes, connection, { sourceIsContainer: isContainer, branchMetadata });
+      if (membership) nextNodes = applyChildMembership(state.nodes, membership);
+
       if (isContinuation) {
         // Continuation edges get explicit styling — bypass getBranchVisual
         edgeProps.style = { stroke: 'var(--fc-accent)' };
@@ -301,6 +318,7 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       }
 
       return {
+        ...(nextNodes !== state.nodes ? { nodes: nextNodes } : {}),
         edges: addEdge(edgeProps as Edge, state.edges),
         isDirty: true,
         ...clearedExportStatusState(),
@@ -330,12 +348,17 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   removeEdges: (ids) => {
     get().pushSnapshot('Delete connections');
     const idSet = new Set(ids);
-    set((state) => ({
-      edges: state.edges.filter((e) => !idSet.has(e.id)),
-      selectedEdgeIds: new Set<string>(),
-      isDirty: true,
-      ...clearedExportStatusState(),
-    }));
+    set((state) => {
+      const removed = state.edges.filter((e) => idSet.has(e.id));
+      const nextNodes = clearConnectAuthoredMembership(state.nodes, removed);
+      return {
+        ...(nextNodes !== state.nodes ? { nodes: nextNodes } : {}),
+        edges: state.edges.filter((e) => !idSet.has(e.id)),
+        selectedEdgeIds: new Set<string>(),
+        isDirty: true,
+        ...clearedExportStatusState(),
+      };
+    });
   },
 
   selectEdge: (id) => {
