@@ -33,8 +33,11 @@ test.describe('Flow Canvas branch bands (labeled lanes)', () => {
     await expect(page.locator('.react-flow__node[data-id="if-1"]')).toBeVisible();
     const thenBand = page.locator('[data-testid="branch-band"][data-branch="then"]');
     await expect(thenBand).toHaveCount(1);
-    await expect(thenBand).toContainText('THEN');
-    const elseBand = page.locator('[data-testid="branch-band"][data-branch="else"]');
-    await expect(elseBand).toContainText('ELSE');
+    // The label text now lives on the draggable handle (a sibling of the rectangle), not inside
+    // the rectangle itself — the pill became its own pointer-grabbable element in the band-drag work.
+    const thenHandle = page.locator('[data-testid="branch-band-handle"][data-branch="then"]');
+    await expect(thenHandle).toContainText('THEN');
+    const elseHandle = page.locator('[data-testid="branch-band-handle"][data-branch="else"]');
+    await expect(elseHandle).toContainText('ELSE');
   });
 });
