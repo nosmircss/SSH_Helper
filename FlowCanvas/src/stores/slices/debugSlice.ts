@@ -3,6 +3,7 @@ import type { FlowStore } from '../useFlowStore';
 import { messageBus } from '../../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
 import { sendLayoutAutosave } from '../../utils/layoutAutosave';
+import { computeHierarchicalLayout } from '../../utils/layout/hierarchicalLayout';
 
 export interface DebugSlice {
   paused: boolean;
@@ -81,6 +82,9 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
     });
     // Carrier flag for layout/persistence (NOT node.data.props — never leaks to YAML).
     get().updateNodeData(nodeId, { expanded: nowExpanded });
+    // Reflow so the taller/shorter block pushes neighbors (height-aware layout).
+    const st = get();
+    st.setNodes(computeHierarchicalLayout(st.nodes, st.edges));
     sendLayoutAutosave();
   },
   restoreExpandedNodes: (nodeIds) => {
