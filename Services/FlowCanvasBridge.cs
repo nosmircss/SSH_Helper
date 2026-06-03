@@ -4897,6 +4897,13 @@ namespace SSH_Helper.Services
                     if (data != null)
                         data["disabled"] = true;
                 }
+
+                // Mark expanded blocks (presentation only — never read by YAML export)
+                if (id != null && layout.ExpandedNodeIds.Contains(id))
+                {
+                    var dataExp = node["data"] as JObject;
+                    if (dataExp != null) dataExp["expanded"] = true;
+                }
             }
 
             // Append comment nodes
@@ -4926,7 +4933,7 @@ namespace SSH_Helper.Services
         /// Extracts layout data (positions, comments, disabled blocks) from a graph payload.
         /// Used when capturing layout on "Apply YAML".
         /// </summary>
-        public static CanvasLayoutData ExtractLayout(JArray nodes, JArray? commentNodes, IEnumerable<string>? disabledBlockIds)
+        public static CanvasLayoutData ExtractLayout(JArray nodes, JArray? commentNodes, IEnumerable<string>? disabledBlockIds, IEnumerable<string>? expandedNodeIds = null)
         {
             var layout = new CanvasLayoutData
             {
@@ -4975,6 +4982,12 @@ namespace SSH_Helper.Services
             if (disabledBlockIds != null)
             {
                 layout.DisabledBlockIds.AddRange(disabledBlockIds);
+            }
+
+            // Expanded nodes (presentation only)
+            if (expandedNodeIds != null)
+            {
+                layout.ExpandedNodeIds.AddRange(expandedNodeIds);
             }
 
             return layout;

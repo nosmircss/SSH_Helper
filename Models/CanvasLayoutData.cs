@@ -32,6 +32,11 @@ namespace SSH_Helper.Models
         /// </summary>
         public List<string> DisabledBlockIds { get; set; } = new();
 
+        /// <summary>
+        /// Node IDs of blocks expanded to their read-only settings summary (presentation only).
+        /// </summary>
+        public List<string> ExpandedNodeIds { get; set; } = new();
+
         public CanvasLayoutData Clone()
         {
             return new CanvasLayoutData
@@ -52,6 +57,7 @@ namespace SSH_Helper.Models
                     AttachedToNodeId = c.AttachedToNodeId,
                 }).ToList(),
                 DisabledBlockIds = new List<string>(DisabledBlockIds),
+                ExpandedNodeIds = new List<string>(ExpandedNodeIds),
             };
         }
     }

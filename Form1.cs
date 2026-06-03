@@ -2528,6 +2528,15 @@ namespace SSH_Helper
                     disabled.Select(t => t.ToString()).Where(id => !string.IsNullOrEmpty(id)));
             }
 
+            // Update expanded nodes
+            var expanded = msg["expandedNodes"] as JArray;
+            if (expanded != null)
+            {
+                layout.ExpandedNodeIds.Clear();
+                layout.ExpandedNodeIds.AddRange(
+                    expanded.Select(t => t.ToString()).Where(id => !string.IsNullOrEmpty(id)));
+            }
+
             // Compute structure hash if not set yet (first auto-save before any Apply YAML)
             if (string.IsNullOrEmpty(layout.StructureHash))
             {
@@ -6948,7 +6957,10 @@ namespace SSH_Helper
                     var disabledBlocks = (graphMessage["disabledBlocks"] as JArray)?
                         .Select(t => t.ToString())
                         .Where(id => !string.IsNullOrEmpty(id));
-                    var layout = FlowCanvasBridge.ExtractLayout(nodes, commentNodes, disabledBlocks);
+                    var expandedNodes = (graphMessage["expandedNodes"] as JArray)?
+                        .Select(t => t.ToString())
+                        .Where(id => !string.IsNullOrEmpty(id));
+                    var layout = FlowCanvasBridge.ExtractLayout(nodes, commentNodes, disabledBlocks, expandedNodes);
                     _presetManager.UpdateCanvasLayout(_activePresetName, layout);
                 }
 
