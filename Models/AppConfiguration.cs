@@ -508,6 +508,14 @@ namespace SSH_Helper.Models
 
         // Flow Canvas run-heatmap toggle (persisted from React UI)
         public bool? FlowCanvasHeatmapEnabled { get; set; }
+
+        // Flow Canvas display settings (persisted from React UI; null = use the React default)
+        public int? FlowCanvasBlockWidth { get; set; }
+        public double? FlowCanvasTextScale { get; set; }
+        public double? FlowCanvasDensity { get; set; }
+        public bool? FlowCanvasDefaultExpanded { get; set; }
+        public bool? FlowCanvasSnapToGrid { get; set; }
+        public bool? FlowCanvasBranchBands { get; set; }
     }
 
     /// <summary>
