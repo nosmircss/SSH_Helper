@@ -96,6 +96,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const toggleExpanded = useFlowStore((s) => s.toggleExpanded);
   const selectNode = useFlowStore((s) => s.selectNode);
   const blockWidth = useFlowStore((s) => s.blockWidth);
+  const textScale = useFlowStore((s) => s.textScale);
 
   const handleBreakpointToggle = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -195,13 +196,13 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     display: 'flex',
     alignItems: 'center',
     gap: 6,
-    fontSize: 'var(--fc-fs-header)',
+    fontSize: 13 * textScale,
   };
 
   const badgeStyle: CSSProperties = {
     background: 'transparent',
     color: isDisabled ? 'var(--fc-text-secondary)' : colors.text,
-    fontSize: 10,
+    fontSize: 10 * textScale,
     fontWeight: 700,
     padding: '2px 6px',
     borderRadius: 3,
@@ -321,7 +322,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         <span style={badgeStyle}>{def.type}</span>
         <span style={{
           color: isDisabled ? 'var(--fc-text-faint)' : 'var(--fc-text)',
-          fontSize: 13,
+          fontSize: 13 * textScale,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -348,16 +349,16 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         <div data-testid="block-summary" style={{ background: 'var(--fc-surface-0)', padding: '8px 9px 6px' }}>
           {summary.rows.map((r) => (
             <div key={r.key} style={{ display: 'flex', gap: 10, padding: '3px 0', alignItems: 'baseline' }}>
-              <span style={{ flex: 'none', width: 96, fontSize: 10.5, fontWeight: 600, color: 'var(--fc-text-secondary)' }}>{r.label}</span>
+              <span style={{ flex: 'none', width: 96, fontSize: 10.5 * textScale, fontWeight: 600, color: 'var(--fc-text-secondary)' }}>{r.label}</span>
               <span style={{
-                flex: 1, fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                flex: 1, fontSize: 11.5 * textScale, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 fontFamily: r.isCode ? 'var(--fc-font-mono)' : undefined,
                 color: r.notSet ? 'var(--fc-text-faint)' : (r.isCode ? colors.text : 'var(--fc-text)'),
               }}>{r.value}</span>
             </div>
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, paddingTop: 6,
-                        borderTop: '1px solid var(--fc-border)', fontSize: 10 }}>
+                        borderTop: '1px solid var(--fc-border)', fontSize: 10 * textScale }}>
             <span style={{ color: 'var(--fc-text-faint)' }}>
               {summary.hiddenCount} fields at default
             </span>
@@ -368,7 +369,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           </div>
         </div>
       ) : previewText ? (
-        <div style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 12,
+        <div style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 12 * textScale,
           color: isDisabled ? 'var(--fc-text-disabled)' : colors.text,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {previewText}

@@ -96,6 +96,13 @@ describe('BaseBlock', () => {
     );
     expect(screen.getByTestId('block-node').style.minWidth).toBe('300px');
   });
+
+  it('block label font scales with textScale', () => {
+    mock.state.textScale = 1.15;
+    renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
+    expect(screen.getByText('Send').style.fontSize).toBe(`${13 * 1.15}px`); // '14.95px'
+    mock.state.textScale = 1; // restore for other tests
+  });
 });
 
 describe('BaseBlock — container continuation handle', () => {
