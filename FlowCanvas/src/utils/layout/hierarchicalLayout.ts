@@ -11,6 +11,9 @@ export const LAYOUT = {
   NODE_START_Y: 40,
   CHILD_NODE_MAX_WIDTH: 300,
   COLUMN_GAP: 30,
+  // Generous clear space between sibling branch lanes (beyond each lane's BAND_PAD), so lanes read
+  // as distinct columns with breathing room. The canvas has ample horizontal room to spread into.
+  LANE_GAP: 72,
   get BASE_COLUMN_WIDTH() { return this.CHILD_NODE_MAX_WIDTH + this.COLUMN_GAP; }, // 330
   COLUMN_WIDTH_DECAY: 0.92,
   get MIN_COLUMN_WIDTH() { return this.CHILD_NODE_MAX_WIDTH + this.COLUMN_GAP; }, // 330
@@ -79,9 +82,10 @@ function measureSteps(children: LayoutTreeNode[]): SubtreeSize {
 }
 
 /** Left-to-left horizontal advance reserved for a branch: its column span + its single-branch
- *  indentation + a lane's padding on both sides, so adjacent lanes (BAND_PAD each) never collide. */
+ *  indentation + a lane's padding on both sides + a generous inter-lane gap, so adjacent lanes
+ *  never collide and read as clearly separate columns. */
 function branchSlotWidth(s: SubtreeSize, colWidth: number): number {
-  return s.columns * colWidth + s.indent + 2 * BAND_PAD;
+  return s.columns * colWidth + s.indent + 2 * BAND_PAD + LAYOUT.LANE_GAP;
 }
 
 function placeBranchSteps(
@@ -111,9 +115,9 @@ function placeSingleBranch(branch: LayoutBranch, depth: number, centerX: number,
 function placeMultiBranch(branches: LayoutBranch[], depth: number, centerX: number, startY: number, pos: Map<string, Point>): number {
   const sizes = branches.map((b) => measureSteps(b.children));
   const totalColumns = sizes.reduce((sum, s) => sum + s.columns, 0);
-  // Fixed extra width per branch (nested indent + lane padding) is independent of colWidth; only
-  // the column part scales when clamping to MAX_SPREAD_WIDTH.
-  const extra = sizes.reduce((sum, s) => sum + s.indent + 2 * BAND_PAD, 0);
+  // Fixed extra width per branch (nested indent + lane padding + inter-lane gap) is independent of
+  // colWidth; only the column part scales when clamping to MAX_SPREAD_WIDTH. Mirrors branchSlotWidth.
+  const extra = sizes.reduce((sum, s) => sum + s.indent + 2 * BAND_PAD + LAYOUT.LANE_GAP, 0);
   let colWidth = getColumnWidth(depth);
   if (totalColumns > 0 && totalColumns * colWidth + extra > LAYOUT.MAX_SPREAD_WIDTH) {
     colWidth = Math.max(LAYOUT.CHILD_NODE_MAX_WIDTH, (LAYOUT.MAX_SPREAD_WIDTH - extra) / totalColumns);
