@@ -80,14 +80,6 @@ function branchDepth(stepPath: string | undefined): number {
   return Math.max(0, count - 1);
 }
 
-/** Per-node box used for band geometry. Width is fixed per role; height uses the expanded
- *  estimate when the node is expanded, or COLLAPSED_HEIGHT otherwise. */
-function nodeBox(n: Node): { w: number; h: number } {
-  const data = (n.data ?? {}) as { blockType?: string; expanded?: boolean; props?: Record<string, unknown> };
-  const h = data.expanded ? estimateNodeHeight(data.blockType ?? '', data.props ?? {}, true) : COLLAPSED_HEIGHT;
-  return { w: CHILD_WIDTH, h };
-}
-
 function stepPathOf(n: Node): string | undefined {
   return ((n.data as { props?: Record<string, unknown> } | undefined)?.props?.['_stepPath']) as string | undefined;
 }
@@ -108,7 +100,13 @@ function branchSubtreePrefix(stepPath: string | undefined): string | undefined {
   return undefined;
 }
 
-export function computeBranchBands(nodes: Node[]): BranchBand[] {
+export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WIDTH): BranchBand[] {
+  const boxOf = (n: Node): { w: number; h: number } => {
+    const data = (n.data ?? {}) as { blockType?: string; expanded?: boolean; props?: Record<string, unknown> };
+    const h = data.expanded ? estimateNodeHeight(data.blockType ?? '', data.props ?? {}, true) : COLLAPSED_HEIGHT;
+    return { w: childWidth, h };
+  };
+
   const groups = new Map<string, { parentId: string; branchKey: string; nodes: Node[] }>();
   for (const n of nodes) {
     const props = (n.data as { props?: Record<string, unknown> } | undefined)?.props;
@@ -147,7 +145,7 @@ export function computeBranchBands(nodes: Node[]): BranchBand[] {
       : g.nodes;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of boxNodes) {
-      const { w, h } = nodeBox(n);
+      const { w, h } = boxOf(n);
       minX = Math.min(minX, n.position.x);
       minY = Math.min(minY, n.position.y);
       maxX = Math.max(maxX, n.position.x + w);
