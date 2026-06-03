@@ -207,6 +207,9 @@ function FlowCanvasInner() {
       };
 
       addNode(newNode);
+      if (useFlowStore.getState().defaultBlockExpanded) {
+        useFlowStore.getState().toggleExpanded(newNode.id);
+      }
       selectNode(newNode.id);
     },
     [addNode, selectNode],
