@@ -4,6 +4,7 @@ import { blockDefMap, categoryColors, type BlockCategory } from '../blockDefs/re
 import { useFlowStore } from '../stores/useFlowStore';
 import { mix } from '../utils/tokens';
 import { nodeBorderColor, resolveNodeShadow } from '../utils/nodeStyle';
+import { SPINE_WIDTH, CHILD_WIDTH } from '../utils/nodeSize';
 import { BlockIcon } from './BlockIcon';
 import './baseblock.css';
 import './execution-cinematics.css';
@@ -150,8 +151,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     background: isDisabled ? 'var(--fc-surface-disabled)' : 'var(--fc-node-surface)',
     border: `1px solid ${nodeBorderColor({ selected, isDisabled, border: colors.border })}`,
     borderRadius: 8,
-    minWidth: isChild ? 160 : 280,
-    maxWidth: isChild ? 260 : 280,
+    minWidth: isChild ? CHILD_WIDTH : SPINE_WIDTH,
+    maxWidth: isChild ? CHILD_WIDTH : SPINE_WIDTH,
     overflow: 'hidden',
     opacity: isDisabled ? 0.5 : isChild ? 0.95 : 1,
     boxShadow: heatTint ? `0 0 0 3px ${heatTint}, ${existingBoxShadow}` : existingBoxShadow,
@@ -171,8 +172,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 18,
-    height: 18,
+    width: 20,
+    height: 20,
     flexShrink: 0,
     borderRadius: 4,
     color: isDisabled ? 'var(--fc-text-faint)' : colors.icon,
@@ -180,7 +181,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   };
 
   const headerStyle: CSSProperties = {
-    padding: '4px 8px',
+    padding: '6px 9px',
     borderBottom: `1px solid ${mix(colors.border, 20)}`,
     display: 'flex',
     alignItems: 'center',
@@ -311,7 +312,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         <span style={badgeStyle}>{def.type}</span>
         <span style={{
           color: isDisabled ? 'var(--fc-text-faint)' : 'var(--fc-text)',
-          fontSize: 12,
+          fontSize: 13,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -327,7 +328,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         <div style={{
           padding: '4px 8px',
           fontFamily: 'monospace',
-          fontSize: 11,
+          fontSize: 12,
           color: isDisabled ? 'var(--fc-text-disabled)' : colors.text,
           overflow: 'hidden',
           textOverflow: 'ellipsis',

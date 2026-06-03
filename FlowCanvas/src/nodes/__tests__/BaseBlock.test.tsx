@@ -52,4 +52,17 @@ describe('BaseBlock', () => {
     renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
     expect(screen.queryByTestId('node-rail')).toBeNull();
   });
+
+  it('renders a spine block at 330px and a child block at 300px', () => {
+    const { rerender } = renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
+    expect(screen.getByTestId('block-node').style.minWidth).toBe('330px');
+    rerender(
+      React.createElement(BaseBlock, {
+        id: 'n1', selected: false, type: 'baseBlock', zIndex: 0, isConnectable: true,
+        positionAbsoluteX: 0, positionAbsoluteY: 0, dragging: false,
+        data: { blockType: 'send', label: 'Send', props: { _isChildOf: 'p' } },
+      } as any),
+    );
+    expect(screen.getByTestId('block-node').style.minWidth).toBe('300px');
+  });
 });
