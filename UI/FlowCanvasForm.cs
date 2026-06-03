@@ -364,8 +364,20 @@ namespace SSH_Helper.UI
             if (ws.FlowCanvasOutputHeight > 0)
                 panelSizes["outputHeight"] = ws.FlowCanvasOutputHeight;
 
-            if (panelSizes.Count > 0 || ws.FlowCanvasHeatmapEnabled.HasValue)
-                SendMessage(new { type = "layout-restore", panelSizes, heatmapEnabled = ws.FlowCanvasHeatmapEnabled ?? false });
+            // React guards each field by type, so sending nulls is harmless. Always send so any
+            // persisted display setting is restored, not just panel sizes.
+            SendMessage(new
+            {
+                type = "layout-restore",
+                panelSizes,
+                heatmapEnabled = ws.FlowCanvasHeatmapEnabled ?? false,
+                blockWidth = ws.FlowCanvasBlockWidth,
+                textScale = ws.FlowCanvasTextScale,
+                density = ws.FlowCanvasDensity,
+                defaultBlockExpanded = ws.FlowCanvasDefaultExpanded,
+                snapToGrid = ws.FlowCanvasSnapToGrid,
+                branchBandsEnabled = ws.FlowCanvasBranchBands,
+            });
 
             var rm = ws.FlowCanvasReducedMotion;
             if (rm.HasValue) SendMessage(new { type = "pref-restore", reducedMotion = rm.Value });
@@ -378,9 +390,18 @@ namespace SSH_Helper.UI
             var panelSizes = msg["panelSizes"] as JObject;
             var rightWidth = panelSizes?["rightPanelWidth"]?.Value<int>();
             var outputHeight = panelSizes?["outputHeight"]?.Value<int>();
-            // The heatmap toggle reuses the layout-save channel but carries no panelSizes object.
+            // These all reuse the layout-save channel and arrive without a panelSizes object.
             var heatmap = msg["heatmapEnabled"]?.Value<bool>();
-            if (rightWidth == null && outputHeight == null && heatmap == null) return;
+            var blockWidth = msg["blockWidth"]?.Value<int>();
+            var textScale = msg["textScale"]?.Value<double>();
+            var density = msg["density"]?.Value<double>();
+            var defaultExpanded = msg["defaultBlockExpanded"]?.Value<bool>();
+            var snap = msg["snapToGrid"]?.Value<bool>();
+            var bands = msg["branchBandsEnabled"]?.Value<bool>();
+
+            if (rightWidth == null && outputHeight == null && heatmap == null && blockWidth == null
+                && textScale == null && density == null && defaultExpanded == null && snap == null && bands == null)
+                return;
 
             _configService.Update(c =>
             {
@@ -388,6 +409,12 @@ namespace SSH_Helper.UI
                 if (rightWidth > 0) c.WindowState.FlowCanvasRightPanelWidth = rightWidth;
                 if (outputHeight > 0) c.WindowState.FlowCanvasOutputHeight = outputHeight;
                 if (heatmap.HasValue) c.WindowState.FlowCanvasHeatmapEnabled = heatmap.Value;
+                if (blockWidth > 0) c.WindowState.FlowCanvasBlockWidth = blockWidth;
+                if (textScale.HasValue) c.WindowState.FlowCanvasTextScale = textScale.Value;
+                if (density.HasValue) c.WindowState.FlowCanvasDensity = density.Value;
+                if (defaultExpanded.HasValue) c.WindowState.FlowCanvasDefaultExpanded = defaultExpanded.Value;
+                if (snap.HasValue) c.WindowState.FlowCanvasSnapToGrid = snap.Value;
+                if (bands.HasValue) c.WindowState.FlowCanvasBranchBands = bands.Value;
             });
         }
 
