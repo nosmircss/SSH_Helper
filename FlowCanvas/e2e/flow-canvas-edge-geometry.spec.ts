@@ -37,11 +37,11 @@ test.describe('Flow Canvas Edge Geometry', () => {
     await expect(page.locator('.react-flow__node[data-id="long"]')).toBeVisible();
     const wShort = await nodeWidth(page, 'short');
     const wLong = await nodeWidth(page, 'long');
-    // Should be 0 (minWidth===maxWidth===280); allow 1px for Chromium sub-pixel rounding.
+    // Should be 0 (minWidth===maxWidth===330); allow 1px for Chromium sub-pixel rounding.
     expect(Math.abs(wShort - wLong)).toBeLessThanOrEqual(1);
   });
 
-  test('the Start node shares the uniform top-level width (~280px)', async ({ page }) => {
+  test('the Start node shares the uniform top-level width (~330px)', async ({ page }) => {
     await loadGraphFixture(page, {
       nodes: [
         { id: 'start', type: 'start', position: { x: 200, y: 40 }, data: { blockType: '_start', label: 'S', props: { name: 'S' } } },
@@ -51,8 +51,8 @@ test.describe('Flow Canvas Edge Geometry', () => {
     });
     await expect(page.locator('.react-flow__node[data-id="start"]')).toBeVisible();
     const wStart = await nodeWidth(page, 'start');
-    expect(wStart).toBeGreaterThan(276);
-    expect(wStart).toBeLessThan(290);
+    expect(wStart).toBeGreaterThan(326);
+    expect(wStart).toBeLessThan(334);
   });
 
   test('an aligned, downward continuation edge renders as a straight line', async ({ page }) => {
