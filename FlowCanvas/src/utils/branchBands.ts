@@ -7,6 +7,10 @@ import { CHILD_WIDTH, COLLAPSED_HEIGHT, estimateNodeHeight, BAND_PAD } from './n
 // Re-exported for back-compat: BAND_PAD now lives in nodeSize (shared with the layout engine).
 export { BAND_PAD };
 
+/** Per-depth-level inward inset for nested bands, so each nesting level steps clear of its
+ *  parent's left accent. Capped at BAND_PAD - 4 in computeBranchBands to keep children wrapped. */
+const NESTED_BAND_INSET = 10;
+
 export interface BranchBand {
   id: string;
   parentId: string;
@@ -137,13 +141,19 @@ export function computeBranchBands(nodes: Node[]): BranchBand[] {
     }
     const firstProps = (g.nodes[0]?.data as { props?: Record<string, unknown> } | undefined)?.props;
     const depth = branchDepth(firstProps?.['_stepPath'] as string | undefined);
+    // Pull nested bands inward by depth on the LEFT ONLY, so a band that shares its parent's left
+    // edge (e.g. a multi-branch first arm sitting at the container's own X) doesn't paint over the
+    // parent's left accent — without that inset the nesting reads as one band changing color. Top,
+    // right and bottom keep full BAND_PAD so the pill label clears the first block and the bottom
+    // isn't crowded. Capped at BAND_PAD - 4 so the band still clears its leftmost child.
+    const leftInset = Math.min(depth * NESTED_BAND_INSET, BAND_PAD - 4);
     bands.push({
       id: groupId,
       parentId: g.parentId,
       branchKey: g.branchKey,
-      x: minX - BAND_PAD,
+      x: minX - BAND_PAD + leftInset,
       y: minY - BAND_PAD,
-      width: (maxX - minX) + BAND_PAD * 2,
+      width: (maxX - minX) + BAND_PAD * 2 - leftInset,
       height: (maxY - minY) + BAND_PAD * 2,
       colorVar: branchColorVar(g.branchKey),
       depth,

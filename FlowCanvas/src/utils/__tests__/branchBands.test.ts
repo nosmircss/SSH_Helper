@@ -27,6 +27,21 @@ describe('branchBands', () => {
     expect(b.branchKey).toBe('then');
   });
 
+  it('insets a nested band on the LEFT only, preserving top/right/bottom padding', () => {
+    // A nested band that shares its parent's left edge (e.g. a multi-branch then under a loop)
+    // would paint over the parent's left accent — hiding the nesting (yellow→green). Inset the
+    // LEFT of depth>=1 bands so the parent shows through, but keep full top/right/bottom padding
+    // so the pill label clears the first block and blocks aren't crowded at the bottom.
+    const outer = computeBranchBands([child('c', 'p', 'steps/0/then/0', 100, 100)])[0];
+    expect(outer.x).toBe(100 - 18); // depth 0: flush, no inset
+    const nested = computeBranchBands([child('g', 'q', 'steps/0/then/0/else/0', 100, 100)])[0];
+    expect(nested.depth).toBeGreaterThanOrEqual(1);
+    expect(nested.x).toBeGreaterThan(100 - 18);           // left pulled inward (reveals parent accent)
+    expect(nested.y).toBe(100 - 18);                      // top NOT inset (pill clears the first block)
+    expect(nested.x + nested.width).toBe(100 + 300 + 18); // right NOT inset (full padding)
+    expect(nested.y + nested.height).toBe(100 + 52 + 18); // bottom NOT inset (full padding)
+  });
+
   it('marks the outermost branch depth 0', () => {
     const b = computeBranchBands([child('c1', 'p', 'steps/0/then/0', 0, 0)])[0];
     expect(b.depth).toBe(0);

@@ -6,7 +6,12 @@ import { estimateNodeHeight, COLLAPSED_HEIGHT, BAND_PAD } from '../nodeSize';
 /** Single source of truth for layout spacing (ported from FlowCanvasBridge.cs). */
 export const LAYOUT = {
   NODE_SPACING_Y: 106,
-  SINGLE_BRANCH_CHILD_OFFSET: 70,
+  // A single-branch container (then-only IF, loop, single-case switch) routes its continuation
+  // straight down the spine from the bottom-CENTER handle (x = node.x + SPINE_WIDTH/2). For that
+  // wire to stay clear of the branch band, the body must indent far enough that the band's left
+  // wall (childX - BAND_PAD) lands right of the wire — i.e. offset > SPINE_WIDTH/2 + BAND_PAD = 183.
+  // 220 leaves a comfortable gutter. (Multi-branch containers keep the bottom-LEFT corridor.)
+  SINGLE_BRANCH_CHILD_OFFSET: 220,
   NODE_START_X: 250,
   NODE_START_Y: 40,
   CHILD_NODE_MAX_WIDTH: 300,

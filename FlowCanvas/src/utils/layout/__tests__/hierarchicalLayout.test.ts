@@ -143,7 +143,23 @@ describe('placeTree — height-aware vertical spacing', () => {
   });
 });
 
-import { BAND_PAD } from '../../nodeSize';
+import { BAND_PAD, SPINE_WIDTH } from '../../nodeSize';
+
+describe('placeTree — single-branch continuation clears its branch band (regression: wire outside band)', () => {
+  it('indents a single THEN branch far enough that the band starts right of the IF continuation wire', () => {
+    // then-only IF: the continuation leaves the IF's bottom-CENTER and runs straight down the
+    // spine. The THEN band's left wall is childX - BAND_PAD. If the child indents too little, the
+    // band overlaps the spine and the straight wire renders inside/across it (the reported bug).
+    const ifNode: LayoutTreeNode = {
+      id: 'if', node: { id: 'if' } as never, isContainer: true,
+      branches: [{ scope: 'then', sortRank: 0, children: [leaf('t1')] }],
+    };
+    const pos = placeTree({ spine: [ifNode] });
+    const continuationX = pos.get('if')!.x + SPINE_WIDTH / 2; // bottom-center handle
+    const bandLeft = pos.get('t1')!.x - BAND_PAD;
+    expect(bandLeft).toBeGreaterThan(continuationX);
+  });
+});
 
 describe('placeTree — branch lanes reserve room for nested indentation', () => {
   it('places a sibling branch clear of a branch whose content is indented by nested containers', () => {

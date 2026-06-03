@@ -68,6 +68,26 @@ test.describe('Flow Canvas Edge Geometry', () => {
     await expect(page.locator('path#e1')).toHaveAttribute('d', /^M[\s\d.,-]+L[\s\d.,-]+$/);
   });
 
+  test('a single-branch IF continuation renders as a straight vertical line', async ({ page }) => {
+    await loadGraphFixture(page, {
+      nodes: [
+        { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', label: 'S', props: {} } },
+        { id: 'if-1', type: 'block', position: { x: 9, y: 9 }, data: { blockType: 'if', label: 'If', props: { condition: 'x == 1', _stepPath: 'steps/0' } } },
+        { id: 'then-1', type: 'block', position: { x: 9, y: 9 }, data: { blockType: 'send', label: 'Y', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/0', _branchLabel: 'then', command: 'y' } } },
+        { id: 'after-1', type: 'block', position: { x: 9, y: 9 }, data: { blockType: 'send', label: 'After', props: { command: 'next' } } },
+      ],
+      edges: [
+        { id: 'e-start', source: '__start__', target: 'if-1' },
+        { id: 'e-then', source: 'if-1', target: 'then-1', label: 'then' },
+        { id: 'e-cont', source: 'if-1', target: 'after-1', sourceHandle: 'continue' },
+      ],
+    });
+    await expect(page.locator('.react-flow__node[data-id="after-1"]')).toBeVisible();
+    await expect(page.locator('path#e-cont')).toHaveCount(1);
+    // Straight = getStraightPath's single "M x,y L x,y"; a smoothstep bend would add Q corners.
+    await expect(page.locator('path#e-cont')).toHaveAttribute('d', /^M[\s\d.,-]+L[\s\d.,-]+$/);
+  });
+
   test('an X-offset edge keeps its orthogonal (smoothstep) routing', async ({ page }) => {
     // hasUserLayout:true keeps the hand-placed X-offset; without it the auto-layout engine
     // snaps both blocks onto the spine column and collapses the edge to a straight vertical

@@ -61,7 +61,12 @@ namespace SSH_Helper.Services
         }
 
         private const double NodeSpacingY = 106;  // ~25% looser than the original 85 for more breathing room
-        private const double SingleBranchChildOffset = 70;
+        // Single-branch container bodies indent far enough that their branch band clears the
+        // spine, so the continuation can run straight down the bottom-center (must exceed
+        // SpineWidth/2 + BandPad ≈ 183). Mirrors LAYOUT.SINGLE_BRANCH_CHILD_OFFSET in
+        // hierarchicalLayout.ts. NOTE: the canvas recomputes layout on import, so these
+        // positions are the host-only (no-canvas) fallback — keep the value in sync with TS.
+        private const double SingleBranchChildOffset = 220;
         private const double NodeStartX = 250;
         private const double NodeStartY = 40;
         private const double ChildIndentX = 60;

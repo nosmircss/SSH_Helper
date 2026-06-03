@@ -2,27 +2,35 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
 
-// ── Minimal stubs for @xyflow/react ──────────────────────────────────────────
+// ── Minimal stubs for @xyflow/react (data-position exposes the handle's side) ──
 vi.mock('@xyflow/react', () => ({
   Handle: ({ type, position, id, style }: any) =>
-    React.createElement('div', { 'data-testid': `handle-${type}-${id ?? position}`, style }),
+    React.createElement('div', {
+      'data-testid': `handle-${type}-${id ?? position}`,
+      'data-position': position,
+      style,
+    }),
   Position: { Top: 'top', Bottom: 'bottom', Right: 'right', Left: 'left' },
 }));
 
-// ── Stub the store (returns defaults so hooks never throw) ───────────────────
+// ── Stub the store (mutable so tests can vary `nodes` for branch-count selectors) ──
+const mock = vi.hoisted(() => ({
+  state: {
+    toggleBreakpoint: () => {},
+    blockTimings: new Map(),
+    heatmapEnabled: false,
+    reducedMotion: false,
+    loopIterations: new Map(),
+    branchTaken: new Map(),
+    isExpanded: () => true,
+    toggleExpanded: () => {},
+    selectNode: () => {},
+    nodes: [] as any[],
+  } as any,
+}));
+
 vi.mock('../../stores/useFlowStore', () => ({
-  useFlowStore: (selector: (s: any) => any) =>
-    selector({
-      toggleBreakpoint: vi.fn(),
-      blockTimings: new Map(),
-      heatmapEnabled: false,
-      reducedMotion: false,
-      loopIterations: new Map(),
-      branchTaken: new Map(),
-      isExpanded: () => true,
-      toggleExpanded: vi.fn(),
-      selectNode: vi.fn(),
-    }),
+  useFlowStore: (selector: (s: any) => any) => selector(mock.state),
 }));
 
 // ── Import the component under test ─────────────────────────────────────────
@@ -74,5 +82,39 @@ describe('BaseBlock', () => {
       } as any),
     );
     expect(screen.getByTestId('block-node').style.minWidth).toBe('300px');
+  });
+});
+
+describe('BaseBlock — container continuation handle', () => {
+  it('puts the continue handle at bottom-center for a single-branch (then-only) IF', () => {
+    mock.state.nodes = [
+      { id: 'if-1', data: { blockType: 'if', props: { _stepPath: 'steps/0' } } },
+      { id: 't', data: { props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/0' } } },
+    ];
+    renderNode({ id: 'if-1', data: { blockType: 'if', label: 'If', props: { _stepPath: 'steps/0' } } as any });
+    expect(screen.getByTestId('handle-source-continue').getAttribute('data-position')).toBe('bottom');
+  });
+
+  it('separates the THEN (body) handle from the continue handle on a single-branch IF, and keeps continue un-rotated (straight)', () => {
+    mock.state.nodes = [
+      { id: 'if-1', data: { blockType: 'if', props: { _stepPath: 'steps/0' } } },
+      { id: 't', data: { props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/0' } } },
+    ];
+    renderNode({ id: 'if-1', data: { blockType: 'if', label: 'If', props: { _stepPath: 'steps/0' } } as any });
+    // The THEN/body handle is shifted right toward its indented body, clear of the continue handle.
+    expect(screen.getByTestId('handle-source-bottom').style.left).toBe('75%');
+    // The continue handle is NOT rotated: a rotate(45) diamond offsets React Flow's connection
+    // point ~2px, which bends the continuation. Un-rotated → RF centers it → renders straight.
+    expect(screen.getByTestId('handle-source-continue').style.transform).toBe('');
+  });
+
+  it('keeps the continue handle on the left for a multi-branch (then+else) IF', () => {
+    mock.state.nodes = [
+      { id: 'if-2', data: { blockType: 'if', props: { _stepPath: 'steps/0' } } },
+      { id: 't', data: { props: { _isChildOf: 'if-2', _stepPath: 'steps/0/then/0' } } },
+      { id: 'e', data: { props: { _isChildOf: 'if-2', _stepPath: 'steps/0/else/0' } } },
+    ];
+    renderNode({ id: 'if-2', data: { blockType: 'if', label: 'If', props: { _stepPath: 'steps/0' } } as any });
+    expect(screen.getByTestId('handle-source-continue').getAttribute('data-position')).toBe('left');
   });
 });
