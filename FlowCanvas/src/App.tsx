@@ -396,6 +396,7 @@ function FlowCanvasInner() {
               snapGrid={[gridSize, gridSize]}
               selectionOnDrag
               panOnDrag={[1, 2]}
+              minZoom={0.2}
               fitView
               fitViewOptions={{ maxZoom: 0.85, padding: 0.15 }}
               proOptions={{ hideAttribution: true }}
