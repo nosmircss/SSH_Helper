@@ -43,11 +43,13 @@ function doSend(): void {
   }
 
   const disabledBlocks = Array.from(state.disabledBlocks);
+  const expandedNodes = Array.from(state.expandedNodes);
 
   messageBus.send({
     type: CANVAS_HOST_MESSAGES.outgoing.layoutAutosave,
     positions,
     comments,
     disabledBlocks,
+    expandedNodes,
   });
 }

@@ -152,6 +152,12 @@ export function initMessageBridge(): () => void {
         if (disabledIds.length > 0) {
           state.restoreDisabledBlocks(disabledIds);
         }
+        const expandedIds: string[] = [];
+        for (const node of state.nodes) {
+          const data = node.data as Record<string, unknown> | undefined;
+          if (data?.expanded === true) expandedIds.push(node.id);
+        }
+        if (expandedIds.length > 0) state.restoreExpandedNodes(expandedIds);
       }
     }),
 
