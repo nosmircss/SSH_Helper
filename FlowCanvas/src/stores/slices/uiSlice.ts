@@ -57,7 +57,9 @@ export interface UISlice {
   toggleHeatmap: () => void;
   restoreHeatmapEnabled: (enabled: boolean) => void;
   toggleBranchBands: () => void;
+  restoreBranchBands: (value: boolean) => void;
   toggleSnapToGrid: () => void;
+  restoreSnapToGrid: (value: boolean) => void;
   setSearchQuery: (query: string) => void;
   nextSearchResult: () => void;
   prevSearchResult: () => void;
@@ -125,11 +127,19 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   }),
   restoreHeatmapEnabled: (enabled) => set({ heatmapEnabled: enabled }),
 
-  // Transient view preference (default-on, v1). Unlike heatmap it does not persist through
-  // WindowState — keeps the C# surface untouched for Wave 2a (trivial follow-on if requested).
-  toggleBranchBands: () => set((s) => ({ branchBandsEnabled: !s.branchBandsEnabled })),
+  toggleBranchBands: () => set((s) => {
+    const next = !s.branchBandsEnabled;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, branchBandsEnabled: next });
+    return { branchBandsEnabled: next };
+  }),
+  restoreBranchBands: (value) => set({ branchBandsEnabled: value }),
 
-  toggleSnapToGrid: () => set((s) => ({ snapToGrid: !s.snapToGrid })),
+  toggleSnapToGrid: () => set((s) => {
+    const next = !s.snapToGrid;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, snapToGrid: next });
+    return { snapToGrid: next };
+  }),
+  restoreSnapToGrid: (value) => set({ snapToGrid: value }),
 
   setSearchQuery: (query) => {
     const nodes = get().nodes;
