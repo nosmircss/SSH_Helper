@@ -3,6 +3,9 @@ import { useFlowStore } from '../stores/useFlowStore';
 import { WIDTH_PRESETS, TEXT_SCALES, DENSITIES } from '../stores/slices/settingsSlice';
 import { mix } from '../utils/tokens';
 
+// Label on its own line above a FULL-WIDTH segmented row whose chips share the width equally
+// (flex: 1). Stacking + equal-flex is what lets all 5 width presets fit the popover without
+// clipping — an inline chip group can't shrink and overflows once the labels are real words.
 function Segmented<T extends string | number>(props: {
   label: string;
   value: T;
@@ -10,14 +13,15 @@ function Segmented<T extends string | number>(props: {
   onChange: (v: T) => void;
 }) {
   return (
-    <div style={rowStyle}>
-      <span style={labStyle}>{props.label}</span>
-      <div style={{ display: 'inline-flex', border: '1px solid var(--fc-border)', borderRadius: 6, overflow: 'hidden' }}>
+    <div style={{ padding: '5px 0' }}>
+      <div style={{ ...labStyle, marginBottom: 4 }}>{props.label}</div>
+      <div style={{ display: 'flex', width: '100%', border: '1px solid var(--fc-border)', borderRadius: 6, overflow: 'hidden' }}>
         {props.options.map((o, i) => {
           const on = o.v === props.value;
           return (
             <button key={o.label} onClick={() => props.onChange(o.v)} style={{
-              fontSize: 10, padding: '3px 8px', cursor: 'pointer', fontFamily: 'inherit',
+              flex: '1 1 0', minWidth: 0, fontSize: 10, padding: '4px 2px', cursor: 'pointer', fontFamily: 'inherit',
+              textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               border: 'none', borderLeft: i ? '1px solid var(--fc-border)' : 'none',
               background: on ? 'var(--fc-accent-surface)' : 'var(--fc-surface-1)',
               color: on ? 'var(--fc-text)' : 'var(--fc-text-muted)',
@@ -107,7 +111,7 @@ export default function SettingsPopover() {
 
       {open && (
         <div role="dialog" aria-label="Display settings" style={{
-          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 50, width: 236,
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 50, width: 280,
           background: 'var(--fc-surface-0)', border: '1px solid var(--fc-border-subtle)',
           borderRadius: 9, boxShadow: '0 12px 36px var(--fc-overlay-scrim)', padding: '8px 12px 10px',
         }}>
