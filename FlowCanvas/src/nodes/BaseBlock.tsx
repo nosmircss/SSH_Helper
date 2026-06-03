@@ -5,7 +5,7 @@ import { useFlowStore } from '../stores/useFlowStore';
 import { mix } from '../utils/tokens';
 import { nodeBorderColor, resolveNodeShadow } from '../utils/nodeStyle';
 import { summarizeBlock } from '../utils/blockSummary';
-import { SPINE_WIDTH, CHILD_WIDTH } from '../utils/nodeSize';
+import { BLOCK_WIDTH_INSET } from '../utils/nodeSize';
 import { BlockIcon } from './BlockIcon';
 import './baseblock.css';
 import './execution-cinematics.css';
@@ -95,6 +95,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const isExpanded = useFlowStore((s) => s.isExpanded(id));
   const toggleExpanded = useFlowStore((s) => s.toggleExpanded);
   const selectNode = useFlowStore((s) => s.selectNode);
+  const blockWidth = useFlowStore((s) => s.blockWidth);
 
   const handleBreakpointToggle = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -159,8 +160,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     background: isDisabled ? 'var(--fc-surface-disabled)' : 'var(--fc-node-surface)',
     border: `1px solid ${nodeBorderColor({ selected, isDisabled, border: colors.border })}`,
     borderRadius: 8,
-    minWidth: isChild ? CHILD_WIDTH : SPINE_WIDTH,
-    maxWidth: isChild ? CHILD_WIDTH : SPINE_WIDTH,
+    minWidth: isChild ? blockWidth - BLOCK_WIDTH_INSET : blockWidth,
+    maxWidth: isChild ? blockWidth - BLOCK_WIDTH_INSET : blockWidth,
     overflow: 'hidden',
     opacity: isDisabled ? 0.5 : isChild ? 0.95 : 1,
     boxShadow: heatTint ? `0 0 0 3px ${heatTint}, ${existingBoxShadow}` : existingBoxShadow,

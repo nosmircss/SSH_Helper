@@ -26,6 +26,8 @@ const mock = vi.hoisted(() => ({
     toggleExpanded: () => {},
     selectNode: () => {},
     nodes: [] as any[],
+    blockWidth: 330,
+    textScale: 1,
   } as any,
 }));
 
@@ -69,6 +71,17 @@ describe('BaseBlock', () => {
     renderNode({ data: { blockType: 'send', label: 'Send', props: { command: 'show ver', capture: 'out' } } as any });
     expect(screen.getByTestId('block-summary')).toBeInTheDocument();
     expect(screen.getByText('Edit in Properties')).toBeInTheDocument();
+  });
+
+  it('block width follows the store blockWidth setting', () => {
+    mock.state.blockWidth = 700;
+    renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
+    expect(screen.getByTestId('block-node').style.minWidth).toBe('700px');
+    // child block: 700 - 30 = 670
+    renderNode({ data: { blockType: 'send', label: 'Send', props: { _isChildOf: 'p' } } as any });
+    const blocks = screen.getAllByTestId('block-node');
+    expect(blocks[blocks.length - 1].style.minWidth).toBe('670px');
+    mock.state.blockWidth = 330; // restore for other tests
   });
 
   it('renders a spine block at 330px and a child block at 300px', () => {
