@@ -146,7 +146,6 @@
   --fc-font-mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
   --fc-fs-badge: 10px;
   --fc-fs-body: 12px;
-  --fc-fs-header: 13px;
 
   /* Specialty (not in generic ladder) */
   --fc-term-bg: oklch(16% 0.01 255);

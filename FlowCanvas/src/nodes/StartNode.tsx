@@ -32,6 +32,7 @@ const FLAG_KEYS: { key: string; label: string }[] = [
 
 function StartNode({ data, selected }: NodeProps) {
   const blockWidth = useFlowStore((s) => s.blockWidth);
+  const textScale = useFlowStore((s) => s.textScale);
   const startData = data as StartNodeData;
   const props = startData.props ?? {};
   const scriptName = props.name || startData.label || 'Untitled Script';
@@ -82,7 +83,7 @@ function StartNode({ data, selected }: NodeProps) {
         <span style={{
           background: 'var(--fc-start-accent)',
           color: 'var(--fc-start-badge-text)',
-          fontSize: 10,
+          fontSize: 10 * textScale,
           fontWeight: 700,
           padding: '2px 6px',
           borderRadius: 3,
@@ -94,7 +95,7 @@ function StartNode({ data, selected }: NodeProps) {
         </span>
         <span style={{
           color: 'var(--fc-text)',
-          fontSize: 12,
+          fontSize: 12 * textScale,
           fontWeight: 600,
           overflow: 'hidden',
           textOverflow: 'ellipsis',

@@ -1,7 +1,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import { buildLayoutTree } from './treeBuilder';
 import type { LayoutBranch, LayoutTree, LayoutTreeNode, Point } from './types';
-import { estimateNodeHeight, COLLAPSED_HEIGHT, BAND_PAD } from '../nodeSize';
+import { estimateNodeHeight, COLLAPSED_HEIGHT, BAND_PAD, BLOCK_WIDTH_INSET } from '../nodeSize';
 
 /** Single source of truth for layout spacing (ported from FlowCanvasBridge.cs). */
 export const LAYOUT = {
@@ -36,7 +36,7 @@ interface ResolvedSizing {
   childWidth: number; columnWidth: number; nodeSpacingY: number; branchOffset: number; textScale: number;
 }
 function resolveSizing(s: BlockSizing): ResolvedSizing {
-  const childWidth = s.blockWidth - LAYOUT.COLUMN_GAP;            // preserves the 30px child inset
+  const childWidth = s.blockWidth - BLOCK_WIDTH_INSET;            // preserves the 30px child inset
   return {
     childWidth,
     columnWidth: childWidth + LAYOUT.COLUMN_GAP,                  // = blockWidth

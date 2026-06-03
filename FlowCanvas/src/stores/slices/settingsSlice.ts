@@ -5,7 +5,7 @@ import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
 import { sendLayoutAutosave } from '../../utils/layoutAutosave';
 import { computeHierarchicalLayout, type BlockSizing } from '../../utils/layout/hierarchicalLayout';
 
-/** Width presets (px). M=330 is today's default. */
+/** Width presets (px). Normal=330 is today's default. */
 export const WIDTH_PRESETS = [
   { label: 'Compact', px: 300 },
   { label: 'Normal', px: 330 },
