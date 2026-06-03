@@ -4,6 +4,7 @@ import { useAutoLayout } from '../hooks/useAutoLayout';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import { buildExecutableGraphPayload } from '../utils/exportGraph';
 import { mix } from '../utils/tokens';
+import SettingsPopover from './SettingsPopover';
 
 export default function Toolbar() {
   const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
@@ -15,14 +16,6 @@ export default function Toolbar() {
   const canRedo = useFlowStore((s) => s.future.length > 0);
   const undo = useFlowStore((s) => s.undo);
   const redo = useFlowStore((s) => s.redo);
-  const snapToGrid = useFlowStore((s) => s.snapToGrid);
-  const toggleSnapToGrid = useFlowStore((s) => s.toggleSnapToGrid);
-  const reducedMotion = useFlowStore((s) => s.reducedMotion);
-  const toggleReducedMotion = useFlowStore((s) => s.toggleReducedMotion);
-  const heatmapEnabled = useFlowStore((s) => s.heatmapEnabled);
-  const toggleHeatmap = useFlowStore((s) => s.toggleHeatmap);
-  const branchBandsEnabled = useFlowStore((s) => s.branchBandsEnabled);
-  const toggleBranchBands = useFlowStore((s) => s.toggleBranchBands);
   const problemsVisible = useFlowStore((s) => s.panelsVisible.problems);
   const diagnostics = useFlowStore((s) => s.diagnostics);
   const errorCount = diagnostics.filter((d) => d.severity === 'error').length;
@@ -197,16 +190,6 @@ export default function Toolbar() {
       <button onClick={toggleSearch} style={btnStyle(searchVisible ? 'var(--fc-accent)' : 'var(--fc-text-muted)', true)} title="Search blocks (Ctrl+F)">
         🔍
       </button>
-      <button onClick={toggleSnapToGrid} style={btnStyle(snapToGrid ? 'var(--fc-state-success)' : 'var(--fc-text-muted)', true)} title="Snap to grid">
-        ⊡ {snapToGrid ? 'Snap' : 'Free'}
-      </button>
-      <button
-        onClick={toggleReducedMotion}
-        style={btnStyle(reducedMotion ? 'var(--fc-state-success)' : 'var(--fc-text-muted)', true)}
-        title={reducedMotion ? 'Motion reduced — click to enable animations' : 'Reduce motion — disable animations'}
-      >
-        {reducedMotion ? '⏸ Calm' : '▶ Motion'}
-      </button>
       <button
         onClick={() => setAllExpanded(!allExpanded)}
         disabled={!hasBlocks}
@@ -215,6 +198,7 @@ export default function Toolbar() {
       >
         {allExpanded ? '⊟ Collapse All' : '⊞ Expand All'}
       </button>
+      <SettingsPopover />
 
       <Separator color={borderColor} />
 
@@ -242,20 +226,6 @@ export default function Toolbar() {
         title="Toggle execution timeline"
       >
         ⏱ Timeline
-      </button>
-      <button
-        onClick={toggleHeatmap}
-        style={btnStyle(heatmapEnabled ? 'var(--fc-accent)' : 'var(--fc-text-muted)', true)}
-        title="Toggle run heatmap (color blocks by duration)"
-      >
-        🔥 Heatmap
-      </button>
-      <button
-        onClick={toggleBranchBands}
-        style={btnStyle(branchBandsEnabled ? 'var(--fc-cat-control-flow-border)' : 'var(--fc-text-muted)', true)}
-        title="Toggle branch containment bands (highlight if/try/switch branch regions)"
-      >
-        ▭ Bands
       </button>
       <button
         onClick={clearPath}
