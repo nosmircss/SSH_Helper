@@ -2,6 +2,7 @@
 // Round-trip-safe branch-band derivation. Reads ONLY existing transient metadata
 // (_isChildOf, _stepPath, _branchLabel) + node.position; writes nothing to node.data.
 import type { Node } from '@xyflow/react';
+import { CHILD_WIDTH, COLLAPSED_HEIGHT } from './nodeSize';
 
 export interface BranchBand {
   id: string;
@@ -47,9 +48,20 @@ export function branchKeyFromStepPath(stepPath: string | undefined, branchLabel:
   return (branchLabel ?? 'then').split(/[:\s]/)[0].toLowerCase();
 }
 
-const NODE_W = 280; // max width from BaseBlock containerStyle (non-child 280 / child 260)
-const NODE_H = 64;  // header + preview estimate
-const PAD = 10;
+export const BAND_PAD = 18;
+
+/** Human pill label for a branch key (single source for the band layer). */
+export function branchPillLabel(key: string): string {
+  const k = (key ?? '').toLowerCase();
+  if (k === 'do') return 'LOOP';
+  return k.toUpperCase();
+}
+
+/** Per-node box used for band geometry. Width is fixed per role; height is the COLLAPSED
+ *  estimate here — Phase 5 swaps in the expanded estimate so lanes wrap expanded children. */
+function nodeBox(_n: Node): { w: number; h: number } {
+  return { w: CHILD_WIDTH, h: COLLAPSED_HEIGHT };
+}
 
 export function computeBranchBands(nodes: Node[]): BranchBand[] {
   const groups = new Map<string, { parentId: string; branchKey: string; nodes: Node[] }>();
@@ -70,19 +82,20 @@ export function computeBranchBands(nodes: Node[]): BranchBand[] {
   for (const [groupId, g] of groups) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of g.nodes) {
+      const { w, h } = nodeBox(n);
       minX = Math.min(minX, n.position.x);
       minY = Math.min(minY, n.position.y);
-      maxX = Math.max(maxX, n.position.x + NODE_W);
-      maxY = Math.max(maxY, n.position.y + NODE_H);
+      maxX = Math.max(maxX, n.position.x + w);
+      maxY = Math.max(maxY, n.position.y + h);
     }
     bands.push({
       id: groupId,
       parentId: g.parentId,
       branchKey: g.branchKey,
-      x: minX - PAD,
-      y: minY - PAD,
-      width: (maxX - minX) + PAD * 2,
-      height: (maxY - minY) + PAD * 2,
+      x: minX - BAND_PAD,
+      y: minY - BAND_PAD,
+      width: (maxX - minX) + BAND_PAD * 2,
+      height: (maxY - minY) + BAND_PAD * 2,
       colorVar: branchColorVar(g.branchKey),
     });
   }
