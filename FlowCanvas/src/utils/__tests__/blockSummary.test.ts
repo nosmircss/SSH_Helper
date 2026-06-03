@@ -24,4 +24,14 @@ describe('summarizeBlock', () => {
     const tok = r.rows.find((x) => x.key === 'token');
     if (tok) expect(tok.masked).toBe(true);
   });
+  it('marks interactive max_seconds/max_lines required (as "not set") when show_window is off and neither is set', () => {
+    const r = summarizeBlock('interactive', { show_window: false, command: 'top' });
+    const keys = r.rows.map((x) => x.key);
+    expect(keys).toContain('max_seconds');
+    expect(keys).toContain('max_lines');
+    expect(r.rows.find((x) => x.key === 'max_seconds')!.notSet).toBe(true);
+    // setting one satisfies the requirement, so the other is no longer required and (being empty) hides.
+    const r2 = summarizeBlock('interactive', { show_window: false, command: 'top', max_seconds: 30 });
+    expect(r2.rows.map((x) => x.key)).not.toContain('max_lines');
+  });
 });

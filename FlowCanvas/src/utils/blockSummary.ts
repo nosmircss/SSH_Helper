@@ -31,7 +31,13 @@ function isRequired(blockType: string, def: PropertyDef, props: Record<string, u
     return base;
   }
   if (blockType === 'interactive') {
-    if (!toBool(props.show_window, true) && def.key === 'command') return true;
+    const showWindow = toBool(props.show_window, true);
+    if (showWindow) return base;
+    if (def.key === 'command') return true;
+    if (def.key === 'max_seconds' || def.key === 'max_lines') {
+      // Window hidden → a bound is required: max_seconds OR max_lines must be set.
+      return !hasValue(props.max_seconds) && !hasValue(props.max_lines);
+    }
   }
   return base;
 }
