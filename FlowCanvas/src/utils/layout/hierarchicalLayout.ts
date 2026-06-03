@@ -28,12 +28,35 @@ export const LAYOUT = {
   MAX_NESTING_DEPTH: 5,
 } as const;
 
-const VERTICAL_GAP = LAYOUT.NODE_SPACING_Y - COLLAPSED_HEIGHT; // 54 — preserves collapsed spacing
+/** User-facing canvas sizing. Defaults reproduce the historical fixed geometry. */
+export interface BlockSizing { blockWidth: number; density: number; textScale: number; }
+export const DEFAULT_BLOCK_SIZING: BlockSizing = { blockWidth: 330, density: 1, textScale: 1 };
+
+interface ResolvedSizing {
+  childWidth: number; columnWidth: number; nodeSpacingY: number; branchOffset: number; textScale: number;
+}
+function resolveSizing(s: BlockSizing): ResolvedSizing {
+  const childWidth = s.blockWidth - LAYOUT.COLUMN_GAP;            // preserves the 30px child inset
+  return {
+    childWidth,
+    columnWidth: childWidth + LAYOUT.COLUMN_GAP,                  // = blockWidth
+    nodeSpacingY: Math.round(LAYOUT.NODE_SPACING_Y * s.density),
+    // Branch-gutter invariant (see BRANCH_CHILD_OFFSET comment): offset > blockWidth/2 + BAND_PAD.
+    // blockWidth/2 + BAND_PAD + 37 reproduces 330 -> 220 and keeps the gutter at every width.
+    branchOffset: Math.round(s.blockWidth / 2 + BAND_PAD + 37),
+    textScale: s.textScale,
+  };
+}
+// Set synchronously at the top of computeHierarchicalLayout (no await in the pass => no reentrancy).
+// computeBranchBands is a SEPARATE function (different file) with its own param and is unaffected.
+let activeSizing: ResolvedSizing = resolveSizing(DEFAULT_BLOCK_SIZING);
+
+function verticalGap(): number { return activeSizing.nodeSpacingY - COLLAPSED_HEIGHT; } // preserves collapsed spacing
 
 function advanceFor(n: LayoutTreeNode): number {
   const data = (n.node?.data ?? {}) as { blockType?: string; expanded?: boolean; props?: Record<string, unknown> };
-  if (!data.expanded) return LAYOUT.NODE_SPACING_Y;
-  return estimateNodeHeight(data.blockType ?? '', data.props ?? {}, true) + VERTICAL_GAP;
+  if (!data.expanded) return activeSizing.nodeSpacingY;
+  return estimateNodeHeight(data.blockType ?? '', data.props ?? {}, true, activeSizing.textScale) + verticalGap();
 }
 
 interface SubtreeSize { columns: number; rows: number; indent: number; }
@@ -47,7 +70,7 @@ function nonEmptyBranches(node: LayoutTreeNode): LayoutBranch[] {
 // original C# behaviour. The decay/base/max-spread knobs are retained for parity; lower
 // MIN_COLUMN_WIDTH if you want depth-decay to actually take effect.
 function getColumnWidth(depth: number): number {
-  return Math.max(LAYOUT.MIN_COLUMN_WIDTH, LAYOUT.BASE_COLUMN_WIDTH * Math.pow(LAYOUT.COLUMN_WIDTH_DECAY, depth));
+  return Math.max(activeSizing.columnWidth, activeSizing.columnWidth * Math.pow(LAYOUT.COLUMN_WIDTH_DECAY, depth));
 }
 
 /** Mirrors C# MeasureSteps: column count + row count of a branch subtree, plus `indent` — the
@@ -77,13 +100,13 @@ function measureSteps(children: LayoutTreeNode[]): SubtreeSize {
       rows += maxRows;
       // This container shifts its own arms right by the offset too (like the single-branch case
       // below), so reserve it — otherwise a sibling lane would overlap the shifted multi-branch body.
-      indent = Math.max(indent, LAYOUT.BRANCH_CHILD_OFFSET + maxIndent);
+      indent = Math.max(indent, activeSizing.branchOffset + maxIndent);
     } else {
       for (const b of branches) {
         const s = measureSteps(b.children);
         columns = Math.max(columns, s.columns);
         rows += s.rows;
-        indent = Math.max(indent, LAYOUT.BRANCH_CHILD_OFFSET + s.indent);
+        indent = Math.max(indent, activeSizing.branchOffset + s.indent);
       }
     }
   }
@@ -117,7 +140,7 @@ function placeBranchSteps(
 }
 
 function placeSingleBranch(branch: LayoutBranch, depth: number, centerX: number, startY: number, pos: Map<string, Point>): number {
-  const childX = centerX + LAYOUT.BRANCH_CHILD_OFFSET;
+  const childX = centerX + activeSizing.branchOffset;
   return placeBranchSteps(branch.children, depth, childX, childX, startY, pos);
 }
 
@@ -127,10 +150,10 @@ function placeMultiBranch(branches: LayoutBranch[], depth: number, centerX: numb
   // Fixed extra width (the container's own branch indent + per-branch nested indent + lane padding +
   // inter-lane gap) is independent of colWidth; only the column part scales when clamping to
   // MAX_SPREAD_WIDTH. Mirrors leftX's starting offset + branchSlotWidth.
-  const extra = LAYOUT.BRANCH_CHILD_OFFSET + sizes.reduce((sum, s) => sum + s.indent + 2 * BAND_PAD + LAYOUT.LANE_GAP, 0);
+  const extra = activeSizing.branchOffset + sizes.reduce((sum, s) => sum + s.indent + 2 * BAND_PAD + LAYOUT.LANE_GAP, 0);
   let colWidth = getColumnWidth(depth);
   if (totalColumns > 0 && totalColumns * colWidth + extra > LAYOUT.MAX_SPREAD_WIDTH) {
-    colWidth = Math.max(LAYOUT.CHILD_NODE_MAX_WIDTH, (LAYOUT.MAX_SPREAD_WIDTH - extra) / totalColumns);
+    colWidth = Math.max(activeSizing.childWidth, (LAYOUT.MAX_SPREAD_WIDTH - extra) / totalColumns);
   }
   // Indent the FIRST (primary: then/do/try/case-0) branch right of the container by
   // BRANCH_CHILD_OFFSET — opening the spine gutter so the straight continuation clears the band —
@@ -138,7 +161,7 @@ function placeMultiBranch(branches: LayoutBranch[], depth: number, centerX: numb
   // (columns + nested indent + lane padding), so a sibling never overlaps a branch whose nested
   // bodies are indented far to the right. (#45: a nested body only ever moves further RIGHT, never
   // left of its parent's column.)
-  let leftX = centerX + LAYOUT.BRANCH_CHILD_OFFSET;
+  let leftX = centerX + activeSizing.branchOffset;
   let maxEndY = startY;
   for (let i = 0; i < branches.length; i++) {
     const endY = placeBranchSteps(branches[i].children, depth, leftX, leftX, startY, pos);
@@ -157,7 +180,7 @@ function placeContainer(node: LayoutTreeNode, depth: number, centerX: number, st
 
 export function placeTree(tree: LayoutTree): Map<string, Point> {
   const pos = new Map<string, Point>();
-  let currentY = LAYOUT.NODE_START_Y + LAYOUT.NODE_SPACING_Y;
+  let currentY = LAYOUT.NODE_START_Y + activeSizing.nodeSpacingY;
   for (const node of tree.spine) {
     pos.set(node.id, { x: LAYOUT.NODE_START_X, y: currentY });
     currentY += advanceFor(node);
@@ -177,11 +200,11 @@ export function placeTree(tree: LayoutTree): Map<string, Point> {
 function placeComments(nodes: Node[], pos: Map<string, Point>): void {
   const comments = nodes.filter((n) => n.type === 'comment');
   if (comments.length === 0 || pos.size === 0) return;
-  const gutterX = Math.max(...[...pos.values()].map((p) => p.x)) + LAYOUT.BASE_COLUMN_WIDTH;
+  const gutterX = Math.max(...[...pos.values()].map((p) => p.x)) + activeSizing.columnWidth;
   let y = LAYOUT.NODE_START_Y;
   for (const c of comments) {
     pos.set(c.id, { x: gutterX, y });
-    y += LAYOUT.NODE_SPACING_Y;
+    y += activeSizing.nodeSpacingY;
   }
 }
 
@@ -190,7 +213,8 @@ function placeComments(nodes: Node[], pos: Map<string, Point>): void {
  * smart-hybrid rules. Returns new node objects with updated positions; nodes not in the
  * tree (the start node, orphans the builder left unplaced) keep their position.
  */
-export function computeHierarchicalLayout(nodes: Node[], edges: Edge[]): Node[] {
+export function computeHierarchicalLayout(nodes: Node[], edges: Edge[], sizing: BlockSizing = DEFAULT_BLOCK_SIZING): Node[] {
+  activeSizing = resolveSizing(sizing);
   const tree = buildLayoutTree(nodes, edges);
   const pos = placeTree(tree);
   placeComments(nodes, pos);
