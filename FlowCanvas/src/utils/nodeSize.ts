@@ -2,6 +2,8 @@
 // height is an ESTIMATE (xyflow exposes no measured height at layout time) used by the
 // hierarchical layout and the branch-band geometry so taller/expanded blocks don't overlap.
 
+import { summarizeBlock } from './blockSummary';
+
 export const SPINE_WIDTH = 330;
 export const CHILD_WIDTH = 300;
 
@@ -15,4 +17,11 @@ export const SUMMARY_FOOTER_H = 24; // "N at default" + Edit-in-Properties foote
 
 export function nodeWidth(props: Record<string, unknown> | undefined): number {
   return props && props['_isChildOf'] ? CHILD_WIDTH : SPINE_WIDTH;
+}
+
+export function estimateNodeHeight(blockType: string, props: Record<string, unknown>, expanded: boolean): number {
+  if (!expanded) return COLLAPSED_HEIGHT;
+  const rows = summarizeBlock(blockType, props).rows.length;
+  // header (~30) + summary body (pad + rows + footer)
+  return 30 + SUMMARY_PAD + rows * SUMMARY_ROW_H + SUMMARY_FOOTER_H;
 }

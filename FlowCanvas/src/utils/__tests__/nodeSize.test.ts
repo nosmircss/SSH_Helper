@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SPINE_WIDTH, CHILD_WIDTH, COLLAPSED_HEIGHT, nodeWidth } from '../nodeSize';
+import { SPINE_WIDTH, CHILD_WIDTH, COLLAPSED_HEIGHT, nodeWidth, estimateNodeHeight } from '../nodeSize';
 
 describe('nodeSize', () => {
   it('exposes the new fixed widths', () => {
@@ -11,5 +11,11 @@ describe('nodeSize', () => {
     expect(nodeWidth({ _isChildOf: 'p' })).toBe(300);
     expect(nodeWidth({})).toBe(330);
     expect(nodeWidth(undefined)).toBe(330);
+  });
+  it('estimates collapsed vs expanded height', () => {
+    const collapsed = estimateNodeHeight('send', { command: 'x' }, false);
+    const expanded = estimateNodeHeight('send', { command: 'x', capture: 'y' }, true);
+    expect(collapsed).toBe(52);
+    expect(expanded).toBeGreaterThan(collapsed); // header + 2 rows + footer
   });
 });
