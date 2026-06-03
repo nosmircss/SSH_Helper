@@ -26,4 +26,13 @@ describe('branchBands', () => {
     expect(b.width).toBe(300 + 18 * 2); // child width 300 + pad both sides
     expect(b.branchKey).toBe('then');
   });
+
+  it('marks the outermost branch depth 0', () => {
+    const b = computeBranchBands([child('c1', 'p', 'steps/0/then/0', 0, 0)])[0];
+    expect(b.depth).toBe(0);
+  });
+  it('marks a branch nested inside another branch as depth >= 1', () => {
+    const b = computeBranchBands([child('c2', 'q', 'steps/0/then/0/else/0', 0, 0)])[0];
+    expect(b.depth).toBeGreaterThanOrEqual(1);
+  });
 });

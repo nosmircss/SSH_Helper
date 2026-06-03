@@ -13,6 +13,7 @@ export interface BranchBand {
   width: number;
   height: number;
   colorVar: string;
+  depth: number;
 }
 
 const BRANCH_KEYS = [
@@ -57,6 +58,21 @@ export function branchPillLabel(key: string): string {
   return k.toUpperCase();
 }
 
+/** Branch-nesting depth from a child stepPath: 0 = outermost branch, 1+ = a branch nested
+ *  inside another branch. Counts branch-keyword segments (then/else/elif/do/try/catch/finally/
+ *  cases/case/default/parallel) and subtracts the group's own branch. Drives the brighter
+ *  nested-lane tint. (Replaces the plan's `length - 2`, which marked every band as nested.) */
+function branchDepth(stepPath: string | undefined): number {
+  if (!stepPath) return 0;
+  let count = 0;
+  for (const seg of stepPath.split('/')) {
+    const s = seg.toLowerCase();
+    if (s === 'cases') { count++; continue; }
+    for (const known of BRANCH_KEYS) { if (s === known) { count++; break; } }
+  }
+  return Math.max(0, count - 1);
+}
+
 /** Per-node box used for band geometry. Width is fixed per role; height is the COLLAPSED
  *  estimate here — Phase 5 swaps in the expanded estimate so lanes wrap expanded children. */
 function nodeBox(_n: Node): { w: number; h: number } {
@@ -88,6 +104,8 @@ export function computeBranchBands(nodes: Node[]): BranchBand[] {
       maxX = Math.max(maxX, n.position.x + w);
       maxY = Math.max(maxY, n.position.y + h);
     }
+    const firstProps = (g.nodes[0]?.data as { props?: Record<string, unknown> } | undefined)?.props;
+    const depth = branchDepth(firstProps?.['_stepPath'] as string | undefined);
     bands.push({
       id: groupId,
       parentId: g.parentId,
@@ -97,6 +115,7 @@ export function computeBranchBands(nodes: Node[]): BranchBand[] {
       width: (maxX - minX) + BAND_PAD * 2,
       height: (maxY - minY) + BAND_PAD * 2,
       colorVar: branchColorVar(g.branchKey),
+      depth,
     });
   }
   return bands;
