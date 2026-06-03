@@ -26,7 +26,11 @@ export default function BranchBandsLayer() {
               transform: `translate(${b.x}px, ${b.y}px)`,
               width: b.width, height: b.height,
               background: mix(b.colorVar, tint),
-              border: `1px solid ${mix(b.colorVar, nested ? 55 : 38)}`,
+              // Longhand per-side borders (not the `border` shorthand) so the 3px left accent
+              // can't be clobbered by the shorthand on rerender — React warns about mixing them.
+              borderTop: `1px solid ${mix(b.colorVar, nested ? 55 : 38)}`,
+              borderRight: `1px solid ${mix(b.colorVar, nested ? 55 : 38)}`,
+              borderBottom: `1px solid ${mix(b.colorVar, nested ? 55 : 38)}`,
               borderLeft: `3px solid ${mix(b.colorVar, 70)}`,
               borderRadius: 9,
               pointerEvents: 'none',
