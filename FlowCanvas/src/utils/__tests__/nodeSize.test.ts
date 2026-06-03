@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SPINE_WIDTH, CHILD_WIDTH, COLLAPSED_HEIGHT, nodeWidth, estimateNodeHeight } from '../nodeSize';
+import { SPINE_WIDTH, CHILD_WIDTH, COLLAPSED_HEIGHT, nodeWidth, estimateNodeHeight, BLOCK_WIDTH_INSET } from '../nodeSize';
 
 describe('nodeSize', () => {
   it('exposes the new fixed widths', () => {
@@ -17,5 +17,22 @@ describe('nodeSize', () => {
     const expanded = estimateNodeHeight('send', { command: 'x', capture: 'y' }, true);
     expect(collapsed).toBe(52);
     expect(expanded).toBeGreaterThan(collapsed); // header + 2 rows + footer
+  });
+});
+
+describe('estimateNodeHeight textScale', () => {
+  it('returns the collapsed floor regardless of scale', () => {
+    expect(estimateNodeHeight('print', { message: 'x' }, false, 1.15)).toBe(52);
+  });
+  it('expanded height grows with textScale', () => {
+    const base = estimateNodeHeight('send', { command: 'a', capture: 'b' }, true, 1);
+    const big = estimateNodeHeight('send', { command: 'a', capture: 'b' }, true, 1.15);
+    expect(big).toBeGreaterThan(base);
+  });
+});
+
+describe('BLOCK_WIDTH_INSET', () => {
+  it('is the spine-minus-child delta', () => {
+    expect(BLOCK_WIDTH_INSET).toBe(SPINE_WIDTH - CHILD_WIDTH); // 30
   });
 });

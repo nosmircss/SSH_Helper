@@ -6,6 +6,8 @@ import { summarizeBlock } from './blockSummary';
 
 export const SPINE_WIDTH = 330;
 export const CHILD_WIDTH = 300;
+/** Spine→child width delta (children inside containers are this much narrower). Single source. */
+export const BLOCK_WIDTH_INSET = SPINE_WIDTH - CHILD_WIDTH; // 30
 
 /** Collapsed block height estimate: header (~30) + single preview line (~22). */
 export const COLLAPSED_HEIGHT = 52;
@@ -28,9 +30,14 @@ export function nodeWidth(props: Record<string, unknown> | undefined): number {
   return props && props['_isChildOf'] ? CHILD_WIDTH : SPINE_WIDTH;
 }
 
-export function estimateNodeHeight(blockType: string, props: Record<string, unknown>, expanded: boolean): number {
+export function estimateNodeHeight(
+  blockType: string,
+  props: Record<string, unknown>,
+  expanded: boolean,
+  textScale = 1,
+): number {
   if (!expanded) return COLLAPSED_HEIGHT;
   const rows = summarizeBlock(blockType, props).rows.length;
-  // header (~30) + summary body (pad + rows + footer)
-  return 30 + SUMMARY_PAD + rows * SUMMARY_ROW_H + SUMMARY_FOOTER_H;
+  // header (~30) + summary body (pad + rows + footer); the summary text scales, so does its height.
+  return Math.round((30 + SUMMARY_PAD + rows * SUMMARY_ROW_H + SUMMARY_FOOTER_H) * textScale);
 }
