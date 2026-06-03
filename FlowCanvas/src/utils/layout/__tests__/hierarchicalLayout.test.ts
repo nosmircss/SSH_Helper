@@ -142,3 +142,27 @@ describe('placeTree — height-aware vertical spacing', () => {
     expect(pos.get('after')!.y - pos.get('x')!.y).toBeGreaterThan(LAYOUT.NODE_SPACING_Y);
   });
 });
+
+import { BAND_PAD } from '../../nodeSize';
+
+describe('placeTree — branch lanes reserve room for nested indentation', () => {
+  it('places a sibling branch clear of a branch whose content is indented by nested containers', () => {
+    // outer IF: then = [ loop{ do: [body] } ] (single-branch nesting indents body to the right), else = [e]
+    const nestedLoop: LayoutTreeNode = {
+      id: 'loop', node: { id: 'loop' } as never, isContainer: true,
+      branches: [{ scope: 'do', sortRank: 0, children: [leaf('body')] }],
+    };
+    const ifNode: LayoutTreeNode = {
+      id: 'if', node: { id: 'if' } as never, isContainer: true,
+      branches: [
+        { scope: 'then', sortRank: 0, children: [nestedLoop] },
+        { scope: 'else', sortRank: 2000, children: [leaf('e')] },
+      ],
+    };
+    const pos = placeTree({ spine: [ifNode] });
+    const thenSubtreeRight = pos.get('body')!.x + LAYOUT.CHILD_NODE_MAX_WIDTH; // nested body's right edge
+    const elseLeft = pos.get('e')!.x;
+    // The else lane must begin clear of the then subtree's right edge plus both lanes' padding.
+    expect(elseLeft).toBeGreaterThanOrEqual(thenSubtreeRight + 2 * BAND_PAD);
+  });
+});

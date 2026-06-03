@@ -10,6 +10,11 @@ export const CHILD_WIDTH = 300;
 /** Collapsed block height estimate: header (~30) + single preview line (~22). */
 export const COLLAPSED_HEIGHT = 52;
 
+/** Padding a branch lane adds around its content on every side. Lives here (not in branchBands)
+ *  so the hierarchical layout can reserve horizontal room for lanes without depending on the
+ *  band layer. The layout and the band geometry MUST use the same value. */
+export const BAND_PAD = 18;
+
 /** Expanded summary metrics (mirror BaseBlock's summary layout). */
 export const SUMMARY_PAD = 14;     // top+bottom padding of the summary body
 export const SUMMARY_ROW_H = 20;   // one label:value row

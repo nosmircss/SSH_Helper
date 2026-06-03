@@ -2,7 +2,10 @@
 // Round-trip-safe branch-band derivation. Reads ONLY existing transient metadata
 // (_isChildOf, _stepPath, _branchLabel) + node.position; writes nothing to node.data.
 import type { Node } from '@xyflow/react';
-import { CHILD_WIDTH, COLLAPSED_HEIGHT, estimateNodeHeight } from './nodeSize';
+import { CHILD_WIDTH, COLLAPSED_HEIGHT, estimateNodeHeight, BAND_PAD } from './nodeSize';
+
+// Re-exported for back-compat: BAND_PAD now lives in nodeSize (shared with the layout engine).
+export { BAND_PAD };
 
 export interface BranchBand {
   id: string;
@@ -48,8 +51,6 @@ export function branchKeyFromStepPath(stepPath: string | undefined, branchLabel:
   // Fall back to the importer's display label (lowercased first word).
   return (branchLabel ?? 'then').split(/[:\s]/)[0].toLowerCase();
 }
-
-export const BAND_PAD = 18;
 
 /** Human pill label for a branch key (single source for the band layer). */
 export function branchPillLabel(key: string): string {
