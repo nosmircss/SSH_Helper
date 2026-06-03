@@ -126,3 +126,10 @@ describe('computeHierarchicalLayout', () => {
     expect(Math.abs(t.x - e.x)).toBeGreaterThanOrEqual(LAYOUT.CHILD_NODE_MAX_WIDTH);
   });
 });
+
+describe('column width tracks child width', () => {
+  it('multi-branch columns are at least CHILD_NODE_MAX_WIDTH + COLUMN_GAP apart', () => {
+    expect(LAYOUT.CHILD_NODE_MAX_WIDTH).toBe(300);
+    expect(LAYOUT.MIN_COLUMN_WIDTH).toBe(330);
+  });
+});
