@@ -4,6 +4,7 @@ import { blockDefMap, categoryColors, type BlockCategory } from '../blockDefs/re
 import { useFlowStore } from '../stores/useFlowStore';
 import { mix } from '../utils/tokens';
 import { nodeBorderColor, resolveNodeShadow } from '../utils/nodeStyle';
+import { summarizeBlock } from '../utils/blockSummary';
 import { SPINE_WIDTH, CHILD_WIDTH } from '../utils/nodeSize';
 import { BlockIcon } from './BlockIcon';
 import './baseblock.css';
@@ -91,6 +92,9 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   });
   const loopIteration = useFlowStore((s) => s.loopIterations.get(id));
   const branchTakenKey = useFlowStore((s) => s.branchTaken.get(id));
+  const isExpanded = useFlowStore((s) => s.isExpanded(id));
+  const toggleExpanded = useFlowStore((s) => s.toggleExpanded);
+  const selectNode = useFlowStore((s) => s.selectNode);
 
   const handleBreakpointToggle = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -134,6 +138,10 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     : blockData.props?.['_preview']
       ? String(blockData.props['_preview'])
       : null;
+
+  const summary = isExpanded
+    ? summarizeBlock(blockData.blockType, (blockData.props ?? {}) as Record<string, unknown>)
+    : null;
 
   // running + error are class-driven: the fc-exec-running / fc-exec-error animations own the
   // box-shadow via the cascade (CSS animations outrank inline styles), so no inline glow here.
@@ -321,22 +329,50 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           {blockData.label || def.label}
         </span>
         {execIndicator}
+        <span
+          data-testid="expand-toggle"
+          onClick={(e) => { e.stopPropagation(); toggleExpanded(id); }}
+          style={{ marginLeft: 4, cursor: 'pointer', color: 'var(--fc-text-secondary)', display: 'flex' }}
+          title={isExpanded ? 'Collapse' : 'Expand settings'}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points={isExpanded ? '6 9 12 15 18 9' : '9 6 15 12 9 18'} />
+          </svg>
+        </span>
       </div>
 
-      {/* Preview content */}
-      {previewText && (
-        <div style={{
-          padding: '4px 8px',
-          fontFamily: 'monospace',
-          fontSize: 12,
+      {/* Preview content or expanded summary */}
+      {isExpanded && summary ? (
+        <div data-testid="block-summary" style={{ background: 'var(--fc-surface-0)', padding: '8px 9px 6px' }}>
+          {summary.rows.map((r) => (
+            <div key={r.key} style={{ display: 'flex', gap: 10, padding: '3px 0', alignItems: 'baseline' }}>
+              <span style={{ flex: 'none', width: 96, fontSize: 10.5, fontWeight: 600, color: 'var(--fc-text-secondary)' }}>{r.label}</span>
+              <span style={{
+                flex: 1, fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                fontFamily: r.isCode ? 'var(--fc-font-mono)' : undefined,
+                color: r.notSet ? 'var(--fc-text-faint)' : (r.isCode ? colors.text : 'var(--fc-text)'),
+              }}>{r.value}</span>
+            </div>
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, paddingTop: 6,
+                        borderTop: '1px solid var(--fc-border)', fontSize: 10 }}>
+            <span style={{ color: 'var(--fc-text-faint)' }}>
+              {summary.hiddenCount} fields at default
+            </span>
+            <span
+              onClick={(e) => { e.stopPropagation(); selectNode(id); }}
+              style={{ color: 'var(--fc-accent)', cursor: 'pointer' }}
+            >Edit in Properties</span>
+          </div>
+        </div>
+      ) : previewText ? (
+        <div style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 12,
           color: isDisabled ? 'var(--fc-text-disabled)' : colors.text,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}>
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {previewText}
         </div>
-      )}
+      ) : null}
 
       {/* Output handle (bottom) */}
       <Handle

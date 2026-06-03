@@ -19,6 +19,9 @@ vi.mock('../../stores/useFlowStore', () => ({
       reducedMotion: false,
       loopIterations: new Map(),
       branchTaken: new Map(),
+      isExpanded: () => true,
+      toggleExpanded: vi.fn(),
+      selectNode: vi.fn(),
     }),
 }));
 
@@ -51,6 +54,13 @@ describe('BaseBlock', () => {
   it('no longer renders the legacy accent rail (the category border carries identity now)', () => {
     renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
     expect(screen.queryByTestId('node-rail')).toBeNull();
+  });
+
+  it('renders the read-only summary when expanded and hides the preview', () => {
+    // store stub returns isExpanded=true
+    renderNode({ data: { blockType: 'send', label: 'Send', props: { command: 'show ver', capture: 'out' } } as any });
+    expect(screen.getByTestId('block-summary')).toBeInTheDocument();
+    expect(screen.getByText('Edit in Properties')).toBeInTheDocument();
   });
 
   it('renders a spine block at 330px and a child block at 300px', () => {
