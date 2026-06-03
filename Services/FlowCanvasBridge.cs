@@ -72,7 +72,7 @@ namespace SSH_Helper.Services
         // MinColumnWidth must be >= max child node width + gap to prevent overlap
         private const double ChildNodeMaxWidth = 300;
         private const double ColumnGap = 30;
-        private const double MinColumnWidth = ChildNodeMaxWidth + ColumnGap;   // 290 — never narrower than a node
+        private const double MinColumnWidth = ChildNodeMaxWidth + ColumnGap;   // 330 — never narrower than a node
 
         // Branch edge colors
         private const string ColorThen = "#2ecc71";

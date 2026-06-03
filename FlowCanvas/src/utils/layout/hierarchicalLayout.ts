@@ -11,9 +11,9 @@ export const LAYOUT = {
   NODE_START_Y: 40,
   CHILD_NODE_MAX_WIDTH: 300,
   COLUMN_GAP: 30,
-  get BASE_COLUMN_WIDTH() { return this.CHILD_NODE_MAX_WIDTH + this.COLUMN_GAP; }, // 290
+  get BASE_COLUMN_WIDTH() { return this.CHILD_NODE_MAX_WIDTH + this.COLUMN_GAP; }, // 330
   COLUMN_WIDTH_DECAY: 0.92,
-  get MIN_COLUMN_WIDTH() { return this.CHILD_NODE_MAX_WIDTH + this.COLUMN_GAP; }, // 290
+  get MIN_COLUMN_WIDTH() { return this.CHILD_NODE_MAX_WIDTH + this.COLUMN_GAP; }, // 330
   MAX_SPREAD_WIDTH: 1400,
   MAX_NESTING_DEPTH: 5,
 } as const;
@@ -32,8 +32,8 @@ function nonEmptyBranches(node: LayoutTreeNode): LayoutBranch[] {
   return node.branches.filter((b) => b.children.length > 0);
 }
 
-// NOTE: MIN_COLUMN_WIDTH currently equals BASE_COLUMN_WIDTH (290), so the depth decay is
-// always clamped away and every column is a fixed 290px — this intentionally matches the
+// NOTE: MIN_COLUMN_WIDTH currently equals BASE_COLUMN_WIDTH (330), so the depth decay is
+// always clamped away and every column is a fixed 330px — this intentionally matches the
 // original C# behaviour. The decay/base/max-spread knobs are retained for parity; lower
 // MIN_COLUMN_WIDTH if you want depth-decay to actually take effect.
 function getColumnWidth(depth: number): number {
