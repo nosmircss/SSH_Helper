@@ -12,6 +12,7 @@ import { isConnectionAllowed } from '../utils/connectionRules';
 import type { ConnectionVerdict } from '../utils/connectionRules';
 import type { Connection } from '@xyflow/react';
 import { computeHierarchicalLayout } from '../utils/layout/hierarchicalLayout';
+import type { CanvasSettings } from './slices/settingsSlice';
 
 interface FlowCanvasTestHooks {
   onOutgoingMessage?: (msg: unknown) => void;
@@ -135,7 +136,8 @@ export function initMessageBridge(): () => void {
         const hasUserLayout = (msg as { hasUserLayout?: boolean }).hasUserLayout === true;
         if (!hasUserLayout) {
           const s = store.getState();
-          store.getState().setNodes(computeHierarchicalLayout(s.nodes, s.edges));
+          store.getState().setNodes(computeHierarchicalLayout(s.nodes, s.edges,
+            { blockWidth: s.blockWidth, density: s.density, textScale: s.textScale }));
         }
 
         resetGraphSessionState(store);
@@ -378,7 +380,7 @@ export function initMessageBridge(): () => void {
       // Intentionally ignored: canvas is always dark regardless of main app theme
     }),
 
-    // Restore panel sizes from WinForms persisted settings
+    // Restore panel sizes and canvas settings from WinForms persisted settings
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.layoutRestore, (msg) => {
       if (msg.panelSizes && typeof msg.panelSizes === 'object') {
         const sizes: Record<string, number> = {};
@@ -387,9 +389,17 @@ export function initMessageBridge(): () => void {
         }
         store.getState().restorePanelSizes(sizes);
       }
-      if (typeof msg.heatmapEnabled === 'boolean') {
-        store.getState().restoreHeatmapEnabled(msg.heatmapEnabled);
-      }
+      if (typeof msg.heatmapEnabled === 'boolean') store.getState().restoreHeatmapEnabled(msg.heatmapEnabled);
+
+      const cs: Partial<CanvasSettings> = {};
+      if (typeof msg.blockWidth === 'number' && msg.blockWidth > 0) cs.blockWidth = msg.blockWidth;
+      if (typeof msg.textScale === 'number' && msg.textScale > 0) cs.textScale = msg.textScale;
+      if (typeof msg.density === 'number' && msg.density > 0) cs.density = msg.density;
+      if (typeof msg.defaultBlockExpanded === 'boolean') cs.defaultBlockExpanded = msg.defaultBlockExpanded;
+      if (Object.keys(cs).length > 0) store.getState().restoreCanvasSettings(cs);
+
+      if (typeof msg.snapToGrid === 'boolean') store.getState().restoreSnapToGrid(msg.snapToGrid);
+      if (typeof msg.branchBandsEnabled === 'boolean') store.getState().restoreBranchBands(msg.branchBandsEnabled);
     }),
 
     // Restore UI prefs from WinForms persisted settings (no echo back to host)
