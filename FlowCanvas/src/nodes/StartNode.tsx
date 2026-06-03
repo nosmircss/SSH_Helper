@@ -1,5 +1,6 @@
 import { memo, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { SPINE_WIDTH } from '../utils/nodeSize';
 
 export interface StartNodeData {
   blockType: '_start';
@@ -50,8 +51,8 @@ function StartNode({ data, selected }: NodeProps) {
     background: 'linear-gradient(135deg, var(--fc-start-grad-from), var(--fc-start-grad-to))',
     border: `2px solid ${selected ? 'var(--fc-border-selected)' : 'var(--fc-start-accent)'}`,
     borderRadius: 8,
-    minWidth: 280,
-    maxWidth: 280,
+    minWidth: SPINE_WIDTH,
+    maxWidth: SPINE_WIDTH,
     overflow: 'hidden',
     boxShadow: selected
       ? '0 0 12px var(--fc-glow-selected)'
