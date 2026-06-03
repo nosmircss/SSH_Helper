@@ -52,3 +52,65 @@ describe('toggleExpanded reflow (Option A)', () => {
     expect(afterB).toBeGreaterThan(beforeB);
   });
 });
+
+describe('setAllExpanded', () => {
+  const buildGraph = () => {
+    const nodes = [
+      { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', props: {} } },
+      { id: 'A', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'send', props: { command: 'a', capture: 'b' } } },
+      { id: 'B', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'x' } } },
+      { id: 'C', type: 'comment', position: { x: 0, y: 0 }, data: { text: 'note' } },
+    ];
+    const edges = [
+      { id: 'e0', source: '__start__', target: 'A' },
+      { id: 'e1', source: 'A', target: 'B' },
+    ];
+    useFlowStore.setState({ expandedNodes: new Set() });
+    useFlowStore.getState().setNodes(nodes as never);
+    useFlowStore.getState().setEdges(edges as never);
+  };
+
+  it('expands every block node and leaves start/comment untouched', () => {
+    buildGraph();
+    useFlowStore.getState().setAllExpanded(true);
+    const s = useFlowStore.getState();
+    expect(s.isExpanded('A')).toBe(true);
+    expect(s.isExpanded('B')).toBe(true);
+    expect(s.isExpanded('__start__')).toBe(false);
+    expect(s.isExpanded('C')).toBe(false);
+    expect(s.expandedNodes.size).toBe(2);
+    const byId = new Map(s.nodes.map((n) => [n.id, n]));
+    expect((byId.get('A')!.data as Record<string, unknown>).expanded).toBe(true);
+    expect((byId.get('B')!.data as Record<string, unknown>).expanded).toBe(true);
+    expect((byId.get('__start__')!.data as Record<string, unknown>).expanded).toBeUndefined();
+    expect((byId.get('C')!.data as Record<string, unknown>).expanded).toBeUndefined();
+  });
+
+  it('collapses every block node', () => {
+    buildGraph();
+    useFlowStore.getState().setAllExpanded(true);
+    useFlowStore.getState().setAllExpanded(false);
+    const s = useFlowStore.getState();
+    expect(s.expandedNodes.size).toBe(0);
+    const byId = new Map(s.nodes.map((n) => [n.id, n]));
+    expect((byId.get('A')!.data as Record<string, unknown>).expanded).toBe(false);
+    expect((byId.get('B')!.data as Record<string, unknown>).expanded).toBe(false);
+  });
+
+  it('persists via sendLayoutAutosave', () => {
+    buildGraph();
+    vi.clearAllMocks();
+    useFlowStore.getState().setAllExpanded(true);
+    expect(sendLayoutAutosave).toHaveBeenCalled();
+  });
+
+  it('reflows so expanding all pushes a downstream block lower', () => {
+    buildGraph();
+    const s0 = useFlowStore.getState();
+    s0.setNodes(computeHierarchicalLayout(s0.nodes, s0.edges));
+    const beforeB = useFlowStore.getState().nodes.find((n) => n.id === 'B')!.position.y;
+    useFlowStore.getState().setAllExpanded(true);
+    const afterB = useFlowStore.getState().nodes.find((n) => n.id === 'B')!.position.y;
+    expect(afterB).toBeGreaterThan(beforeB);
+  });
+});

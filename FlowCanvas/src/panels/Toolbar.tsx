@@ -38,6 +38,13 @@ export default function Toolbar() {
   const hasPath = pathVisible && blockStates.size > 0;
   const autoLayout = useAutoLayout();
 
+  const nodes = useFlowStore((s) => s.nodes);
+  const expandedNodes = useFlowStore((s) => s.expandedNodes);
+  const setAllExpanded = useFlowStore((s) => s.setAllExpanded);
+  const blockNodes = nodes.filter((n) => n.type === 'block');
+  const hasBlocks = blockNodes.length > 0;
+  const allExpanded = hasBlocks && blockNodes.every((n) => expandedNodes.has(n.id));
+
   const selectedNodeId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
   const exportStatus = useFlowStore((s) => s.exportStatus);
   const targetHost = useFlowStore((s) => s.targetHost);
@@ -199,6 +206,14 @@ export default function Toolbar() {
         title={reducedMotion ? 'Motion reduced — click to enable animations' : 'Reduce motion — disable animations'}
       >
         {reducedMotion ? '⏸ Calm' : '▶ Motion'}
+      </button>
+      <button
+        onClick={() => setAllExpanded(!allExpanded)}
+        disabled={!hasBlocks}
+        style={btnStyle('var(--fc-text-secondary)', hasBlocks)}
+        title={allExpanded ? 'Collapse every block' : 'Expand every block'}
+      >
+        {allExpanded ? '⊟ Collapse All' : '⊞ Expand All'}
       </button>
 
       <Separator color={borderColor} />

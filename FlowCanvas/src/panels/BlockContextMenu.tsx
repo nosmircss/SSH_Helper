@@ -22,6 +22,7 @@ export default function BlockContextMenu() {
 
   const addComment = useFlowStore((s) => s.addComment);
   const removeNodes = useFlowStore((s) => s.removeNodes);
+  const setAllExpanded = useFlowStore((s) => s.setAllExpanded);
 
   const nodes = useFlowStore((s) => s.nodes);
 
@@ -83,6 +84,23 @@ export default function BlockContextMenu() {
       icon: '\uD83D\uDCDD',
       action: () => {
         addComment(commentPos, nodeId);
+        hideContextMenu();
+      },
+    },
+    { separator: true } as Separator,
+    {
+      label: 'Expand All Blocks',
+      icon: '\u229E',
+      action: () => {
+        setAllExpanded(true);
+        hideContextMenu();
+      },
+    },
+    {
+      label: 'Collapse All Blocks',
+      icon: '\u229F',
+      action: () => {
+        setAllExpanded(false);
         hideContextMenu();
       },
     },

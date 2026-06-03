@@ -22,6 +22,7 @@ export interface DebugSlice {
   isDisabled: (nodeId: string) => boolean;
   hasBreakpoint: (nodeId: string) => boolean;
   toggleExpanded: (nodeId: string) => void;
+  setAllExpanded: (expanded: boolean) => void;
   restoreExpandedNodes: (nodeIds: string[]) => void;
   isExpanded: (nodeId: string) => boolean;
 }
@@ -85,6 +86,19 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
     // Reflow so the taller/shorter block pushes neighbors (height-aware layout).
     const st = get();
     st.setNodes(computeHierarchicalLayout(st.nodes, st.edges));
+    sendLayoutAutosave();
+  },
+  setAllExpanded: (expanded) => {
+    const st = get();
+    const blockIds = st.nodes.filter((n) => n.type === 'block').map((n) => n.id);
+    set({ expandedNodes: expanded ? new Set(blockIds) : new Set<string>() });
+    // Write the carrier flag on every block node in ONE batched pass (vs N updateNodeData
+    // calls / N reflows), then reflow once so all heights settle together. Mirrors
+    // toggleExpanded's side effects; expansion is view state so there's no undo snapshot.
+    const withFlag = st.nodes.map((n) =>
+      n.type === 'block' ? { ...n, data: { ...n.data, expanded } } : n,
+    );
+    st.setNodes(computeHierarchicalLayout(withFlag, st.edges));
     sendLayoutAutosave();
   },
   restoreExpandedNodes: (nodeIds) => {
