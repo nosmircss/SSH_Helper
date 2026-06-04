@@ -2503,6 +2503,26 @@ public class FlowCanvasBridgeTests
         Assert.Equal(1, CountOccurrences(result.Yaml, "# needs vdom"));
     }
 
+    [Fact]
+    public void RoundTrip_QuotedHashInValue_NotStripped()
+    {
+        var yaml = "steps:\n  - send:\n      command: \"echo #1\"\n";
+        var result = RoundTripThroughBridge(yaml);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("#1", result.Yaml);
+    }
+
+    [Fact]
+    public void RoundTrip_HashNotPrecededByWhitespace_NotStripped()
+    {
+        var yaml = "steps:\n  - send:\n      command: v1#2\n";
+        var result = RoundTripThroughBridge(yaml);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("v1#2", result.Yaml);
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         int count = 0, idx = 0;
