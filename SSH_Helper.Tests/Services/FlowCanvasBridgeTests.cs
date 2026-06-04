@@ -3111,4 +3111,33 @@ public class FlowCanvasBridgeSplitYamlStepsTests
         Assert.Null(steps[0].InlineComment);
         Assert.Contains("#", steps[0].Snippet);
     }
+
+    [Fact]
+    public void TextToGraph_LeadingComment_EmitsAnchoredCommentNode()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = "steps:\n  # Get hostname\n  - send:\n      command: hostname\n";
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var comment = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["blockType"]?.ToString() == "comment");
+        Assert.NotNull(comment);
+        Assert.Equal("comment", comment!["data"]?["kind"]?.ToString());
+        Assert.Equal("Get hostname", comment["data"]?["text"]?.ToString());
+        Assert.Equal("leading", comment["data"]?["anchor"]?["type"]?.ToString());
+        Assert.Equal("steps/0", comment["data"]?["anchor"]?["stepPath"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_HeaderComment_EmitsHeaderAnchoredNode()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = "# File header note\nname: demo\nsteps:\n  - send:\n      command: hostname\n";
+        var (nodes, _) = bridge.TextToGraph(yaml);
+        var header = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["anchor"]?["type"]?.ToString() == "header");
+        Assert.NotNull(header);
+        Assert.Equal("File header note", header!["data"]?["text"]?.ToString());
+    }
 }

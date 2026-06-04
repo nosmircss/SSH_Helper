@@ -330,6 +330,41 @@ namespace SSH_Helper.Services
         private int _idCounter;
         private string NextId() => $"node-{_idCounter++}";
 
+        private int _commentCounter;
+
+        private JObject BuildCommentNode(string text, string anchorType, string stepPath, string attachedToNodeId)
+        {
+            var id = $"comment-c{_commentCounter++}";
+            return new JObject
+            {
+                ["id"] = id,
+                ["type"] = "comment",
+                ["position"] = new JObject { ["x"] = 0, ["y"] = 0 },
+                ["data"] = new JObject
+                {
+                    ["commentId"] = id,
+                    ["blockType"] = "comment",
+                    ["kind"] = "comment",
+                    ["text"] = text,
+                    ["anchor"] = new JObject
+                    {
+                        ["type"] = anchorType,
+                        ["stepPath"] = stepPath,
+                    },
+                    ["attachedToNodeId"] = attachedToNodeId,
+                },
+            };
+        }
+
+        private static IEnumerable<string> ExtractPreambleComments(string preamble)
+        {
+            foreach (var raw in preamble.Split('\n'))
+            {
+                var t = raw.TrimEnd('\r').TrimStart();
+                if (t.StartsWith("#")) yield return StripHash(t);
+            }
+        }
+
         #region YAML → Graph (using raw text splitting)
 
         /// <summary>
@@ -343,6 +378,7 @@ namespace SSH_Helper.Services
             var nodes = new JArray();
             var edges = new JArray();
             _idCounter = 0;
+            _commentCounter = 0;
 
             // Parse to get step types/labels, but use raw text for data
             var parser = new ScriptParser();
@@ -377,7 +413,6 @@ namespace SSH_Helper.Services
                 var stepProps = new JObject { ["_yamlSnippet"] = snippet };
                 if (snippetInfo.BlankLinesBefore > 0)
                     stepProps["_blankLinesBefore"] = snippetInfo.BlankLinesBefore;
-                // NOTE: snippetInfo.LeadingComments / InlineComment are consumed by the comment-node emission step (next task), not stored here.
                 stepProps["_stepPath"] = stepPath;
                 if (previewText != null)
                     stepProps["_preview"] = previewText;
@@ -397,6 +432,12 @@ namespace SSH_Helper.Services
                 };
 
                 nodes.Add(node);
+
+                // Emit anchored comment nodes for leading and inline comments on this step
+                foreach (var c in snippetInfo.LeadingComments)
+                    nodes.Add(BuildCommentNode(c, "leading", stepPath, nodeId));
+                if (!string.IsNullOrEmpty(snippetInfo.InlineComment))
+                    nodes.Add(BuildCommentNode(snippetInfo.InlineComment!, "inline", stepPath, nodeId));
 
                 // Connect from all pending nodes to this one
                 foreach (var pe in pendingConnections)
@@ -459,7 +500,11 @@ namespace SSH_Helper.Services
             var startProps = new JObject();
             if (!string.IsNullOrWhiteSpace(preamble))
             {
-                ParsePreambleIntoProps(preamble, script, startProps);
+                // Strip comment-only lines before storing the snippet so header comments
+                // are not double-emitted on a round-trip import.
+                var preambleForSnippet = string.Join("\n", preamble.Split('\n')
+                    .Where(l => { var t = l.TrimEnd('\r').TrimStart(); return !t.StartsWith("#"); })) + "\n";
+                ParsePreambleIntoProps(preambleForSnippet, script, startProps);
             }
 
             var startNode = new JObject
@@ -475,6 +520,13 @@ namespace SSH_Helper.Services
                 },
             };
             nodes.Add(startNode);
+
+            // Emit header comment nodes from the preamble (anchored to the start node)
+            if (!string.IsNullOrWhiteSpace(preamble))
+            {
+                foreach (var line in ExtractPreambleComments(preamble))
+                    nodes.Add(BuildCommentNode(line, "header", "preamble", "__start__"));
+            }
 
             // Connect Start to the first step node (if any steps exist)
             string? firstStepId = null;
