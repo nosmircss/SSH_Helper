@@ -403,6 +403,7 @@ export function initMessageBridge(): () => void {
 
       if (typeof msg.snapToGrid === 'boolean') store.getState().restoreSnapToGrid(msg.snapToGrid);
       if (typeof msg.branchBandsEnabled === 'boolean') store.getState().restoreBranchBands(msg.branchBandsEnabled);
+      if (typeof msg.compactCommentsEnabled === 'boolean') store.getState().restoreCompactComments(msg.compactCommentsEnabled);
     }),
 
     // Restore UI prefs from WinForms persisted settings (no echo back to host)
