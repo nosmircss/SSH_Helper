@@ -14,11 +14,25 @@ describe('placeAnchoredComments', () => {
     expect(c1.position.y).toBeLessThan(200);
   });
 
-  it('does not move sticky-kind comments', () => {
+  it('does not move sticky-kind comments (no anchor)', () => {
+    // kind:'sticky' notes have no anchor property — they are free-floating
     const nodes = [
       { id: 'b1', type: 'block', position: { x: 100, y: 200 }, data: {} },
       { id: 'c1', type: 'comment', position: { x: 50, y: 50 },
-        data: { attachedToNodeId: 'b1', anchor: { type: 'sticky' } } },
+        data: { attachedToNodeId: 'b1', kind: 'sticky' } },
+    ] as never[];
+    const out = placeAnchoredComments(nodes);
+    const c1 = out.find((n) => n.id === 'c1')!;
+    expect(c1.position.x).toBe(50);
+    expect(c1.position.y).toBe(50);
+  });
+
+  it('does not move inline-anchor comments', () => {
+    // inline is a valid NoteAnchor type but placeAnchoredComments only repositions 'leading' and 'header'
+    const nodes = [
+      { id: 'b1', type: 'block', position: { x: 100, y: 200 }, data: {} },
+      { id: 'c1', type: 'comment', position: { x: 50, y: 50 },
+        data: { attachedToNodeId: 'b1', anchor: { type: 'inline', stepPath: 'steps/0' } } },
     ] as never[];
     const out = placeAnchoredComments(nodes);
     const c1 = out.find((n) => n.id === 'c1')!;
