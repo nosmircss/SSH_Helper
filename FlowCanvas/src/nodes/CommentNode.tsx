@@ -3,10 +3,19 @@ import type { NodeProps } from '@xyflow/react';
 import { useFlowStore } from '../stores/useFlowStore';
 import { DEFAULT_COMMENT_COLOR } from '../utils/tokens';
 
+export interface NoteAnchor {
+  type: 'header' | 'leading' | 'inline';
+  stepPath?: string;
+  lineOffset?: number;
+}
+
 export interface CommentNodeData {
   commentId: string;
   text: string;
   color?: string;
+  kind?: 'comment' | 'sticky';
+  anchor?: NoteAnchor;
+  attachedToNodeId?: string;
   [key: string]: unknown;
 }
 
