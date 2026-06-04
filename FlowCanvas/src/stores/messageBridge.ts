@@ -12,6 +12,7 @@ import { isConnectionAllowed } from '../utils/connectionRules';
 import type { ConnectionVerdict } from '../utils/connectionRules';
 import type { Connection } from '@xyflow/react';
 import { computeHierarchicalLayout } from '../utils/layout/hierarchicalLayout';
+import { placeAnchoredComments } from '../utils/layout/placeAnchoredComments';
 import type { CanvasSettings } from './slices/settingsSlice';
 
 interface FlowCanvasTestHooks {
@@ -136,8 +137,10 @@ export function initMessageBridge(): () => void {
         const hasUserLayout = (msg as { hasUserLayout?: boolean }).hasUserLayout === true;
         if (!hasUserLayout) {
           const s = store.getState();
-          store.getState().setNodes(computeHierarchicalLayout(s.nodes, s.edges,
-            { blockWidth: s.blockWidth, density: s.density, textScale: s.textScale }));
+          store.getState().setNodes(placeAnchoredComments(computeHierarchicalLayout(s.nodes, s.edges,
+            { blockWidth: s.blockWidth, density: s.density, textScale: s.textScale })));
+        } else {
+          store.getState().setNodes(placeAnchoredComments(store.getState().nodes));
         }
 
         resetGraphSessionState(store);
