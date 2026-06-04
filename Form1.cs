@@ -6901,11 +6901,14 @@ namespace SSH_Helper
             try
             {
                 var bridge = new FlowCanvasBridge();
-                var exportResult = bridge.ExportGraphToYaml(new JObject
+                var exportPayload = new JObject
                 {
                     ["nodes"] = nodes,
                     ["edges"] = edges
-                });
+                };
+                if (graphMessage["comments"] is JArray commentsArray)
+                    exportPayload["comments"] = commentsArray;
+                var exportResult = bridge.ExportGraphToYaml(exportPayload);
 
                 var warnings = exportResult.Warnings.ToArray();
                 if (!exportResult.Success)

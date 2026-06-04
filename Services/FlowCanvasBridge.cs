@@ -1086,9 +1086,39 @@ namespace SSH_Helper.Services
             }
 
             // Index comment-kind notes by their anchor for re-injection. Sticky-kind notes are visual-only.
+            // Primary key: attachedToNodeId (for authored canvas comments from the flat comments[] array).
+            // Fallback key: anchor.stepPath (for imported comments that carry a stepPath but no attachedToNodeId).
+            var leadingByNode = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var inlineByNode = new Dictionary<string, string>(StringComparer.Ordinal);
             var leadingByPath = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             var inlineByPath = new Dictionary<string, string>(StringComparer.Ordinal);
             var headerComments = new List<string>();
+
+            void IndexComment(string text, string? atype, string? attachedToNodeId, string? spath)
+            {
+                if (atype == "header") { headerComments.Add(text); return; }
+                // Use attachedToNodeId as primary key when present; stepPath as fallback.
+                if (!string.IsNullOrEmpty(attachedToNodeId))
+                {
+                    if (atype == "inline") inlineByNode[attachedToNodeId!] = text;
+                    else // leading (or unspecified non-header)
+                    {
+                        if (!leadingByNode.TryGetValue(attachedToNodeId!, out var nl)) leadingByNode[attachedToNodeId!] = nl = new List<string>();
+                        nl.Add(text);
+                    }
+                }
+                else if (!string.IsNullOrEmpty(spath))
+                {
+                    if (atype == "inline") inlineByPath[spath!] = text;
+                    else
+                    {
+                        if (!leadingByPath.TryGetValue(spath!, out var pl)) leadingByPath[spath!] = pl = new List<string>();
+                        pl.Add(text);
+                    }
+                }
+            }
+
+            // (a) Comment-type nodes in nodeMap (imported from YAML via TextToGraph).
             foreach (var n in nodeMap.Values)
             {
                 var d = n["data"];
@@ -1097,13 +1127,23 @@ namespace SSH_Helper.Services
                 var text = d?["text"]?.ToString() ?? string.Empty;
                 var anchor = d?["anchor"];
                 var atype = anchor?["type"]?.ToString();
-                var spath = anchor?["stepPath"]?.ToString() ?? string.Empty;
-                if (atype == "header") headerComments.Add(text);
-                else if (atype == "inline" && spath.Length > 0) inlineByPath[spath] = text;
-                else if (atype == "leading" && spath.Length > 0)
+                var spath = anchor?["stepPath"]?.ToString();
+                var attachedToNodeId = d?["attachedToNodeId"]?.ToString();
+                IndexComment(text, atype, attachedToNodeId, spath);
+            }
+
+            // (b) Flat entries in graphData["comments"] (authored in React canvas, sent as comments[] array).
+            if (graphData["comments"] is JArray flatComments)
+            {
+                foreach (var c in flatComments)
                 {
-                    if (!leadingByPath.TryGetValue(spath, out var list)) leadingByPath[spath] = list = new List<string>();
-                    list.Add(text);
+                    if (!string.Equals(c["kind"]?.ToString(), "comment", StringComparison.OrdinalIgnoreCase)) continue;
+                    var text = c["text"]?.ToString() ?? string.Empty;
+                    var anchor = c["anchor"];
+                    var atype = anchor?["type"]?.ToString();
+                    var spath = anchor?["stepPath"]?.ToString();
+                    var attachedToNodeId = c["attachedToNodeId"]?.ToString();
+                    IndexComment(text, atype, attachedToNodeId, spath);
                 }
             }
 
@@ -1171,6 +1211,19 @@ namespace SSH_Helper.Services
                 // Single source for this step's comment anchor across all emission branches.
                 var stepPathForComments = result.NodeToStepPathMap.TryGetValue(nodeId, out var sp) ? sp : existingStepPath ?? "";
 
+                // Merge leading comments: byNode (authored canvas) + byPath (imported). Each comment lands in
+                // exactly one dictionary (byNode when attachedToNodeId present, byPath otherwise), so no duplicates.
+                IEnumerable<string>? GetLeadingComments()
+                {
+                    var byNode = leadingByNode.GetValueOrDefault(nodeId);
+                    var byPath = leadingByPath.GetValueOrDefault(stepPathForComments);
+                    if (byNode == null) return byPath;
+                    if (byPath == null) return byNode;
+                    return byNode.Concat(byPath);
+                }
+                string? GetInlineComment() =>
+                    inlineByNode.GetValueOrDefault(nodeId) ?? inlineByPath.GetValueOrDefault(stepPathForComments);
+
                 // Container blocks authored visually (branch metadata -> non-child targets)
                 // should be regenerated from graph structure even when a stale snippet exists.
                 // Also regenerate when the user has modified an imported container's branches
@@ -1185,8 +1238,8 @@ namespace SSH_Helper.Services
                             blockType, props, nodeId, outgoing, nodeMap, incomingCount,
                             consumedByContainer, result, out var containerYaml))
                     {
-                        AppendLeadingComments(sb, leadingByPath.GetValueOrDefault(stepPathForComments), 0);
-                        sb.AppendLine(AppendInlineComment(containerYaml, inlineByPath.GetValueOrDefault(stepPathForComments)));
+                        AppendLeadingComments(sb, GetLeadingComments(), 0);
+                        sb.AppendLine(AppendInlineComment(containerYaml, GetInlineComment()));
                         continue;
                     }
                 }
@@ -1200,8 +1253,8 @@ namespace SSH_Helper.Services
                         ExportDiagnosticSeverity.Warning,
                         $"Container block '{blockType}' is exported from its stored YAML snippet.",
                         nodeId));
-                    AppendLeadingComments(sb, leadingByPath.GetValueOrDefault(stepPathForComments), 0);
-                    var injected = AppendInlineComment(normalizedSnippet, inlineByPath.GetValueOrDefault(stepPathForComments));
+                    AppendLeadingComments(sb, GetLeadingComments(), 0);
+                    var injected = AppendInlineComment(normalizedSnippet, GetInlineComment());
                     sb.Append(injected);
                     if (!injected.EndsWith("\n"))
                         sb.AppendLine();
@@ -1210,8 +1263,8 @@ namespace SSH_Helper.Services
 
                 if (TryGenerateStepYaml(blockType, props, out var generatedYaml, out var error))
                 {
-                    AppendLeadingComments(sb, leadingByPath.GetValueOrDefault(stepPathForComments), 0);
-                    sb.AppendLine(AppendInlineComment(generatedYaml, inlineByPath.GetValueOrDefault(stepPathForComments)));
+                    AppendLeadingComments(sb, GetLeadingComments(), 0);
+                    sb.AppendLine(AppendInlineComment(generatedYaml, GetInlineComment()));
                 }
                 else
                 {

@@ -3105,6 +3105,86 @@ public class FlowCanvasBridgeTests
         Assert.Contains("# keep-imported-snippet", result.Yaml);
     }
 
+    // R1 transport tests — use the REAL flat comments[] shape (no TextToGraph shortcut).
+
+    [Fact]
+    public void Export_AuthoredCommentInCommentsArray_EmitsHashLine()
+    {
+        // Authored canvas comment arrives in the flat comments[] array from React.
+        // anchor has type:'leading' and NO stepPath — only attachedToNodeId.
+        // The export must match by attachedToNodeId and emit "# Authored note" above the print step.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("node-1", "print", new JObject { ["message"] = "hello" })
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "node-1")
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c1",
+                    ["text"] = "Authored note",
+                    ["kind"] = "comment",
+                    ["attachedToNodeId"] = "node-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# Authored note", result.Yaml);
+
+        // Verify ordering: the comment line must appear before the print step.
+        var commentIdx = result.Yaml.IndexOf("# Authored note", StringComparison.Ordinal);
+        var printIdx = result.Yaml.IndexOf("print:", StringComparison.Ordinal);
+        Assert.True(commentIdx < printIdx,
+            $"Expected '# Authored note' before 'print:' but comment was at {commentIdx}, print at {printIdx}.");
+    }
+
+    [Fact]
+    public void Export_StickyInCommentsArray_NotEmitted()
+    {
+        // kind:'sticky' is visual-only and must never inject a # line.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("node-1", "print", new JObject { ["message"] = "hello" })
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "node-1")
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "s1",
+                    ["text"] = "Sticky visual note",
+                    ["kind"] = "sticky",
+                    ["attachedToNodeId"] = "node-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.DoesNotContain("# Sticky visual note", result.Yaml);
+    }
+
     private static JObject CreateEdge(
         string source,
         string target,
