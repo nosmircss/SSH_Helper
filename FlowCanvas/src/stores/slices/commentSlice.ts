@@ -4,7 +4,7 @@ import { sendLayoutAutosave } from '../../utils/layoutAutosave';
 import { DEFAULT_COMMENT_COLOR } from '../../utils/tokens';
 
 export interface CommentSlice {
-  addComment: (position: { x: number; y: number }, attachedToNodeId?: string) => void;
+  addComment: (position: { x: number; y: number }, attachedToNodeId?: string, kind?: 'comment' | 'sticky') => void;
   updateComment: (id: string, updates: Record<string, unknown>) => void;
   removeComment: (id: string) => void;
 }
@@ -12,7 +12,7 @@ export interface CommentSlice {
 let commentCounter = 0;
 
 export const createCommentSlice: StateCreator<FlowStore, [], [], CommentSlice> = (set, get) => ({
-  addComment: (position, attachedToNodeId) => {
+  addComment: (position, attachedToNodeId, kind) => {
     get().pushSnapshot('Add comment');
     const id = `comment-${Date.now()}-${commentCounter++}`;
     const commentNode = {
@@ -24,6 +24,8 @@ export const createCommentSlice: StateCreator<FlowStore, [], [], CommentSlice> =
         text: '',
         color: DEFAULT_COMMENT_COLOR,
         attachedToNodeId,
+        kind: kind ?? 'sticky',
+        ...(attachedToNodeId ? { anchor: { type: 'leading' as const } } : {}),
       },
       style: {
         width: 200,

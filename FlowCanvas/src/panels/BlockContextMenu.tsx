@@ -80,12 +80,14 @@ export default function BlockContextMenu() {
       } as MenuItem,
     ] : []),
     {
-      label: 'Add Comment',
-      icon: '\uD83D\uDCDD',
-      action: () => {
-        addComment(commentPos, nodeId);
-        hideContextMenu();
-      },
+      label: 'Add Comment (#)',
+      icon: '\uD83D\uDCAC',
+      action: () => { addComment(commentPos, nodeId, 'comment'); hideContextMenu(); },
+    },
+    {
+      label: 'Add Sticky',
+      icon: '\uD83D\uDCCC',
+      action: () => { addComment(commentPos, nodeId, 'sticky'); hideContextMenu(); },
     },
     { separator: true } as Separator,
     {
