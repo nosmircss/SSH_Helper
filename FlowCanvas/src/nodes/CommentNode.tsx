@@ -23,6 +23,12 @@ function CommentNode({ data, id }: NodeProps) {
   const commentData = data as CommentNodeData;
   const updateComment = useFlowStore((s) => s.updateComment);
   const removeComment = useFlowStore((s) => s.removeComment);
+  const compact = useFlowStore((s) => (s as Record<string, unknown>).compactCommentsEnabled as boolean | undefined);
+
+  const kind = (commentData.kind as 'comment' | 'sticky' | undefined) ?? 'sticky';
+  const anchorType = commentData.anchor?.type;
+  const isComment = kind === 'comment';
+  const renderPill = compact && isComment && (anchorType === 'leading' || anchorType === 'header');
 
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(commentData.text || '');
@@ -70,8 +76,29 @@ function CommentNode({ data, id }: NodeProps) {
     [commentData.text],
   );
 
+  if (renderPill && !editing) {
+    return (
+      <div
+        data-testid="comment-pill"
+        onDoubleClick={handleDoubleClick}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          background: 'var(--fc-comment-pill-bg, rgba(126,224,138,0.10))',
+          borderLeft: '3px solid var(--fc-comment-pill-accent, #7ee08a)',
+          borderRadius: 3, padding: '2px 9px', fontFamily: 'ui-monospace, Consolas, monospace',
+          fontSize: 11.5, color: 'var(--fc-comment-pill-ink, #9fd6ab)', cursor: 'grab',
+        }}
+        title="Double-click to edit"
+      >
+        <span style={{ color: 'var(--fc-accent)', fontWeight: 700 }}>#</span>
+        {text || 'comment'}
+      </div>
+    );
+  }
+
   return (
     <div
+      data-testid="comment-full"
       onDoubleClick={handleDoubleClick}
       style={{
         background: `${color}cc`,
