@@ -23,7 +23,7 @@ function CommentNode({ data, id }: NodeProps) {
   const commentData = data as CommentNodeData;
   const updateComment = useFlowStore((s) => s.updateComment);
   const removeComment = useFlowStore((s) => s.removeComment);
-  const compact = useFlowStore((s) => (s as Record<string, unknown>).compactCommentsEnabled as boolean | undefined);
+  const compact = useFlowStore((s) => (s as unknown as Record<string, unknown>).compactCommentsEnabled as boolean | undefined);
 
   const kind = (commentData.kind as 'comment' | 'sticky' | undefined) ?? 'sticky';
   const anchorType = commentData.anchor?.type;
