@@ -48,7 +48,7 @@ test.describe('Flow Canvas Interaction Correctness', () => {
 
   test('add comment is persistent through undo and redo', async ({ page }) => {
     await nodeById(page, 'node-2').click({ button: 'right' });
-    await page.getByText('Add Comment', { exact: true }).click();
+    await page.getByText('Add Comment (#)', { exact: true }).click();
 
     await expect(commentNodes(page)).toHaveCount(1);
 
