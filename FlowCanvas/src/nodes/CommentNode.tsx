@@ -23,7 +23,7 @@ function CommentNode({ data, id }: NodeProps) {
   const commentData = data as CommentNodeData;
   const updateComment = useFlowStore((s) => s.updateComment);
   const removeComment = useFlowStore((s) => s.removeComment);
-  const compact = useFlowStore((s) => (s as unknown as Record<string, unknown>).compactCommentsEnabled as boolean | undefined);
+  const compact = useFlowStore((s) => s.compactCommentsEnabled);
 
   const kind = (commentData.kind as 'comment' | 'sticky' | undefined) ?? 'sticky';
   const anchorType = commentData.anchor?.type;
@@ -83,10 +83,10 @@ function CommentNode({ data, id }: NodeProps) {
         onDoubleClick={handleDoubleClick}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
-          background: 'var(--fc-comment-pill-bg, rgba(126,224,138,0.10))',
-          borderLeft: '3px solid var(--fc-comment-pill-accent, #7ee08a)',
+          background: 'var(--fc-comment-pill-bg)',
+          borderLeft: '3px solid var(--fc-comment-pill-accent)',
           borderRadius: 3, padding: '2px 9px', fontFamily: 'ui-monospace, Consolas, monospace',
-          fontSize: 11.5, color: 'var(--fc-comment-pill-ink, #9fd6ab)', cursor: 'grab',
+          fontSize: 11.5, color: 'var(--fc-comment-pill-ink)', cursor: 'grab',
         }}
         title="Double-click to edit"
       >

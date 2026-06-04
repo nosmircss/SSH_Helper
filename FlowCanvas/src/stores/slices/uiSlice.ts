@@ -25,6 +25,7 @@ export interface UISlice {
   reducedMotion: boolean;
   heatmapEnabled: boolean;
   branchBandsEnabled: boolean;
+  compactCommentsEnabled: boolean;
   snapToGrid: boolean;
   gridSize: number;
   searchQuery: string;
@@ -58,6 +59,8 @@ export interface UISlice {
   restoreHeatmapEnabled: (enabled: boolean) => void;
   toggleBranchBands: () => void;
   restoreBranchBands: (value: boolean) => void;
+  toggleCompactComments: () => void;
+  restoreCompactComments: (value: boolean) => void;
   toggleSnapToGrid: () => void;
   restoreSnapToGrid: (value: boolean) => void;
   setSearchQuery: (query: string) => void;
@@ -84,6 +87,7 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   reducedMotion: false,
   heatmapEnabled: false,
   branchBandsEnabled: true,
+  compactCommentsEnabled: true,
   snapToGrid: false,
   gridSize: 20,
   searchQuery: '',
@@ -133,6 +137,13 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     return { branchBandsEnabled: next };
   }),
   restoreBranchBands: (value) => set({ branchBandsEnabled: value }),
+
+  toggleCompactComments: () => set((s) => {
+    const next = !s.compactCommentsEnabled;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, compactCommentsEnabled: next });
+    return { compactCommentsEnabled: next };
+  }),
+  restoreCompactComments: (value) => set({ compactCommentsEnabled: value }),
 
   toggleSnapToGrid: () => set((s) => {
     const next = !s.snapToGrid;

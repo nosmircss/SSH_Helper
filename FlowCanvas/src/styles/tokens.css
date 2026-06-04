@@ -175,6 +175,9 @@
   --fc-comment-ink: oklch(20% 0 0);
   --fc-comment-field-bg: oklch(100% 0 0 / 0.2);
   --fc-comment-default-fallback: #e0c040; /* mirror only — do NOT consume as authored color */
+  --fc-comment-pill-bg: oklch(72% 0.17 150 / 0.10);
+  --fc-comment-pill-accent: oklch(72% 0.17 150);
+  --fc-comment-pill-ink: oklch(78% 0.08 150);
 
   /* Heatmap */
   --fc-heat-cold: var(--fc-accent);
