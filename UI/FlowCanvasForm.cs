@@ -377,6 +377,7 @@ namespace SSH_Helper.UI
                 defaultBlockExpanded = ws.FlowCanvasDefaultExpanded,
                 snapToGrid = ws.FlowCanvasSnapToGrid,
                 branchBandsEnabled = ws.FlowCanvasBranchBands,
+                compactCommentsEnabled = ws.FlowCanvasCompactComments,
             });
 
             var rm = ws.FlowCanvasReducedMotion;
@@ -398,9 +399,10 @@ namespace SSH_Helper.UI
             var defaultExpanded = msg["defaultBlockExpanded"]?.Value<bool>();
             var snap = msg["snapToGrid"]?.Value<bool>();
             var bands = msg["branchBandsEnabled"]?.Value<bool>();
+            var compact = msg["compactCommentsEnabled"]?.Value<bool>();
 
             if (rightWidth == null && outputHeight == null && heatmap == null && blockWidth == null
-                && textScale == null && density == null && defaultExpanded == null && snap == null && bands == null)
+                && textScale == null && density == null && defaultExpanded == null && snap == null && bands == null && compact == null)
                 return;
 
             _configService.Update(c =>
@@ -415,6 +417,7 @@ namespace SSH_Helper.UI
                 if (defaultExpanded.HasValue) c.WindowState.FlowCanvasDefaultExpanded = defaultExpanded.Value;
                 if (snap.HasValue) c.WindowState.FlowCanvasSnapToGrid = snap.Value;
                 if (bands.HasValue) c.WindowState.FlowCanvasBranchBands = bands.Value;
+                if (compact.HasValue) c.WindowState.FlowCanvasCompactComments = compact.Value;
             });
         }
 

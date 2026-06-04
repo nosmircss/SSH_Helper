@@ -47,4 +47,17 @@ public class ConfigurationServiceWindowStateTests : IDisposable
         reloaded.WindowState.EnvironmentDialogHeight.Should().Be(710);
         reloaded.WindowState.EnvironmentDialogSplitterDistance.Should().Be(345);
     }
+
+    [Fact]
+    public void SaveAndLoad_FlowCanvasCompactComments_RoundTrips()
+    {
+        _configService.Load();
+        _configService.Update(config =>
+        {
+            config.WindowState.FlowCanvasCompactComments = false;
+        });
+
+        var reloaded = new ConfigurationService(_configPath).Load();
+        reloaded.WindowState.FlowCanvasCompactComments.Should().BeFalse();
+    }
 }
