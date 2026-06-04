@@ -3101,4 +3101,14 @@ public class FlowCanvasBridgeSplitYamlStepsTests
         Assert.Null(steps[0].InlineComment);
         Assert.Contains("#1", steps[0].Snippet);
     }
+
+    [Fact]
+    public void SplitYamlSteps_BareTrailingHash_IsNotTreatedAsComment()
+    {
+        var yaml = "steps:\n  - send:\n      command: cfg  #\n";
+        var steps = FlowCanvasBridge.SplitYamlSteps(yaml);
+        Assert.Single(steps);
+        Assert.Null(steps[0].InlineComment);
+        Assert.Contains("#", steps[0].Snippet);
+    }
 }

@@ -377,6 +377,7 @@ namespace SSH_Helper.Services
                 var stepProps = new JObject { ["_yamlSnippet"] = snippet };
                 if (snippetInfo.BlankLinesBefore > 0)
                     stepProps["_blankLinesBefore"] = snippetInfo.BlankLinesBefore;
+                // NOTE: snippetInfo.LeadingComments / InlineComment are consumed by the comment-node emission step (next task), not stored here.
                 stepProps["_stepPath"] = stepPath;
                 if (previewText != null)
                     stepProps["_preview"] = previewText;
@@ -4242,8 +4243,9 @@ namespace SSH_Helper.Services
                 else if (c == '"' && !inSingle) inDouble = !inDouble;
                 else if (c == '#' && !inSingle && !inDouble && i > 0 && char.IsWhiteSpace(line[i - 1]))
                 {
-                    code = line.Substring(0, i).TrimEnd();
                     comment = StripHash(line.Substring(i));
+                    if (comment.Length == 0) return false; // bare '#' with no text — not a real comment
+                    code = line.Substring(0, i).TrimEnd();
                     return true;
                 }
             }
