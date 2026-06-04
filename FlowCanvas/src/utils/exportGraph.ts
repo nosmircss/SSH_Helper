@@ -12,6 +12,8 @@ export interface CommentData {
   width: number;
   height: number;
   attachedToNodeId?: string;
+  kind?: string;
+  anchor?: { type: string; stepPath?: string; lineOffset?: number };
 }
 
 export interface ExecutableGraphPayload {
@@ -127,6 +129,10 @@ export function buildExecutableGraphPayload(
         width: (n.style?.width as number) ?? 200,
         height: (n.style?.height as number) ?? 100,
         attachedToNodeId: data?.attachedToNodeId ? String(data.attachedToNodeId) : undefined,
+        kind: typeof data?.kind === 'string' ? data.kind : undefined,
+        anchor: (data?.anchor && typeof data.anchor === 'object')
+          ? (data.anchor as { type: string; stepPath?: string; lineOffset?: number })
+          : undefined,
       });
     } else {
       exportNodes.push(stripDefaultProps(n));
