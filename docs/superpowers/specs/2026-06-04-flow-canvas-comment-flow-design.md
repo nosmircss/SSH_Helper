@@ -133,10 +133,13 @@ block edit:
 
 - Two actions (toolbar + canvas context menu): **Add comment (#)** and **Add sticky**.
 - `comment`-kind notes render with a `#` badge in a block-accent color; `sticky` keeps today's look.
-- Clutter fix: a run of `leading` comment notes collapses to slim `#` pills that expand on
-  hover/click, so 7 section labels do not overwhelm the canvas.
+- **Comment display is a Display Settings toggle** ("Compact comments"), persisted to `WindowState`
+  via the existing `pref-save` / `layout-save` path alongside heatmap / density / branch-bands.
+  **Default = compact:** `leading` comment notes render as slim `#` pills that expand on hover/click;
+  toggling the setting off renders them as full notes. Same anchors and same export either way.
 - Both kinds editable in place and via the Properties panel.
-- Imported notes auto-place near their anchor block without overlapping it.
+- Imported notes auto-place **above** their anchor block, offset so they do not overlap the block
+  or the branch bands.
 
 ## Invariants honored
 
@@ -157,7 +160,9 @@ block edit:
   `ExportGraphToYaml` + regeneration paths, `StepSnippetInfo`).
 - React: `nodes/CommentNode.tsx`, `stores/slices/commentSlice.ts`, `utils/exportGraph.ts`
   (preserve `kind`/`anchor` through `stripDefaultProps`/payload), `panels/Toolbar.tsx` +
-  context menu (two creation actions), `panels/Properties.tsx` (edit), node rendering for pills.
+  context menu (two creation actions), `panels/Properties.tsx` (edit), node rendering for
+  pills/full, and the display-settings slice + panel for the "Compact comments" toggle.
+- C# `WindowState` (persist the "Compact comments" pref via the existing `pref-save` path).
 - Per Development Guideline 8, both React and C# sides change together.
 
 ## Risks
