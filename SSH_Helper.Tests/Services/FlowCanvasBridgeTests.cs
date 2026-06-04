@@ -2540,6 +2540,20 @@ public class FlowCanvasBridgeTests
         Assert.Contains("v1#2", result.Yaml);
     }
 
+    [Fact]
+    public void RoundTrip_SystemInfoSample_PreservesSectionLabels()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var path = Path.Combine(repoRoot, "ScriptSamples", "bash", "system_info.yaml");
+        Assert.True(File.Exists(path), $"sample not found: {path}");
+        var yaml = File.ReadAllText(path);
+        var result = RoundTripThroughBridge(yaml);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        foreach (var label in new[] { "# Get hostname", "# Get OS info", "# Get memory info" })
+            Assert.Contains(label, result.Yaml);
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         int count = 0, idx = 0;
