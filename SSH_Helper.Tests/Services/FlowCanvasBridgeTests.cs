@@ -471,6 +471,7 @@ public class FlowCanvasBridgeTests
         Assert.DoesNotContain(result.Warnings, w => w.Contains("Comment nodes are ignored", System.StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain("comment-1", result.NodeToStepPathMap.Keys);
         Assert.Contains("node-1", result.NodeToStepPathMap.Keys);
+        Assert.DoesNotContain("#", result.Yaml);
     }
 
     [Fact]
@@ -2501,6 +2502,22 @@ public class FlowCanvasBridgeTests
         Assert.Contains("# Create the address object", result.Yaml);
         Assert.Contains("# needs vdom", result.Yaml);
         Assert.Equal(1, CountOccurrences(result.Yaml, "# needs vdom"));
+    }
+
+    [Fact]
+    public void Export_ContainerRegeneration_EmitsLeadingComment()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = "steps:\n  # guard the loop\n  - foreach:\n      iterator: h in ${hosts}\n      do:\n        - print:\n            message: ${h}\n";
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var props = n["data"]?["props"] as JObject;
+            if (props != null && props["_yamlSnippet"] != null) props["_forceGraphExport"] = true;
+        }
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# guard the loop", result.Yaml);
     }
 
     [Fact]

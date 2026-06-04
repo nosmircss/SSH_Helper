@@ -1168,6 +1168,9 @@ namespace SSH_Helper.Services
                 var yamlSnippet = props?["_yamlSnippet"]?.ToString();
                 var forceGraphExport = HasForceGraphExport(props);
 
+                // Single source for this step's comment anchor across all emission branches.
+                var stepPathForComments = result.NodeToStepPathMap.TryGetValue(nodeId, out var sp) ? sp : existingStepPath ?? "";
+
                 // Container blocks authored visually (branch metadata -> non-child targets)
                 // should be regenerated from graph structure even when a stale snippet exists.
                 // Also regenerate when the user has modified an imported container's branches
@@ -1182,7 +1185,8 @@ namespace SSH_Helper.Services
                             blockType, props, nodeId, outgoing, nodeMap, incomingCount,
                             consumedByContainer, result, out var containerYaml))
                     {
-                        sb.AppendLine(containerYaml);
+                        AppendLeadingComments(sb, leadingByPath.GetValueOrDefault(stepPathForComments), 0);
+                        sb.AppendLine(AppendInlineComment(containerYaml, inlineByPath.GetValueOrDefault(stepPathForComments)));
                         continue;
                     }
                 }
@@ -1196,7 +1200,6 @@ namespace SSH_Helper.Services
                         ExportDiagnosticSeverity.Warning,
                         $"Container block '{blockType}' is exported from its stored YAML snippet.",
                         nodeId));
-                    var stepPathForComments = result.NodeToStepPathMap.TryGetValue(nodeId, out var sp) ? sp : existingStepPath ?? "";
                     AppendLeadingComments(sb, leadingByPath.GetValueOrDefault(stepPathForComments), 0);
                     var injected = AppendInlineComment(normalizedSnippet, inlineByPath.GetValueOrDefault(stepPathForComments));
                     sb.Append(injected);
@@ -1207,10 +1210,8 @@ namespace SSH_Helper.Services
 
                 if (TryGenerateStepYaml(blockType, props, out var generatedYaml, out var error))
                 {
-                    var stepPathForComments = result.NodeToStepPathMap.TryGetValue(nodeId, out var sp) ? sp : existingStepPath ?? "";
                     AppendLeadingComments(sb, leadingByPath.GetValueOrDefault(stepPathForComments), 0);
-                    var injected = AppendInlineComment(generatedYaml, inlineByPath.GetValueOrDefault(stepPathForComments));
-                    sb.AppendLine(injected);
+                    sb.AppendLine(AppendInlineComment(generatedYaml, inlineByPath.GetValueOrDefault(stepPathForComments)));
                 }
                 else
                 {
@@ -2298,9 +2299,7 @@ namespace SSH_Helper.Services
             return TrySerializeStepYaml(commandKey, commandValue, out yaml, out error);
         }
 
-        /// <summary>
-        /// Indents every line of a YAML string by the specified number of spaces.
-        /// </summary>
+        /// <summary>Appends leading comment lines (# ...) to the builder, one per entry, at the given indent.</summary>
         private static void AppendLeadingComments(StringBuilder sb, IEnumerable<string>? comments, int indent)
         {
             if (comments == null) return;
@@ -2308,6 +2307,7 @@ namespace SSH_Helper.Services
             foreach (var c in comments) sb.AppendLine($"{prefix}# {c}");
         }
 
+        /// <summary>Injects an inline comment onto the first line of a YAML step string.</summary>
         private static string AppendInlineComment(string stepYaml, string? inline)
         {
             if (string.IsNullOrEmpty(inline)) return stepYaml;
@@ -2316,6 +2316,7 @@ namespace SSH_Helper.Services
             return stepYaml.Substring(0, nl).TrimEnd() + $"  # {inline}" + stepYaml.Substring(nl);
         }
 
+        /// <summary>Indents every line of a YAML string by the specified number of spaces.</summary>
         private static string IndentYaml(string yaml, int spaces)
         {
             var prefix = new string(' ', spaces);
