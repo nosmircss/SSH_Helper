@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import { computeHierarchicalLayout, DEFAULT_BLOCK_SIZING } from '../hierarchicalLayout';
 import { BLOCK_WIDTH_INSET, COLLAPSED_HEIGHT } from '../../nodeSize';
+import { computeBranchBands } from '../../branchBands';
 
 const chain = (): { nodes: Node[]; edges: Edge[] } => ({
   nodes: [
@@ -16,11 +17,14 @@ const chain = (): { nodes: Node[]; edges: Edge[] } => ({
 });
 
 describe('computeHierarchicalLayout sizing param', () => {
-  it('default param reproduces todays positions (regression guard)', () => {
+  it('DEFAULT_BLOCK_SIZING reproduces the historical fixed geometry (regression guard)', () => {
     const { nodes, edges } = chain();
-    const withParam = computeHierarchicalLayout(nodes, edges, DEFAULT_BLOCK_SIZING);
-    const without = computeHierarchicalLayout(nodes, edges);
-    expect(withParam.map((n) => n.position)).toEqual(without.map((n) => n.position));
+    const out = computeHierarchicalLayout(nodes, edges, DEFAULT_BLOCK_SIZING);
+    const a = out.find((n) => n.id === 'A')!.position;
+    const b = out.find((n) => n.id === 'B')!.position;
+    // NODE_START_X=250; first spine row at NODE_START_Y(40)+nodeSpacingY(106)=146; +106 per collapsed row.
+    expect(a).toEqual({ x: 250, y: 146 });
+    expect(b).toEqual({ x: 250, y: 252 });
   });
 
   it('roomy density pushes a downstream block further down', () => {
@@ -167,5 +171,52 @@ describe('no block overlap at max blockWidth (700) — invariant guard', () => {
     expect(x700).toBeGreaterThan(x330);
     // Tighter: delta = branchOffset(700) - branchOffset(330) = 405 - 220 = 185.
     expect(x700 - x330).toBe(185);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A THEN arm that NESTS a multi-branch container (e.g. an inner if/else) must still
+// reserve enough horizontal room that the outer THEN band never overlaps the outer
+// ELSE band. The slot reservation in measureSteps used to count only branchOffset +
+// maxIndent for a nested multi-branch arm, ignoring the inner arms' own lane padding,
+// so the outer THEN band's right pad spilled into the ELSE column.
+// ---------------------------------------------------------------------------
+function nestedMultiBranchInThen(): { nodes: Node[]; edges: Edge[] } {
+  const child = (id: string, parent: string, stepPath: string, label: string): Node => ({
+    id, type: 'block', position: { x: 0, y: 0 },
+    data: { blockType: 'print', props: { _isChildOf: parent, _stepPath: stepPath, _branchLabel: label, message: id } },
+  } as never);
+  const nodes: Node[] = [
+    { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', props: {} } } as never,
+    { id: 'if-1', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'if', props: { _stepPath: 'steps/0', condition: 'x' } } } as never,
+    child('setA', 'if-1', 'steps/0/then/0', 'then'),
+    // nested if (multi-branch) living inside the outer THEN arm
+    { id: 'nIf', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'if', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/1', _branchLabel: 'then', condition: 'p' } } } as never,
+    child('nThen', 'nIf', 'steps/0/then/1/then/0', 'then'),
+    child('nElse', 'nIf', 'steps/0/then/1/else/0', 'else'),
+    child('else-1', 'if-1', 'steps/0/else/0', 'else'),
+  ];
+  const edges: Edge[] = [
+    { id: 'e0', source: '__start__', target: 'if-1' },
+    { id: 'e1', source: 'if-1', target: 'setA' },
+    { id: 'e2', source: 'setA', target: 'nIf' },
+    { id: 'e3', source: 'nIf', target: 'nThen' },
+    { id: 'e4', source: 'nIf', target: 'nElse', sourceHandle: 'false' },
+    { id: 'e5', source: 'if-1', target: 'else-1', sourceHandle: 'false' },
+  ] as never;
+  return { nodes, edges };
+}
+
+describe('nested multi-branch arm does not cause band overlap (max width)', () => {
+  it('outer THEN band clears the outer ELSE band when THEN nests an if/else', () => {
+    const { nodes, edges } = nestedMultiBranchInThen();
+    const placed = computeHierarchicalLayout(nodes, edges, { blockWidth: 700, density: 1, textScale: 1 });
+    const bands = computeBranchBands(placed, 700 - BLOCK_WIDTH_INSET);
+    const thenB = bands.find((b) => b.parentId === 'if-1' && b.branchKey === 'then')!;
+    const elseB = bands.find((b) => b.parentId === 'if-1' && b.branchKey === 'else')!;
+    expect(thenB).toBeDefined();
+    expect(elseB).toBeDefined();
+    // No overlap: the outer ELSE band starts at/after the outer THEN band's right edge.
+    expect(elseB.x).toBeGreaterThanOrEqual(thenB.x + thenB.width);
   });
 });

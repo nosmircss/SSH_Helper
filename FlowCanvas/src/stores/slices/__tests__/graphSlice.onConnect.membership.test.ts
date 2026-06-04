@@ -4,7 +4,7 @@ vi.mock('../../../MessageBus', () => ({ messageBus: { send: vi.fn() }, CANVAS_HO
 import type { Connection, Edge, Node } from '@xyflow/react';
 import { useFlowStore } from '../../useFlowStore';
 import { buildLayoutTree } from '../../../utils/layout/treeBuilder';
-import { computeHierarchicalLayout } from '../../../utils/layout/hierarchicalLayout';
+import { computeHierarchicalLayout, DEFAULT_BLOCK_SIZING } from '../../../utils/layout/hierarchicalLayout';
 import { computeBranchBands } from '../../../utils/branchBands';
 
 function node(id: string, type: string, blockType: string, props: Record<string, unknown>): Node {
@@ -78,7 +78,7 @@ describe('onConnect → continue handle confers band membership', () => {
     // 3. after positioning, print is the bottom-most node of the THEN branch and the THEN band's box
     // grows down to wrap it — which only holds if print is a member of the band group (it was the
     // orphan that escaped the band before the fix).
-    const laid = computeHierarchicalLayout(st.nodes, st.edges);
+    const laid = computeHierarchicalLayout(st.nodes, st.edges, DEFAULT_BLOCK_SIZING);
     const lp = laid.find((n) => n.id === 'print')!;
     const thenMaxY = Math.max(
       ...['a', 'b', 'innerIf', 'innerThen', 'print'].map((id) => laid.find((n) => n.id === id)!.position.y),

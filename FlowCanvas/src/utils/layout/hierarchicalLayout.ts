@@ -89,18 +89,22 @@ function measureSteps(children: LayoutTreeNode[]): SubtreeSize {
     if (branches.length >= 2) {
       let totalCols = 0;
       let maxRows = 0;
-      let maxIndent = 0;
+      let branchesExtra = 0;
       for (const b of branches) {
         const s = measureSteps(b.children);
         totalCols += s.columns;
         maxRows = Math.max(maxRows, s.rows);
-        maxIndent = Math.max(maxIndent, s.indent);
+        // Each nested arm pushes the next right by its FULL branchSlotWidth; the column count above
+        // only covers the column part, so reserve the non-column part here (the arm's own indent +
+        // lane padding). Mirrors placeMultiBranch's `extra`. Using maxIndent alone undercounted the
+        // inner lane padding, letting the outer band's right edge spill into the next sibling lane.
+        branchesExtra += s.indent + 2 * BAND_PAD + LAYOUT.LANE_GAP;
       }
       columns = Math.max(columns, Math.max(2, totalCols));
       rows += maxRows;
       // This container shifts its own arms right by the offset too (like the single-branch case
-      // below), so reserve it — otherwise a sibling lane would overlap the shifted multi-branch body.
-      indent = Math.max(indent, activeSizing.branchOffset + maxIndent);
+      // below), so reserve the offset plus the full nested spread computed above.
+      indent = Math.max(indent, activeSizing.branchOffset + branchesExtra);
     } else {
       for (const b of branches) {
         const s = measureSteps(b.children);
@@ -213,7 +217,11 @@ function placeComments(nodes: Node[], pos: Map<string, Point>): void {
  * smart-hybrid rules. Returns new node objects with updated positions; nodes not in the
  * tree (the start node, orphans the builder left unplaced) keep their position.
  */
-export function computeHierarchicalLayout(nodes: Node[], edges: Edge[], sizing: BlockSizing = DEFAULT_BLOCK_SIZING): Node[] {
+// `sizing` is REQUIRED: every caller must thread the live Display Settings (use selectCanvasSizing
+// from settingsSlice for store callers, or DEFAULT_BLOCK_SIZING for the factory geometry). Making it
+// required is deliberate — a silent default let the Layout button / expand-all revert wide/roomy
+// graphs to 330/1/1 geometry (band overlap + apparent settings reset).
+export function computeHierarchicalLayout(nodes: Node[], edges: Edge[], sizing: BlockSizing): Node[] {
   activeSizing = resolveSizing(sizing);
   const tree = buildLayoutTree(nodes, edges);
   const pos = placeTree(tree);

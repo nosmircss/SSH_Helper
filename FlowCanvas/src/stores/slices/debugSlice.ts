@@ -4,6 +4,7 @@ import { messageBus } from '../../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
 import { sendLayoutAutosave } from '../../utils/layoutAutosave';
 import { computeHierarchicalLayout } from '../../utils/layout/hierarchicalLayout';
+import { selectCanvasSizing } from './settingsSlice';
 
 export interface DebugSlice {
   paused: boolean;
@@ -85,7 +86,7 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
     get().updateNodeData(nodeId, { expanded: nowExpanded });
     // Reflow so the taller/shorter block pushes neighbors (height-aware layout).
     const st = get();
-    st.setNodes(computeHierarchicalLayout(st.nodes, st.edges));
+    st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, selectCanvasSizing(st)));
     sendLayoutAutosave();
   },
   setAllExpanded: (expanded) => {
@@ -98,7 +99,7 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
     const withFlag = st.nodes.map((n) =>
       n.type === 'block' ? { ...n, data: { ...n.data, expanded } } : n,
     );
-    st.setNodes(computeHierarchicalLayout(withFlag, st.edges));
+    st.setNodes(computeHierarchicalLayout(withFlag, st.edges, selectCanvasSizing(st)));
     sendLayoutAutosave();
   },
   restoreExpandedNodes: (nodeIds) => {

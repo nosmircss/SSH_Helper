@@ -28,7 +28,7 @@ describe('placeTree — single-branch container (loop indents right)', () => {
 });
 
 import { buildLayoutTree } from '../treeBuilder';
-import { computeHierarchicalLayout } from '../hierarchicalLayout';
+import { computeHierarchicalLayout, DEFAULT_BLOCK_SIZING } from '../hierarchicalLayout';
 
 describe('placeTree — multi-branch (fans into side-by-side columns)', () => {
   it('indents every branch right of the spine, opening a clear continuation gutter', () => {
@@ -114,7 +114,7 @@ function importedIfElse(): { nodes: Node[]; edges: Edge[] } {
 describe('computeHierarchicalLayout', () => {
   it('repositions layoutable nodes and leaves the start node untouched', () => {
     const { nodes, edges } = importedIfElse();
-    const out = computeHierarchicalLayout(nodes, edges);
+    const out = computeHierarchicalLayout(nodes, edges, DEFAULT_BLOCK_SIZING);
     const start = out.find((n) => n.id === '__start__')!;
     expect(start.position).toEqual({ x: 999, y: 999 }); // start node not in spine, untouched
     const ifNode = out.find((n) => n.id === 'if-1')!;
@@ -123,7 +123,7 @@ describe('computeHierarchicalLayout', () => {
 
   it('produces no overlapping branch children', () => {
     const { nodes, edges } = importedIfElse();
-    const out = computeHierarchicalLayout(nodes, edges);
+    const out = computeHierarchicalLayout(nodes, edges, DEFAULT_BLOCK_SIZING);
     const t = out.find((n) => n.id === 'then-1')!.position;
     const e = out.find((n) => n.id === 'else-1')!.position;
     // Different columns, far enough apart to not overlap (>= one node width).

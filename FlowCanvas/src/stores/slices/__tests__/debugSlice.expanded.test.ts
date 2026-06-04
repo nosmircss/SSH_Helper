@@ -3,7 +3,7 @@ vi.mock('../../../utils/layoutAutosave', () => ({ sendLayoutAutosave: vi.fn() })
 vi.mock('../../../MessageBus', () => ({ messageBus: { send: vi.fn() }, CANVAS_HOST_MESSAGES: { outgoing: {} } }));
 import { useFlowStore } from '../../useFlowStore';
 import { sendLayoutAutosave } from '../../../utils/layoutAutosave';
-import { computeHierarchicalLayout } from '../../../utils/layout/hierarchicalLayout';
+import { computeHierarchicalLayout, DEFAULT_BLOCK_SIZING } from '../../../utils/layout/hierarchicalLayout';
 
 describe('expandedNodes', () => {
   beforeEach(() => { useFlowStore.setState({ expandedNodes: new Set() }); vi.clearAllMocks(); });
@@ -44,7 +44,7 @@ describe('toggleExpanded reflow (Option A)', () => {
     useFlowStore.getState().setEdges(edges as never);
     // baseline layout with A collapsed
     const s0 = useFlowStore.getState();
-    s0.setNodes(computeHierarchicalLayout(s0.nodes, s0.edges));
+    s0.setNodes(computeHierarchicalLayout(s0.nodes, s0.edges, DEFAULT_BLOCK_SIZING));
     const beforeB = useFlowStore.getState().nodes.find((n) => n.id === 'B')!.position.y;
     // expanding A must reflow and push B further down
     useFlowStore.getState().toggleExpanded('A');
@@ -107,7 +107,7 @@ describe('setAllExpanded', () => {
   it('reflows so expanding all pushes a downstream block lower', () => {
     buildGraph();
     const s0 = useFlowStore.getState();
-    s0.setNodes(computeHierarchicalLayout(s0.nodes, s0.edges));
+    s0.setNodes(computeHierarchicalLayout(s0.nodes, s0.edges, DEFAULT_BLOCK_SIZING));
     const beforeB = useFlowStore.getState().nodes.find((n) => n.id === 'B')!.position.y;
     useFlowStore.getState().setAllExpanded(true);
     const afterB = useFlowStore.getState().nodes.find((n) => n.id === 'B')!.position.y;

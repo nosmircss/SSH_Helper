@@ -117,4 +117,17 @@ describe('branchBands', () => {
     const nested = bands.find((b) => b.id === 'nif::then')!;
     expect(nested.memberIds).toEqual(['g']); // just its own body
   });
+
+  it('gives an elif clause its own band instead of folding it into THEN', () => {
+    // elif bodies import with a compound path (elif/N/then/M); keyed parent-relative to the if so
+    // they form a distinct ELIF lane rather than collapsing into the THEN band and rendering bare.
+    const ifNode = { id: 'if-1', position: { x: 0, y: 0 }, data: { blockType: 'if', props: { _stepPath: 'steps/0' } } } as Node;
+    const thenChild = child('t', 'if-1', 'steps/0/then/0', 100, 100);
+    const elifChild = child('e', 'if-1', 'steps/0/elif/0/then/0', 100, 300);
+    const bands = computeBranchBands([ifNode, thenChild, elifChild]);
+    const keys = bands.map((b) => b.branchKey);
+    expect(keys).toContain('then');
+    expect(keys).toContain('elif');
+    expect(bands.find((b) => b.branchKey === 'elif')!.memberIds).toContain('e');
+  });
 });

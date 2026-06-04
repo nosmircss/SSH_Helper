@@ -29,6 +29,13 @@ export const SETTINGS_DEFAULTS = {
 
 export type CanvasSettings = Pick<SettingsSlice, 'blockWidth' | 'textScale' | 'density' | 'defaultBlockExpanded'>;
 
+/** Live canvas sizing read from the store — the single shape every reflow caller MUST thread into
+ *  computeHierarchicalLayout so auto-layout, expand/collapse and import all honor the user's
+ *  Display Settings instead of silently reverting to the factory 330/1/1 geometry. */
+export const selectCanvasSizing = (
+  s: Pick<SettingsSlice, 'blockWidth' | 'density' | 'textScale'>,
+): BlockSizing => ({ blockWidth: s.blockWidth, density: s.density, textScale: s.textScale });
+
 export interface SettingsSlice {
   blockWidth: number;
   textScale: number;
@@ -44,10 +51,7 @@ export interface SettingsSlice {
 }
 
 export const createSettingsSlice: StateCreator<FlowStore, [], [], SettingsSlice> = (set, get) => {
-  const sizing = (): BlockSizing => {
-    const s = get();
-    return { blockWidth: s.blockWidth, density: s.density, textScale: s.textScale };
-  };
+  const sizing = (): BlockSizing => selectCanvasSizing(get());
   // Reflow with the current sizing, persist the changed setting (layout-save) AND the new
   // node positions (layout-autosave). Mirrors debugSlice's setAllExpanded side effects.
   const reflowAndPersist = (changed: Record<string, unknown>) => {

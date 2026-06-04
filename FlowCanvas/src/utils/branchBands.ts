@@ -3,6 +3,7 @@
 // (_isChildOf, _stepPath, _branchLabel) + node.position; writes nothing to node.data.
 import type { Node } from '@xyflow/react';
 import { CHILD_WIDTH, COLLAPSED_HEIGHT, estimateNodeHeight, BAND_PAD, BAND_LABEL_HEADROOM } from './nodeSize';
+import { branchScopeFromStepPath } from './layout/branchScope';
 
 // Re-exported for back-compat: BAND_PAD now lives in nodeSize (shared with the layout engine).
 export { BAND_PAD };
@@ -107,15 +108,39 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
     return { w: childWidth, h };
   };
 
+  const stepPathById = new Map<string, string | undefined>();
+  for (const n of nodes) stepPathById.set(n.id, stepPathOf(n));
+
+  // Resolve a child's branch (key + subtree prefix) RELATIVE to its immediate container so a
+  // compound branch like elif (path '.../elif/N/then/M') keys as 'elif' instead of the trailing
+  // 'then' an end-walk returns. Falls back to the self-contained end-walk when the parent node
+  // isn't present (synthetic fixtures) — identical results for then/else/do/case/parallel.
+  const resolveBranch = (
+    childStepPath: string | undefined,
+    parentId: string,
+    branchLabel: string | undefined,
+  ): { key: string; prefix: string | undefined } => {
+    const parentSP = stepPathById.get(parentId);
+    if (childStepPath && parentSP && childStepPath.startsWith(`${parentSP}/`)) {
+      const seg0 = branchScopeFromStepPath(childStepPath, parentSP).split('/')[0];
+      const key = seg0 === 'cases' ? 'case' : seg0;
+      if (key === 'case' || (BRANCH_KEYS as readonly string[]).includes(key)) {
+        return { key, prefix: `${parentSP}/${seg0}` };
+      }
+    }
+    return { key: branchKeyFromStepPath(childStepPath, branchLabel), prefix: branchSubtreePrefix(childStepPath) };
+  };
+
   const groups = new Map<string, { parentId: string; branchKey: string; nodes: Node[] }>();
   for (const n of nodes) {
     const props = (n.data as { props?: Record<string, unknown> } | undefined)?.props;
     const parentId = props?.['_isChildOf'] as string | undefined;
     if (!parentId) continue;
-    const branchKey = branchKeyFromStepPath(
+    const branchKey = resolveBranch(
       props?.['_stepPath'] as string | undefined,
+      parentId,
       props?.['_branchLabel'] as string | undefined,
-    );
+    ).key;
     const groupId = `${parentId}::${branchKey}`;
     if (!groups.has(groupId)) groups.set(groupId, { parentId, branchKey, nodes: [] });
     groups.get(groupId)!.nodes.push(n);
@@ -139,7 +164,7 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
     // and live in their own (child-parent) groups, so a direct-children-only box would clip them.
     // Box over every node whose stepPath falls under this branch's prefix; fall back to direct
     // children when no usable prefix exists.
-    const prefix = branchSubtreePrefix(stepPathOf(g.nodes[0]));
+    const prefix = resolveBranch(stepPathOf(g.nodes[0]), g.parentId, undefined).prefix;
     const boxNodes = prefix
       ? nodes.filter((n) => { const sp = stepPathOf(n); return sp != null && sp.startsWith(`${prefix}/`); })
       : g.nodes;

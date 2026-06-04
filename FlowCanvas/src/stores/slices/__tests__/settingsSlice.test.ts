@@ -6,7 +6,7 @@ vi.mock('../../../MessageBus', () => ({
 }));
 import { useFlowStore } from '../../useFlowStore';
 import { messageBus } from '../../../MessageBus';
-import { computeHierarchicalLayout } from '../../../utils/layout/hierarchicalLayout';
+import { computeHierarchicalLayout, DEFAULT_BLOCK_SIZING } from '../../../utils/layout/hierarchicalLayout';
 import { SETTINGS_DEFAULTS } from '../settingsSlice';
 
 const chain = () => {
@@ -22,7 +22,7 @@ const chain = () => {
   useFlowStore.getState().setNodes(nodes as never);
   useFlowStore.getState().setEdges(edges as never);
   const s = useFlowStore.getState();
-  s.setNodes(computeHierarchicalLayout(s.nodes, s.edges));
+  s.setNodes(computeHierarchicalLayout(s.nodes, s.edges, DEFAULT_BLOCK_SIZING));
 };
 
 describe('settingsSlice', () => {
