@@ -4216,53 +4216,92 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// A step snippet together with the number of blank lines that preceded it.
+        /// A step snippet together with the number of blank lines that preceded it,
+        /// plus any leading standalone comment lines and an optional inline trailing comment
+        /// stripped from the step's first content line.
         /// </summary>
-        private readonly record struct StepSnippetInfo(string Snippet, int BlankLinesBefore);
+        internal readonly record struct StepSnippetInfo(
+            string Snippet,
+            int BlankLinesBefore,
+            IReadOnlyList<string> LeadingComments,
+            string? InlineComment);
+
+        /// <summary>
+        /// Splits a trailing YAML comment off a line. Returns false when there is no
+        /// safe unquoted trailing comment (e.g. the only '#' is inside a quoted string).
+        /// </summary>
+        internal static bool TrySplitTrailingComment(string line, out string code, out string comment)
+        {
+            code = line;
+            comment = string.Empty;
+            bool inSingle = false, inDouble = false;
+            for (int i = 0; i < line.Length; i++)
+            {
+                char c = line[i];
+                if (c == '\'' && !inDouble) inSingle = !inSingle;
+                else if (c == '"' && !inSingle) inDouble = !inDouble;
+                else if (c == '#' && !inSingle && !inDouble && i > 0 && char.IsWhiteSpace(line[i - 1]))
+                {
+                    code = line.Substring(0, i).TrimEnd();
+                    comment = StripHash(line.Substring(i));
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>Removes the leading '#' and a single following space from a comment line.</summary>
+        internal static string StripHash(string hashLine)
+        {
+            var t = hashLine.TrimStart();
+            if (t.StartsWith("#")) t = t.Substring(1);
+            if (t.StartsWith(" ")) t = t.Substring(1);
+            return t.TrimEnd();
+        }
 
         /// <summary>
         /// Splits YAML text into individual top-level step snippets.
         /// Each snippet is the complete YAML text for one step (including nested blocks).
-        /// Also records the number of blank lines between steps so the exporter can
-        /// reproduce the user's original spacing.
+        /// Also records blank lines between steps, leading standalone comments, and an
+        /// optional inline trailing comment stripped from the step's first content line.
         /// </summary>
-        private static List<StepSnippetInfo> SplitYamlSteps(string yamlText)
+        internal static List<StepSnippetInfo> SplitYamlSteps(string yamlText)
         {
             var steps = new List<StepSnippetInfo>();
             var lines = yamlText.Split('\n');
 
-            // Find where "steps:" starts
             int stepsLineIndex = -1;
             for (int i = 0; i < lines.Length; i++)
             {
-                var trimmed = lines[i].TrimEnd('\r');
-                if (trimmed == "steps:" || trimmed == "steps: ")
-                {
-                    stepsLineIndex = i;
-                    break;
-                }
+                var t = lines[i].TrimEnd('\r');
+                if (t == "steps:" || t == "steps: ") { stepsLineIndex = i; break; }
             }
-
             if (stepsLineIndex < 0) return steps;
 
-            // Determine the indent level of step items (first "- " after "steps:")
             int stepIndent = -1;
             var currentStep = new StringBuilder();
             bool inStep = false;
-            int blankLinesBefore = 0;   // blank lines accumulated before next step
-            int currentBlankLines = 0;  // blank lines for the step being built
+            int blankLinesBefore = 0, currentBlankLines = 0;
+            var pendingComments = new List<string>();
+            var currentLeading = new List<string>();
+            string? currentInline = null;
+
+            void FinalizeStep()
+            {
+                steps.Add(new StepSnippetInfo(
+                    currentStep.ToString().TrimEnd('\r', '\n') + "\n",
+                    currentBlankLines,
+                    currentLeading.ToArray(),
+                    currentInline));
+            }
 
             for (int i = stepsLineIndex + 1; i < lines.Length; i++)
             {
                 var line = lines[i].TrimEnd('\r');
+
                 if (string.IsNullOrWhiteSpace(line))
                 {
-                    if (inStep)
-                    {
-                        // Blank line while inside a step — tentatively include it.
-                        // We'll track separately in case it turns out to be inter-step spacing.
-                        currentStep.AppendLine(line);
-                    }
+                    if (inStep) currentStep.AppendLine(line);
                     blankLinesBefore++;
                     continue;
                 }
@@ -4270,21 +4309,31 @@ namespace SSH_Helper.Services
                 var indent = line.Length - line.TrimStart().Length;
                 var trimmed = line.TrimStart();
 
+                // Comment-only line: only buffer it as a leading comment when we are NOT
+                // already inside a step body (i.e. at or above step indent). Once we're
+                // inside a step, nested comments deeper than stepIndent must stay in the
+                // snippet verbatim so the container round-trip is preserved.
+                if (trimmed.StartsWith("#") && (!inStep || indent <= stepIndent))
+                {
+                    pendingComments.Add(StripHash(trimmed));
+                    blankLinesBefore = 0;
+                    continue;
+                }
+
                 if (trimmed.StartsWith("- ") || trimmed == "-")
                 {
                     if (stepIndent < 0) stepIndent = indent;
 
                     if (indent == stepIndent)
                     {
-                        // New top-level step — finalize the previous one
-                        if (inStep && currentStep.Length > 0)
-                        {
-                            steps.Add(new StepSnippetInfo(
-                                currentStep.ToString().TrimEnd('\r', '\n') + "\n",
-                                currentBlankLines));
-                        }
+                        if (inStep && currentStep.Length > 0) FinalizeStep();
+
                         currentStep.Clear();
-                        currentStep.AppendLine(line);
+                        currentLeading = new List<string>(pendingComments);
+                        pendingComments.Clear();
+                        currentInline = null;
+
+                        AppendStepLine(currentStep, line, ref currentInline);
                         currentBlankLines = inStep ? blankLinesBefore : 0;
                         blankLinesBefore = 0;
                         inStep = true;
@@ -4292,30 +4341,29 @@ namespace SSH_Helper.Services
                     }
                 }
 
-                // Non-blank line that is part of the current step — reset blank counter.
                 blankLinesBefore = 0;
 
-                // Continuation of current step (deeper indent or non-list line)
-                if (inStep && (indent > stepIndent || string.IsNullOrWhiteSpace(line)))
+                if (inStep && (indent > stepIndent ||
+                    (indent <= stepIndent && !trimmed.StartsWith("- "))))
                 {
-                    currentStep.AppendLine(line);
-                }
-                else if (inStep && indent <= stepIndent && !trimmed.StartsWith("- "))
-                {
-                    // Back to step indent but not a new step — belongs to previous step
-                    currentStep.AppendLine(line);
+                    AppendStepLine(currentStep, line, ref currentInline);
                 }
             }
 
-            // Last step
-            if (inStep && currentStep.Length > 0)
-            {
-                steps.Add(new StepSnippetInfo(
-                    currentStep.ToString().TrimEnd('\r', '\n') + "\n",
-                    currentBlankLines));
-            }
-
+            if (inStep && currentStep.Length > 0) FinalizeStep();
             return steps;
+        }
+
+        private static void AppendStepLine(StringBuilder sb, string line, ref string? inlineComment)
+        {
+            // Capture the first inline comment found anywhere in the step snippet.
+            if (inlineComment == null && TrySplitTrailingComment(line, out var code, out var comment))
+            {
+                inlineComment = comment;
+                sb.AppendLine(code);
+                return;
+            }
+            sb.AppendLine(line);
         }
 
         /// <summary>

@@ -3065,3 +3065,40 @@ public class FlowCanvasBridgeTests
         return edge;
     }
 }
+
+public class FlowCanvasBridgeSplitYamlStepsTests
+{
+    [Fact]
+    public void SplitYamlSteps_LeadingCommentAttachesToNextStep_AndIsStrippedFromSnippet()
+    {
+        var yaml = "steps:\n  # Get hostname\n  - send:\n      command: hostname\n";
+        var steps = FlowCanvasBridge.SplitYamlSteps(yaml);
+
+        Assert.Single(steps);
+        Assert.Equal(new[] { "Get hostname" }, steps[0].LeadingComments);
+        Assert.DoesNotContain("#", steps[0].Snippet);
+        Assert.Contains("- send:", steps[0].Snippet);
+    }
+
+    [Fact]
+    public void SplitYamlSteps_InlineComment_IsCapturedAndStripped()
+    {
+        var yaml = "steps:\n  - send:\n      command: cfg  # needs vdom\n";
+        var steps = FlowCanvasBridge.SplitYamlSteps(yaml);
+
+        Assert.Single(steps);
+        Assert.Equal("needs vdom", steps[0].InlineComment);
+        Assert.DoesNotContain("needs vdom", steps[0].Snippet);
+    }
+
+    [Fact]
+    public void SplitYamlSteps_HashInsideQuotes_IsNotTreatedAsComment()
+    {
+        var yaml = "steps:\n  - send:\n      command: \"echo #1\"\n";
+        var steps = FlowCanvasBridge.SplitYamlSteps(yaml);
+
+        Assert.Single(steps);
+        Assert.Null(steps[0].InlineComment);
+        Assert.Contains("#1", steps[0].Snippet);
+    }
+}
