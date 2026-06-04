@@ -3140,4 +3140,31 @@ public class FlowCanvasBridgeSplitYamlStepsTests
         Assert.NotNull(header);
         Assert.Equal("File header note", header!["data"]?["text"]?.ToString());
     }
+
+    [Fact]
+    public void TextToGraph_InlineComment_EmitsInlineAnchoredNode()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = "steps:\n  - send:\n      command: hostname  # note\n";
+        var (nodes, _) = bridge.TextToGraph(yaml);
+        var inline = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["anchor"]?["type"]?.ToString() == "inline");
+        Assert.NotNull(inline);
+        Assert.Equal("note", inline!["data"]?["text"]?.ToString());
+        Assert.Equal("steps/0", inline["data"]?["anchor"]?["stepPath"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_CommentOnlyPreambleNoSteps_DoesNotWireStartToComment()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = "# just a note\nsteps:\n";
+        var (_, edges) = bridge.TextToGraph(yaml);
+        foreach (var e in edges.OfType<JObject>())
+        {
+            var target = e["target"]?.ToString();
+            Assert.False(target != null && target.StartsWith("comment-"),
+                $"start wired to a comment node: {target}");
+        }
+    }
 }

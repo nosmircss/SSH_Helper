@@ -528,12 +528,13 @@ namespace SSH_Helper.Services
                     nodes.Add(BuildCommentNode(line, "header", "preamble", "__start__"));
             }
 
-            // Connect Start to the first step node (if any steps exist)
+            // Connect Start to the first step node (if any steps exist).
+            // Skip the start node itself and any comment nodes — only a real step qualifies.
             string? firstStepId = null;
             for (int n = 0; n < nodes.Count; n++)
             {
                 var nid = nodes[n]["id"]?.ToString();
-                if (nid != null && nid != "__start__")
+                if (nid != null && nid != "__start__" && nodes[n]["type"]?.ToString() != "comment")
                 {
                     firstStepId = nid;
                     break;
