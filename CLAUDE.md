@@ -5,263 +5,189 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build and Run Commands
 
 ```bash
-# Build the project (includes Flow Canvas React build via MSBuild target)
+# Build the project (runs the Flow Canvas React build first via MSBuild target)
 dotnet build SSH_Helper.sln
-
-# Build in release mode
 dotnet build SSH_Helper.sln -c Release
+
+# Skip the Node/Vite build (build .NET only, no Node toolchain required)
+dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true
 
 # Run the application
 dotnet run --project SSH_Helper.csproj
 
-# Run tests
+# Run the .NET test suite
 dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj
 
-# Build Flow Canvas separately (React/Vite)
-cd FlowCanvas && npm run build
+# Flow Canvas (React/Vite) — from FlowCanvas/
+npm run build      # tsc && vite build
+npm test           # vitest run (unit suite)
+npm run test:e2e   # Playwright e2e
 ```
+
+The solution (`SSH_Helper.sln`) holds two projects: `SSH_Helper` (WinExe) and `SSH_Helper.Tests`.
 
 ## Project Overview
 
-SSH_Helper is a Windows Forms application (.NET 8.0) for executing SSH commands and YAML scripts against multiple hosts. It features a visual Flow Canvas editor, a full YAML scripting engine with 30+ commands, cron-based job scheduling, interactive terminals, environment management, and connection pooling.
+SSH_Helper is a Windows Forms application (.NET 8.0) for executing SSH commands and YAML scripts against multiple hosts. It features a visual Flow Canvas editor, a full YAML scripting engine (30+ commands), cron-based job scheduling, interactive terminals, environment management, and connection pooling.
 
 ## Architecture
 
+The repo root holds `Form1.cs` (main UI — keep it thin) and the top-level dialogs (`SettingsDialog`, `JobListDialog`, `JobEditorDialog`, `EnvironmentDialog`, etc.). The folders below are the map; **browse a folder (Glob) for its current contents rather than trusting a catalog here** — most of these directories are large and grow often.
+
 ```
-SSH_Helper/
-├── Models/                    # Data transfer objects and configuration models
-├── Services/                  # Business logic and external integrations
-│   ├── Scripting/             # YAML script engine (executor, parser, context)
-│   │   ├── Commands/          # 30+ command handlers (send, if, foreach, try, etc.)
-│   │   ├── Functions/         # Built-in function registry (string, math, collection, etc.)
-│   │   ├── Models/            # Script, ScriptStep, DebugState
-│   │   └── Parsers/           # Config parsers (e.g., FortiGate)
-│   ├── Editor/                # Scintilla editor services (validation, autocomplete, highlighting)
-│   ├── Credentials/           # Windows Credential Manager integration
-│   └── Terminal/              # Interactive terminal session management
-├── UI/                        # Reusable WinForms controls and forms
-│   └── FlowCanvasForm.cs      # WebView2 host for the React Flow Canvas
-├── Forms/                     # Additional forms
-│   └── InteractiveTerminalForm.cs
-├── FlowCanvas/                # React/TypeScript visual script editor (Vite + React Flow)
-│   └── src/
-│       ├── nodes/             # Custom node types (BaseBlock, StartNode, CommentNode)
-│       ├── panels/            # UI panels (Toolbar, Palette, Properties, Debug, Output)
-│       ├── stores/            # Zustand store with 9 slices
-│       └── blockDefs/         # Block type metadata registry
-├── Utilities/                 # Reusable helper classes
-├── ScriptSamples/             # Example YAML scripts
-├── Form1.cs                   # Main UI
-├── SettingsDialog.cs          # Multi-tab settings (editor, fonts, SSH, credentials, updates)
-├── EnvironmentDialog.cs       # Named environment profile management
-├── JobListDialog.cs           # Job scheduler dashboard
-├── JobEditorDialog.cs         # Job creation/editing
-├── ExecutionDetailsDialog.cs  # Execution history viewer
-├── FolderExecutionDialog.cs   # Batch folder execution config
-├── RunOutputViewerDialog.cs   # Per-host output viewer
-├── ImportPreviewDialog.cs     # Import conflict resolution
-├── FindDialog.cs              # Modeless find dialog
-├── AboutDialog.cs             # Application info
-└── UpdateDialog.cs            # Auto-update from GitHub Releases
+Models/                # Config / job / history / environment DTOs
+Services/              # Business logic (see breakdown below)
+  Scripting/           # YAML engine: executor, parser, context, Commands/, Functions/
+  Editor/              # Scintilla editor services (validation, autocomplete, highlighting)
+  Credentials/         # Windows Credential Manager integration
+  Terminal/            # Interactive terminal sessions
+  Vault/               # HashiCorp Vault credential retrieval + OIDC login
+  Notifications/       # Multi-channel dispatch (SMTP, Teams, Toast, Webhook)
+UI/                    # Reusable WinForms controls/forms (incl. FlowCanvasForm.cs)
+Forms/                 # Additional forms (InteractiveTerminalForm.cs)
+Utilities/             # Cross-cutting helpers
+FlowCanvas/src/        # React/TypeScript visual editor (Vite + @xyflow/react)
+  nodes/ panels/ stores/ blockDefs/
+ScriptSamples/         # Example YAML scripts
 ```
 
 ### Models
 
-- **AppConfiguration.cs** - Root configuration persisted to config.json. Includes:
-  - `Presets`: Dictionary of saved presets (commands or YAML scripts)
-  - `Username`, `Delay`, `Timeout`: Default SSH settings
-  - `ConnectionTimeout`, `UseConnectionPooling`: Connection pool settings
-  - `DarkMode`, `AutoResizeHostColumns`, `RememberState`, `PresetSortMode`
-  - `FontSettings`: Per-element font family/size with `GlobalScaleFactor`
-  - `CommandEditorSettings`: 20+ Scintilla editor settings (highlighting, autocomplete, folding, validation)
-  - `SshConfigSettings`, `CredentialSettings`, `UpdateSettings`
-  - `MaxConcurrentJobs`, `DefaultMaxHistoryRuns`, `DefaultHistoryRetentionDays`
-  - `WindowState`: Window geometry, splitter positions, Flow Canvas dimensions
-  - `ApplicationState`, `HistoryEntry`, `HostHistoryEntry`
+DTOs for config, jobs, history, and environments — read the folder. The non-obvious invariants:
 
-- **PresetInfo.cs** - Command preset with `PresetType` enum (Script vs. legacy commands), optional per-preset delay/timeout overrides
-
-- **HostConnection.cs** - SSH host connection details with IP validation, port parsing, variable storage
-
-- **ExecutionResult.cs** - Result of SSH command execution on a single host
-
-- **EnvironmentConfig.cs** - Named environment profile (host columns, hosts, variables, CSV fingerprint)
-
-- **JobDefinition.cs** - Scheduled job model with cron expression, target hosts/presets, credentials, execution mode. Related enums: `CredentialMode`, `ScheduleType`, `FolderExecutionMode`, `JobExecutionState`, `JobTargetType`
-
-- **JobRunRecord.cs / JobRunIndexDocument.cs / JobRunPayload.cs / JobRunResult.cs** - Job execution history persistence
-
-- **FolderExecutionOptions.cs / FolderInfo.cs** - Folder-level batch execution configuration
-
-- **SshConfigFile.cs / SshConfigEntry / SshHostConfig.cs** - OpenSSH config file models
-
-- **CsvFileFingerprint.cs** - Hash/size fingerprint for CSV file change detection
+- **AppConfiguration.cs** is the root, persisted to `config.json`. It aggregates `FontSettings`, `CommandEditorSettings` (20+ Scintilla options), `SshConfigSettings`, `CredentialSettings`, `UpdateSettings`, `VaultSettings`, `NotificationSettings`, plus `WindowState` (geometry, splitter positions, Flow Canvas dimensions) and the compressed `ApplicationState` blob.
+- **PresetInfo** — `PresetType` is `Simple` or `YamlScript`, and `Type` is **auto-detected** from content (`ScriptParser.IsYamlScript(Commands)`), never stored. The only per-preset override is `int? Timeout` (there is **no** per-preset `Delay`). `Commands` is always normalized to CRLF line endings (same for `JobDefinition.CustomPresetCommands`) — this matters for content-hash comparison and diffing.
+- **JobDefinition** — `JobTargetType` has three shapes: `Preset` (named), `Folder` (carries per-preset `FolderPresetHashes` for drift tracking), and `CustomPreset` (command/YAML content lives directly on the job, so it runs without any saved preset). `CredentialMode` includes a `Vault` member (`VaultCredentialPath` / `VaultProfileName`).
 
 ### Services
 
-**Core SSH:**
-- **SshExecutionService.cs** - Core SSH execution engine with async execution, cancellation, event-driven progress
-- **SshConnectionPool.cs** - Connection pooling using Rebex SSH; reuses connections across executions
-- **SshShellSession.cs** - Stateful interactive SSH shell using Rebex scripting API with prompt detection
-- **SshConfigService.cs** - Reads `~/.ssh/config` and applies host-specific settings
-- **ExecutionCoordinator.cs** - Facade that decouples Form1 from direct SSH service coupling
+`Services/` (root) covers SSH execution + pooling, config persistence, environments, history, presets, and scheduling/jobs; subfolders add Vault, Notifications, Credentials, Terminal, Editor, and Scripting (below). Filenames are self-describing — read the folder. Non-obvious wiring:
 
-**Scripting Engine (`Services/Scripting/`):**
-- **ScriptExecutor.cs** - Interprets YAML scripts; dispatches to 30+ command handlers; fires `StepStarting`, `StepCompleted`, `DebugPauseStateChanged` events; supports breakpoints, step mode, disabled nodes
-- **ScriptParser.cs** - Parses YAML text into `Script`/`ScriptStep` models
-- **ScriptContext.cs** - Runtime state: variables, SSH session ref, output events, exit status
-- **ExpressionEvaluator.cs** - Boolean expressions (==, !=, >, <, contains, matches, startswith, is empty, is defined, and/or/not)
-- **ExpressionParser.cs** - Function-call expression parsing from YAML values
-- **FunctionRegistry.cs** - 40+ built-in functions across categories (string, math, collection, datetime, encoding, type)
-- **LambdaExpression.cs** - Arrow-style lambdas for higher-order collection functions (map, filter, reduce)
-- **ScriptDependencyAnalyzer.cs** - Analyzes which host columns and SSH capabilities a script requires
-- **ValueResolver.cs** - Resolves `{{variable}}` references in script values
+- **SshConnectionPool** is built on **Rebex** (not SSH.NET) for pooled/interactive sessions.
+- **ConfigurationService** GZip-compresses the `ApplicationState` blob into `SavedStateCompressed` (`gz64:` prefix) on save and re-inflates on load; legacy uncompressed `SavedState` and legacy string presets are migrated on first load (write-back). Load is corruption-resilient: a parse failure backs the file up to `config.json.corrupt`, sets `ConfigLoadError` for the UI to surface, and falls back to defaults. Every save also keeps a `.bak`.
+- **EnvironmentService** raises `EnvironmentChanged` (previous/current environment + config).
+- **HistoryStorageService** derives its base dir from the config **file's** directory, so a test that redirects the config path also redirects history.
 
-**Scripting Commands (`Services/Scripting/Commands/`):**
-30+ command handlers including: `SendCommand`, `PrintCommand`, `SetCommand`, `WaitCommand`, `ExtractCommand`, `IfCommand`, `ForeachCommand`, `WhileCommand`, `TryCommand`, `SwitchCommand`, `ParallelCommand`, `BreakCommand`, `ContinueCommand`, `ExitCommand`, `ReturnCommand`, `CallCommand`, `AssertCommand`, `LogCommand`, `InputCommand`, `ConfirmCommand`, `ChooseCommand`, `MultiselectCommand`, `ReadFileCommand`, `WriteFileCommand`, `HttpCommand`, `WebhookCommand`, `PingCommand`, `DnsCommand`, `PortcheckCommand`, `SftpCommand`, `ParseCommand`, `TableCommand`, `UpdateColumnCommand`, `UpdateEnvironmentCommand`, `InteractiveCommand`, `BrowserCallbackCaptureCommand`
+### Scripting engine (`Services/Scripting/`)
 
-**Editor Services (`Services/Editor/`):**
-- **ScriptEditorValidationService.cs** - Debounced async YAML validation with diagnostics
-- **ScriptAutocompleteProvider.cs** - Context-aware autocomplete for YAML script editing
-- **YamlSshSyntaxHighlighter.cs** - Syntax highlighting rules for Scintilla
+The executor, parser, `ScriptContext`, `ExpressionEvaluator`/`ExpressionParser`, `FunctionRegistry`, and `ValueResolver` live here — read the folder. Wiring a fresh agent can't infer:
 
-**Scheduling:**
-- **SchedulingService.cs** - Cron-based job scheduler with timer management and missed-run detection
-- **JobExecutionService.cs** - Runs scheduled/on-demand jobs with queue, cancellation, concurrency limits
-- **JobStorageService.cs** - CRUD persistence for job definitions
-- **JobHistoryService.cs** - Job execution history with pruning and retention policies
-- **JobExportService.cs** - Export/import job definitions with conflict detection
-
-**Other Services:**
-- **ConfigurationService.cs** - Configuration persistence to `%LocalAppData%\SSH_Helper\config.json` with legacy migration
-- **PresetManager.cs** - Preset CRUD with export/import (GZip + Base64)
-- **CsvManager.cs** - CSV import/export with `Host_IP` column requirement
-- **EnvironmentService.cs** - Named environment profiles with active switching and `EnvironmentChanged` event
-- **HistoryStorageService.cs** - Execution history persistence (index + per-run payloads)
-- **FlowCanvasBridge.cs** - Bidirectional translator between YAML scripts and Flow Canvas graph JSON (import/export with layout calculation and branch coloring)
-- **UpdateService.cs** - GitHub Releases auto-update (check, download, verify, install)
-- **PresetDeleteUndoService.cs** - Undo support for preset deletion
-- **CredentialManagerProvider.cs** - Windows Credential Manager integration via DPAPI
-
-### UI Components (`UI/`)
-
-- **FlowCanvasForm.cs** - Modeless WinForms window hosting the React Flow Canvas via WebView2. Bidirectional JSON messaging (PostWebMessage/WebMessageReceived). Events: `OnApplyYaml`, `OnDebugAction`, `OnTestStep`, `OnExecuteCanvas`, `OnBreakpointToggle`, `OnRunRequest`, `OnDisableBlock`, `OnTestDataBlock`
-- **ScintillaScriptEditorControl.cs** - Full-featured YAML script editor: syntax highlighting, autocomplete, inline diagnostics, code folding, brace matching, smart Enter, variable tooltips
-- **UnsavedPresetDiffDialog.cs** - Inline diff of unsaved preset changes (LCS algorithm)
-- **CronBuilderControl.cs** - UserControl for building/previewing cron expressions
-- **BrowserCallbackWebViewDialog.cs** - Embedded browser for OAuth/SSO flows during script execution
-- **MemoryDebuggerDialog.cs** - Live process memory diagnostics
-- **HistoryListBox.cs** - Custom-drawn history list with status icons
-- **InteractiveTerminalViewportControl.cs** - Terminal viewport renderer
-- **DialogTheme.cs** - Centralized dark/light mode theming
-- **BufferedPanel.cs / BufferedSplitContainer.cs** - Double-buffered controls to eliminate flicker
+- **Commands/** holds one class per command implementing `IScriptCommand` (`ExecuteAsync(ScriptStep, ScriptContext, CancellationToken)` → `CommandResult`); there are ~43 handlers. **Registration is manual and enum-keyed**: dispatch is a `Dictionary<StepType, IScriptCommand>` built in `ScriptExecutor`'s ctor (~line 104), so adding a command means adding a `StepType` value **and** a dictionary entry, not just dropping a file in the folder.
+- **Container commands** (If/Foreach/While/Repeat/Try/Switch/Parallel/Call) are constructed with `this` so they re-enter `ScriptExecutor` to run nested steps; leaf commands take no executor. A block command that forgets its own recursion silently skips all nested execution/validation.
+- `CommandResult` carries the control-flow + canvas contract: `ShouldExit/Break/Continue/Return`, `IterationCount`, and `BranchTaken`. The `BranchTaken` vocabulary (`then` | `else` | `elif/{i}/then` | `cases/{i}/do` | `default`) **must** match the Flow Canvas `edge.data.branchPath` or path highlighting breaks.
+- **Functions/** — ~70 built-in functions across 8 `IFunctionCategory` classes (`void Register(FunctionRegistry)`), wired in `FunctionRegistry`. Note: `JsonFunctions.cs` lives in `Commands/` but is a plain static helper, **not** a command or category.
+- **ScriptExecutor** fires `StepStarting`, `StepCompleted`, `DebugPauseStateChanged` and supports breakpoints, step mode, and disabled nodes.
 
 ### Flow Canvas (`FlowCanvas/`)
 
-A React/TypeScript visual script editor built with Vite and @xyflow/react (React Flow), hosted in a WebView2 window.
+A React/TypeScript visual script editor (Vite + `@xyflow/react`) hosted in a WebView2 window. The C# `UI/FlowCanvasForm.cs` hosts the React app and exchanges JSON via `PostWebMessage`/`WebMessageReceived`.
 
-**Key components:**
-- **App.tsx** - Root ReactFlow canvas with MiniMap, Controls, Background
-- **MessageBus.ts** - Typed C#-to-React message protocol over WebView2
-- **stores/useFlowStore.ts** - Zustand store with 9 slices: graph, debug, execution, ui, variable, host, timeline, comment, undo
-- **nodes/BaseBlock.tsx** - Universal block node rendering all step types with breakpoint/disable toggles
-- **panels/** - Toolbar, Palette (drag-and-drop blocks), Properties editor, OutputPreview, VariableInspector, DebugPanel, TimelinePanel, SearchOverlay, HostBar
+React side: the Zustand store is composed from slices in `stores/slices/` (read the folder for the current set); `MessageBus.ts` is the typed WebView2 protocol (`on`/`send`/`sendReady`, singleton `messageBus`); custom node types and UI panels live in `nodes/` and `panels/`.
 
-**C#-to-React bridge flow:**
-1. YAML script in editor -> `FlowCanvasBridge.ImportToCanvas()` -> graph JSON (nodes + edges)
-2. Graph JSON sent to React via `PostWebMessage`
-3. User edits graph visually in React Flow
-4. Export: React sends graph JSON back -> `FlowCanvasBridge.ExportToYaml()` -> YAML script
-5. Debug: `ScriptExecutor` events -> `FlowCanvasForm` -> React messages for step highlighting, breakpoints, variable updates
+**C#↔React bridge flow:**
+1. YAML text → `FlowCanvasBridge.TextToGraph()` → graph JSON (nodes + edges).
+2. `FlowCanvasForm.LoadGraph()` sends a `load-graph` message. Its `hasUserLayout` flag tells the canvas whether positions are a saved user arrangement (keep) or algorithmic defaults (run hierarchical auto-layout).
+3. User edits the graph visually in React Flow.
+4. Export: React posts `apply-yaml` → `FlowCanvasBridge.ExportGraphToYaml()`.
+5. Debug: `ScriptExecutor` events → `FlowCanvasForm` → React messages for step highlighting, breakpoints, variable updates.
 
-### Utilities
+**Bridge design:** each graph node stores the original YAML snippet verbatim for its step; export reassembles snippets, preserving all properties, comments, and formatting (snippet round-trip, not lossy re-serialization). This is why edits to untouched blocks survive export.
 
-- **TerminalOutputProcessor.cs** - ANSI escape sequence handling (Normalize, Sanitize, StripPagerArtifacts)
-- **PromptDetector.cs** - Shell prompt detection with adaptive regex
-- **InputValidator.cs** - Centralized input validation
-- **FlowCanvasDistLocator.cs** - Locates built Flow Canvas `dist/` folder (alongside exe or embedded resources)
-- **InlineDiffBuilder.cs** - LCS-based inline diff algorithm for preset change visualization
-- **ModelessDialogManager.cs** - Generic show-or-activate pattern for modeless dialogs
-- **OutputThrottler.cs** - Batches rapid output events to prevent UI thread flooding
-- **SshConfigParser.cs** - Parses OpenSSH `~/.ssh/config` files
-- **PresetSaveImpactResolver.cs** - Analyzes what saving a preset affects (jobs, environments)
-- **PresetEnvironmentLoadPlanner.cs** - Decides environment switching when loading presets
-- **CsvFileSyncEvaluator.cs** - Evaluates CSV file sync status with loaded grid
-- **JsonFileWriter.cs** - Atomic JSON write (temp file + rename)
-- **AppDataPaths.cs** - Centralizes `%LocalAppData%\SSH_Helper\` path construction
-- **ScintillaNativeBootstrap.cs** - Extracts Scintilla/Lexilla native DLLs from embedded resources at startup
+**Handshake:** `FlowCanvasForm` queues all outbound `SendMessage` payloads in `_pendingMessages` until React posts `{type:'ready'}`, then drains them. Sending `load-graph` before `ready` would be dropped.
+
+**C# event surface** (grep for these handlers; all are wired in `Form1`): `OnApplyYaml`, `OnDebugAction`, `OnTestStep`, `OnExecuteCanvas`, `OnBreakpointToggle`, `OnRunRequest`, `OnDisableBlock`, `OnTestDataBlock`, plus `OnLayoutAutosave` and `OnBrowsePath`. The React-side `run-request` message is deprecated in favor of `run` (both route to `OnRunRequest`). Display-settings (panel sizes, heatmap, block width, density, branch bands, reduced motion) persist to `WindowState` via internal `layout-save`/`pref-save` messages.
+
+Per Development Guideline 8, Flow Canvas changes require both React (`FlowCanvas/src/`) and C# (`FlowCanvasBridge.cs`, `FlowCanvasForm.cs`) updates.
+
+### UI and Utilities
+
+Reusable WinForms controls/forms live in `UI/`; cross-cutting helpers live in `Utilities/` — browse the folders. Conventions to honor:
+
+- Theme dialogs through **`DialogTheme`** (the single static class driving dark/light app-wide).
+- Use **`BufferedPanel` / `BufferedSplitContainer`** (double-buffered subclasses) for repaint-heavy surfaces instead of stock `Panel`/`SplitContainer` to avoid flicker.
+- Build `%LocalAppData%\SSH_Helper\` paths via **`AppDataPaths`** (single source of truth for the storage root).
+- Persist JSON via **`JsonFileWriter.WriteJsonAtomic`** (temp file + `File.Replace`, optional `.bak`); `TryBackupCorrupt` salvages bad files on load. Hand-rolled `File.WriteAllText` drops the crash-safety guarantee.
+- Show modeless windows via **`ModelessDialogManager<TForm>.ShowOrActivate`** (single-instance, owner-centered).
+- Throttle high-rate output via **`OutputThrottler`**.
+- **`ScintillaNativeBootstrap`** extracts the native Scintilla/Lexilla DLLs at startup; the editor control fails to load without it.
 
 ### Event-Driven Communication
 
-Services communicate with the UI via events:
-```csharp
-// SSH execution events
-service.ProgressChanged += (s, e) => UpdateProgressBar(e.Current, e.Total);
-service.OutputReceived += (s, e) => AppendOutput(e.Output);
+Services talk to the UI via events. The event **names** below are real; payload fields differ from a naive guess, so check the EventArgs:
 
-// Script execution events
-executor.StepStarting += (s, e) => HighlightCurrentStep(e.Step);
-executor.StepCompleted += (s, e) => UpdateStepStatus(e.Step, e.Duration);
+```csharp
+// SSH execution — SshProgressEventArgs has Host/Message/IsError/IsConnected (no Current/Total)
+service.ProgressChanged += (s, e) => UpdateProgressBar(e.Host, e.Message);
+service.OutputReceived  += (s, e) => AppendOutput(e.Output);
+
+// Script execution — StepExecutionEventArgs carries StepIndex, StepPath ("steps/2/then/0"),
+// StepType, StepName, Success, Output, DurationMs (long? ms), IterationCount, BranchTaken
+executor.StepStarting          += (s, e) => HighlightStep(e.StepPath);
+executor.StepCompleted         += (s, e) => UpdateStepStatus(e.StepType, e.DurationMs);
 executor.DebugPauseStateChanged += (s, e) => UpdateDebugUI(e.IsPaused);
 
-// Environment events
-envService.EnvironmentChanged += (s, e) => ReloadHostGrid(e.Environment);
+// Environment
+envService.EnvironmentChanged += (s, e) => ReloadHostGrid(e.CurrentEnvironment);
 
-// Job scheduler events
+// Job scheduler — JobCompleted carries a JobRunResult
 jobService.JobStateChanged += (s, e) => UpdateJobStatus(e.Job);
-jobService.JobCompleted += (s, e) => RecordJobHistory(e.Result);
+jobService.JobCompleted    += (s, e) => RecordJobHistory(e);
 ```
+
+The `StepPath` / `BranchTaken` / `IterationCount` fields are the contract the Flow Canvas debug bridge depends on.
 
 ## Configuration
 
-- Config file: `%LocalAppData%\SSH_Helper\config.json`
-- Execution history: `%LocalAppData%\SSH_Helper\history/`
-- Job definitions and history: `%LocalAppData%\SSH_Helper\jobs/`
-- Presets can override global Delay and Timeout values
-- Legacy configs (string presets) are auto-migrated on load
-- Window state, splitter positions, and Flow Canvas dimensions are persisted
+Default storage root is `%LocalAppData%\SSH_Helper\` (a `PORTABLE_BUILD` compile flavor redirects it to the exe directory — see `AppDataPaths`):
+
+- `config.json` — main config (see `ConfigurationService` notes above).
+- `history/` — execution history (index + per-run payload files).
+- `jobs.json` — job **definitions** (file, not a folder); `job-history/` — job run history (per-job subdirs).
+
+Window state, splitter positions, and Flow Canvas dimensions are persisted into config.
 
 ## CSV Grid Columns
 
-The DataGridView supports these predefined columns:
-- `Host_IP` (required, cannot be deleted)
-- `port`, `username`, `password`, `vault_path`
-
-Custom columns can be added and used as variables in commands/scripts via `{{column_name}}` syntax.
+`Host_IP` is the only column **enforced in code** (`CsvManager.HostColumnName` — required, non-deletable first column). `port`, `username`, `password`, and `vault_path` are convention-level columns wired in `Form1` as per-host SSH overrides. Any other column becomes a `{{column_name}}` variable usable in commands/scripts.
 
 ## Dependencies
 
-- **SSH.NET** (2024.1.0) - SSH client library
-- **Rebex.SshShell** (7.0.9448) - SSH shell with terminal emulation (connection pooling, interactive terminal)
-- **Newtonsoft.Json** (13.0.3) - JSON serialization
-- **Scintilla5.NET** (6.1.1) - Advanced code editor control
-- **Microsoft.Web.WebView2** (1.0.3124.44) - Chromium browser control (Flow Canvas, browser callback)
-- **YamlDotNet** (16.3.0) - YAML serialization (script parser, Flow Canvas bridge)
-- **Cronos** (0.11.1) - Cron schedule calculation
-- **CronExpressionDescriptor** (2.45.0) - Human-readable cron descriptions
+Package versions are the source of truth in `SSH_Helper.csproj` `<PackageReference>` entries — read the csproj rather than trusting a copied list. The key libraries and their reason for being:
 
-**Build-time:**
-- `BuildFlowCanvas` MSBuild target runs `npm run build` in `FlowCanvas/` before .NET build
-- Flow Canvas `dist/` is embedded as assembly resources for single-file publish
-- Scintilla native DLLs embedded and extracted at startup via `ScintillaNativeBootstrap`
+- **SSH.NET** — SSH client library.
+- **Rebex.SshShell** — SSH shell with terminal emulation (connection pooling, interactive terminal). Plus three conditional manual `Reference` DLLs (`Rebex.Castle`/`Curve25519`/`Ed25519`) gated on `libs\RebexElliptic` existing.
+- **Newtonsoft.Json** — JSON serialization.
+- **Scintilla5.NET** — advanced code editor control.
+- **Microsoft.Web.WebView2** — Chromium control (Flow Canvas, browser callback).
+- **YamlDotNet** — YAML serialization (script parser, Flow Canvas bridge).
+- **Cronos** / **CronExpressionDescriptor** — cron calculation / human-readable descriptions.
+- **Microsoft.Toolkit.Uwp.Notifications**, **NAudio** — toast notifications and sound playback.
+
+**Rebex licensing:** `RebexLicenseKey` is injected from the `REBEX_LICENSE_KEY` env var into an assembly metadata attribute at build (`rebex.key` is copied to output if present). Rebex SSH won't function without it.
+
+**Build-time pipeline:**
+- `BuildFlowCanvas` MSBuild target runs `npm run build` in `FlowCanvas/` before the .NET build (gated on `FlowCanvas\package.json` existing; skip with `-p:SkipFlowCanvasBuild=true`).
+- Single-file publish settings (`PublishSingleFile`/`SelfContained`/`win-x64`) apply **only in Release** — which is why the Flow Canvas `dist/` and the native Scintilla/Lexilla DLLs are embedded as assembly resources. Debug builds resolve them from disk.
+- Resolution is layered: `FlowCanvasDistLocator` prefers `exe-dir/FlowCanvas/dist` → `project-root/FlowCanvas/dist` → embedded-extracted-to-AppData (extraction dir versioned by build-time `BuildTimestamp` metadata for cache-busting). `ScintillaNativeBootstrap` similarly prefers `runtimes/<rid>/native` on disk before extracting embedded DLLs.
+- A `PortableBuild` flavor (`-p:PortableBuild=true`) defines `PORTABLE_BUILD` and renames the assembly to `SSH_Helper_Portable`.
 
 ## Test Infrastructure
 
-- Test project: `SSH_Helper.Tests/` using xUnit 2.7.0, FluentAssertions 6.12.0, Moq 4.20.70
-- WinForms tests require `Xunit.StaFact` 1.1.11 (`[WinFormsFact]`/`[WinFormsTheory]`)
-- `InternalsVisibleTo("SSH_Helper.Tests")` is in SSH_Helper.csproj
-- `ConfigurationService` accepts optional `configFilePath` for test isolation
+- Test project `SSH_Helper.Tests/` uses xUnit 2.7.0, FluentAssertions 6.12.0, Moq 4.20.70 (FluentAssertions 6.x vs 8.x APIs differ — don't accidentally upgrade).
+- WinForms tests require **`Xunit.StaFact` 1.1.11** (`[WinFormsFact]`/`[WinFormsTheory]`) to run on an STA thread.
+- `InternalsVisibleTo("SSH_Helper.Tests")` is in `SSH_Helper.csproj` (a second entry exposes internals to `FlowCanvasParityCli`).
+- `ConfigurationService(string? configFilePath = null)` enables test isolation via temp dirs; because `HistoryStorageService` derives its base dir from the config file's directory, redirecting the config path also redirects history.
 
 ## Development Guidelines
 
-1. **Add new features** through services, not directly in Form1
-2. **New script commands** go in `Services/Scripting/Commands/` implementing the command handler pattern
-3. **New built-in functions** go in `Services/Scripting/Functions/` implementing `IFunctionCategory`
-4. **Use InputValidator** for all user input validation
-5. **Use TerminalOutputProcessor** for any terminal output handling
-6. **Follow existing patterns** - events for service-to-UI communication
-7. **Keep Form1 thin** - UI logic only, delegate to services
-8. **Flow Canvas changes** require both React (`FlowCanvas/src/`) and C# (`FlowCanvasBridge.cs`, `FlowCanvasForm.cs`) updates
-9. **Use DialogTheme** for consistent dark/light mode theming in new dialogs
-10. **Use AppDataPaths** for any file paths under `%LocalAppData%\SSH_Helper\`
-11. **Track rejected feature ideas** in `rejected_ideas.md` so declined proposals are documented and not repeatedly reintroduced
+1. **Add new features** through services, not directly in Form1.
+2. **New script commands** go in `Services/Scripting/Commands/` implementing `IScriptCommand` — and remember to register the `StepType` + dictionary entry in `ScriptExecutor`.
+3. **New built-in functions** go in `Services/Scripting/Functions/` implementing `IFunctionCategory`.
+4. **Use InputValidator** for all user input validation.
+5. **Use TerminalOutputProcessor** for any terminal output handling.
+6. **Follow existing patterns** — events for service-to-UI communication.
+7. **Keep Form1 thin** — UI logic only, delegate to services.
+8. **Flow Canvas changes** require both React (`FlowCanvas/src/`) and C# (`FlowCanvasBridge.cs`, `FlowCanvasForm.cs`) updates.
+9. **Use DialogTheme** for consistent dark/light mode theming in new dialogs.
+10. **Use AppDataPaths** for any file paths under the storage root.
+11. **Track rejected feature ideas** in `rejected_ideas.md` so declined proposals are documented and not repeatedly reintroduced.
