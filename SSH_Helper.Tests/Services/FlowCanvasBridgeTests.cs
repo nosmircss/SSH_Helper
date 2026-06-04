@@ -400,8 +400,9 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
-    public void ExportGraphToYaml_CommentNodes_AreIgnoredWithWarning()
+    public void ExportGraphToYaml_PlainCommentNodes_AreConsumedSilently()
     {
+        // A comment node with blockType 'comment' but NO kind/anchor is a plain visual note — must NOT inject any # lines.
         var bridge = new FlowCanvasBridge();
         var graph = new JObject
         {
@@ -467,7 +468,7 @@ public class FlowCanvasBridgeTests
         var result = bridge.ExportGraphToYaml(graph);
 
         Assert.True(result.Success);
-        Assert.Contains(result.Warnings, w => w.Contains("Comment nodes are ignored", System.StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("Comment nodes are ignored", System.StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain("comment-1", result.NodeToStepPathMap.Keys);
         Assert.Contains("node-1", result.NodeToStepPathMap.Keys);
     }
@@ -2488,6 +2489,26 @@ public class FlowCanvasBridgeTests
         Assert.NotNull(choose);
         Assert.Empty(choose!.Options);
         Assert.Equal("${interface_list}", choose.OptionsFrom);
+    }
+
+    [Fact]
+    public void RoundTrip_LeadingAndInlineComments_ArePreserved()
+    {
+        var yaml = "steps:\n  # Create the address object\n  - send:\n      command: cfg  # needs vdom\n";
+        var result = RoundTripThroughBridge(yaml);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# Create the address object", result.Yaml);
+        Assert.Contains("# needs vdom", result.Yaml);
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# needs vdom"));
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int count = 0, idx = 0;
+        while ((idx = haystack.IndexOf(needle, idx, System.StringComparison.Ordinal)) >= 0)
+        { count++; idx += needle.Length; }
+        return count;
     }
 
     private static FlowCanvasBridge.FlowCanvasExportResult RoundTripThroughBridge(string yaml)

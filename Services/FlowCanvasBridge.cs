@@ -418,6 +418,23 @@ namespace SSH_Helper.Services
                     stepProps["_preview"] = previewText;
                 ExtractStepProperties(step, stepType, stepProps);
 
+                // When a trailing inline comment was stripped from the snippet, the YAML parser
+                // (via PreprocessYaml quoting) may have embedded it in a string prop value.
+                // Strip it so the prop holds the clean value and the comment round-trips separately.
+                if (!string.IsNullOrEmpty(snippetInfo.InlineComment))
+                {
+                    var suffix = $"  # {snippetInfo.InlineComment}";
+                    foreach (var prop in stepProps.Properties().ToList())
+                    {
+                        if (prop.Value.Type == JTokenType.String)
+                        {
+                            var raw = prop.Value.ToString();
+                            if (raw.EndsWith(suffix, StringComparison.Ordinal))
+                                prop.Value = raw.Substring(0, raw.Length - suffix.Length);
+                        }
+                    }
+                }
+
                 var node = new JObject
                 {
                     ["id"] = nodeId,
@@ -1068,8 +1085,31 @@ namespace SSH_Helper.Services
                 }
             }
 
+            // Index comment-kind notes by their anchor for re-injection. Sticky-kind notes are visual-only.
+            var leadingByPath = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var inlineByPath = new Dictionary<string, string>(StringComparer.Ordinal);
+            var headerComments = new List<string>();
+            foreach (var n in nodeMap.Values)
+            {
+                var d = n["data"];
+                if (!string.Equals(d?["blockType"]?.ToString(), "comment", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(d?["kind"]?.ToString(), "comment", StringComparison.OrdinalIgnoreCase)) continue;
+                var text = d?["text"]?.ToString() ?? string.Empty;
+                var anchor = d?["anchor"];
+                var atype = anchor?["type"]?.ToString();
+                var spath = anchor?["stepPath"]?.ToString() ?? string.Empty;
+                if (atype == "header") headerComments.Add(text);
+                else if (atype == "inline" && spath.Length > 0) inlineByPath[spath] = text;
+                else if (atype == "leading" && spath.Length > 0)
+                {
+                    if (!leadingByPath.TryGetValue(spath, out var list)) leadingByPath[spath] = list = new List<string>();
+                    list.Add(text);
+                }
+            }
+
             // Build preamble from Start node props
             var sb = new StringBuilder();
+            AppendLeadingComments(sb, headerComments, 0);
             if (nodeMap.TryGetValue("__start__", out var startNode))
             {
                 var startProps = startNode["data"]?["props"] as JObject;
@@ -1103,15 +1143,9 @@ namespace SSH_Helper.Services
                 var existingStepPath = props?["_stepPath"]?.ToString();
                 var isChildNode = props?["_isChildOf"] != null;
 
-                // Skip non-executable node kinds.
+                // Comment nodes are consumed by the index built above; silently skip them here.
                 if (string.Equals(blockType, "comment", StringComparison.OrdinalIgnoreCase))
-                {
-                    result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
-                        ExportDiagnosticSeverity.Warning,
-                        "Comment nodes are ignored during YAML export.",
-                        nodeId));
                     continue;
-                }
 
                 if (!string.IsNullOrWhiteSpace(existingStepPath))
                     result.NodeToStepPathMap[nodeId] = existingStepPath!;
@@ -1162,15 +1196,21 @@ namespace SSH_Helper.Services
                         ExportDiagnosticSeverity.Warning,
                         $"Container block '{blockType}' is exported from its stored YAML snippet.",
                         nodeId));
-                    sb.Append(normalizedSnippet);
-                    if (!normalizedSnippet.EndsWith("\n"))
+                    var stepPathForComments = result.NodeToStepPathMap.TryGetValue(nodeId, out var sp) ? sp : existingStepPath ?? "";
+                    AppendLeadingComments(sb, leadingByPath.GetValueOrDefault(stepPathForComments), 0);
+                    var injected = AppendInlineComment(normalizedSnippet, inlineByPath.GetValueOrDefault(stepPathForComments));
+                    sb.Append(injected);
+                    if (!injected.EndsWith("\n"))
                         sb.AppendLine();
                     continue;
                 }
 
                 if (TryGenerateStepYaml(blockType, props, out var generatedYaml, out var error))
                 {
-                    sb.AppendLine(generatedYaml);
+                    var stepPathForComments = result.NodeToStepPathMap.TryGetValue(nodeId, out var sp) ? sp : existingStepPath ?? "";
+                    AppendLeadingComments(sb, leadingByPath.GetValueOrDefault(stepPathForComments), 0);
+                    var injected = AppendInlineComment(generatedYaml, inlineByPath.GetValueOrDefault(stepPathForComments));
+                    sb.AppendLine(injected);
                 }
                 else
                 {
@@ -2261,6 +2301,21 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Indents every line of a YAML string by the specified number of spaces.
         /// </summary>
+        private static void AppendLeadingComments(StringBuilder sb, IEnumerable<string>? comments, int indent)
+        {
+            if (comments == null) return;
+            var prefix = new string(' ', indent);
+            foreach (var c in comments) sb.AppendLine($"{prefix}# {c}");
+        }
+
+        private static string AppendInlineComment(string stepYaml, string? inline)
+        {
+            if (string.IsNullOrEmpty(inline)) return stepYaml;
+            var nl = stepYaml.IndexOf('\n');
+            if (nl < 0) return stepYaml.TrimEnd() + $"  # {inline}";
+            return stepYaml.Substring(0, nl).TrimEnd() + $"  # {inline}" + stepYaml.Substring(nl);
+        }
+
         private static string IndentYaml(string yaml, int spaces)
         {
             var prefix = new string(' ', spaces);
