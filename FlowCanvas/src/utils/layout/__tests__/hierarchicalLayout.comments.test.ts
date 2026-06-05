@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { computeHierarchicalLayout, DEFAULT_BLOCK_SIZING } from '../hierarchicalLayout';
+import { computeHierarchicalLayout, DEFAULT_BLOCK_SIZING, estimateCommentStep } from '../hierarchicalLayout';
+
+describe('estimateCommentStep compact multiline', () => {
+  it('grows the compact pill reserve linearly per authored newline', () => {
+    const one = estimateCommentStep('one line', true);
+    const two = estimateCommentStep('line one\nline two', true);
+    const three = estimateCommentStep('a\nb\nc', true);
+    expect(two).toBeGreaterThan(one);
+    expect(three).toBeGreaterThan(two);
+    expect(two - one).toBe(three - two); // linear per extra line
+  });
+});
 
 describe('computeHierarchicalLayout anchored comments', () => {
   const baseNodes = () => [
@@ -93,6 +104,22 @@ describe('computeHierarchicalLayout anchored comments', () => {
     const bCompact = compactOut.find((n) => n.id === 'b')!.position.y;
     const bFull = fullOut.find((n) => n.id === 'b')!.position.y;
     expect(bFull).toBeGreaterThan(bCompact); // a non-compact card reserves more vertical room than a pill
+  });
+
+  it('reserves more vertical room for a multiline compact pill than a single-line one', () => {
+    const mk = (text: string) => [
+      { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', props: {} } },
+      { id: 'a', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'a' } } },
+      { id: 'b', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'b' } } },
+      { id: 'c', type: 'comment', position: { x: 0, y: 0 }, data: { commentId: 'c', kind: 'comment', text, anchor: { type: 'leading', stepPath: 'steps/1' }, attachedToNodeId: 'b' } },
+    ];
+    const e = [{ id: 'e0', source: '__start__', target: 'a' }, { id: 'e1', source: 'a', target: 'b' }];
+    const sizing = { ...DEFAULT_BLOCK_SIZING, compactComments: true };
+    const single = computeHierarchicalLayout(mk('one') as never, e as never, sizing);
+    const multi = computeHierarchicalLayout(mk('one\ntwo\nthree') as never, e as never, sizing);
+    const bSingle = single.find((n) => n.id === 'b')!.position.y;
+    const bMulti = multi.find((n) => n.id === 'b')!.position.y;
+    expect(bMulti).toBeGreaterThan(bSingle); // multiline pill pushes its block lower
   });
 
   it('still gutters a free-floating sticky (no anchor)', () => {

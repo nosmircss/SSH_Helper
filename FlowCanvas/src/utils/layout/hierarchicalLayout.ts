@@ -57,11 +57,16 @@ let activeSizing: ResolvedSizing = resolveSizing(DEFAULT_BLOCK_SIZING);
 // text. Used both to RESERVE room above a commented block (so comments never overlap the block/
 // band above) and to STACK multiple comments. Exported so the saved-layout placement pass uses
 // the identical metric.
-const COMMENT_PILL_STEP = 28;
+const COMMENT_PILL_STEP = 28; // single-line pill (height + gap)
+const COMMENT_PILL_LINE = 16; // each additional pill line
 const COMMENT_CARD_GAP = 8;
 export function estimateCommentStep(text: string, compact: boolean): number {
-  if (compact) return COMMENT_PILL_STEP;
   const t = text ?? '';
+  if (compact) {
+    // A compact pill is content-width (no wrapping), so it only grows by explicit newlines.
+    const lineCount = Math.max(1, t.split('\n').length);
+    return COMMENT_PILL_STEP + (lineCount - 1) * COMMENT_PILL_LINE;
+  }
   const lines = Math.max(1, t.split('\n').length, Math.ceil(t.length / 33));
   return 12 + lines * 17 + COMMENT_CARD_GAP; // card padding + wrapped lines + gap
 }

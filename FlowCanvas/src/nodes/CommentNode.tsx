@@ -72,16 +72,18 @@ function CommentNode({ data, id }: NodeProps) {
         data-testid="comment-pill"
         onDoubleClick={handleDoubleClick}
         style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
+          // flex-start so the '#' aligns with the first line of a multiline note.
+          display: 'inline-flex', alignItems: 'flex-start', gap: 6,
           background: 'var(--fc-comment-pill-bg)',
           borderLeft: '3px solid var(--fc-comment-pill-accent)',
           borderRadius: 3, padding: '2px 9px', fontFamily: 'ui-monospace, Consolas, monospace',
-          fontSize: 11.5, color: 'var(--fc-comment-pill-ink)', cursor: 'grab',
+          fontSize: 11.5, lineHeight: 1.35, color: 'var(--fc-comment-pill-ink)', cursor: 'grab',
         }}
         title="Double-click to edit"
       >
         <span style={{ color: 'var(--fc-accent)', fontWeight: 700 }}>#</span>
-        {text || 'comment'}
+        {/* pre-line honors authored newlines so a multiline note shows each line in the pill */}
+        <span style={{ whiteSpace: 'pre-line' }}>{text || 'comment'}</span>
       </div>
     );
   }
