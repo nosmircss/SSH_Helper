@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand';
-import type { Node, Edge, OnNodesChange, OnEdgesChange, Connection } from '@xyflow/react';
+import type { Node, Edge, OnNodesChange, OnEdgesChange, Connection, NodeChange } from '@xyflow/react';
 import { applyNodeChanges, applyEdgeChanges, addEdge } from '@xyflow/react';
 import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
@@ -281,6 +281,32 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
           ];
         }
       }
+
+      // Drag-follow: when a block is moved, move its anchored comments by the same delta so they
+      // stay attached. Skip comments that already have their own change (directly dragged / removed)
+      // and blocks that aren't actually moving (zero delta).
+      const deltaByBlock = new Map<string, { dx: number; dy: number; dragging?: boolean }>();
+      for (const c of filtered) {
+        if (c.type !== 'position' || !c.position) continue;
+        const cur = state.nodes.find((n) => n.id === c.id);
+        if (!cur) continue;
+        const dx = c.position.x - cur.position.x;
+        const dy = c.position.y - cur.position.y;
+        if (dx !== 0 || dy !== 0) deltaByBlock.set(c.id, { dx, dy, dragging: c.dragging });
+      }
+      if (deltaByBlock.size > 0) {
+        const changedIds = new Set(allChanges.map((c) => ('id' in c ? c.id : undefined)));
+        const follow: NodeChange[] = [];
+        for (const n of state.nodes) {
+          if (n.type !== 'comment' || changedIds.has(n.id)) continue;
+          const att = (n.data as Record<string, unknown>)?.attachedToNodeId;
+          const d = typeof att === 'string' ? deltaByBlock.get(att) : undefined;
+          if (!d) continue;
+          follow.push({ type: 'position', id: n.id, position: { x: n.position.x + d.dx, y: n.position.y + d.dy }, dragging: d.dragging });
+        }
+        if (follow.length > 0) allChanges = [...allChanges, ...follow];
+      }
+
       const nextNodes = applyNodeChanges(allChanges, state.nodes);
       const hasSelectionChange = allChanges.some((c) => c.type === 'select');
       const hasGraphMutation = allChanges.some((c) => c.type !== 'select');
