@@ -1164,6 +1164,9 @@ namespace SSH_Helper.Services
             if (!HasTopLevelStepsHeader(preambleText))
                 sb.AppendLine("steps:");
 
+            // Bundle comment dictionaries so they can be threaded into container/branch helpers.
+            var commentCtx = new CommentContext(leadingByNode, inlineByNode, leadingByPath, inlineByPath);
+
             // Tracks nodes consumed as branch children by container blocks (if/foreach/while).
             // These are skipped in the main export loop since they're nested inside their parent's YAML.
             var consumedByContainer = new HashSet<string>();
@@ -1236,7 +1239,7 @@ namespace SSH_Helper.Services
                 {
                     if (TryGenerateContainerFromGraph(
                             blockType, props, nodeId, outgoing, nodeMap, incomingCount,
-                            consumedByContainer, result, out var containerYaml))
+                            consumedByContainer, result, commentCtx, out var containerYaml))
                     {
                         AppendLeadingComments(sb, GetLeadingComments(), 0);
                         sb.AppendLine(AppendInlineComment(containerYaml, GetInlineComment()));
@@ -1709,6 +1712,42 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Comment dictionaries built once in ExportGraphToYaml and threaded into container/branch helpers
+        /// so comments on nodes inside branches are injected, not silently dropped.
+        /// </summary>
+        private readonly struct CommentContext
+        {
+            public readonly Dictionary<string, List<string>> LeadingByNode;
+            public readonly Dictionary<string, string> InlineByNode;
+            public readonly Dictionary<string, List<string>> LeadingByPath;
+            public readonly Dictionary<string, string> InlineByPath;
+
+            public CommentContext(
+                Dictionary<string, List<string>> leadingByNode,
+                Dictionary<string, string> inlineByNode,
+                Dictionary<string, List<string>> leadingByPath,
+                Dictionary<string, string> inlineByPath)
+            {
+                LeadingByNode = leadingByNode;
+                InlineByNode = inlineByNode;
+                LeadingByPath = leadingByPath;
+                InlineByPath = inlineByPath;
+            }
+
+            public IEnumerable<string>? GetLeadingComments(string nodeId, string stepPath)
+            {
+                var byNode = LeadingByNode.GetValueOrDefault(nodeId);
+                var byPath = LeadingByPath.GetValueOrDefault(stepPath);
+                if (byNode == null) return byPath;
+                if (byPath == null) return byNode;
+                return byNode.Concat(byPath);
+            }
+
+            public string? GetInlineComment(string nodeId, string stepPath) =>
+                InlineByNode.GetValueOrDefault(nodeId) ?? InlineByPath.GetValueOrDefault(stepPath);
+        }
+
+        /// <summary>
         /// Generates YAML for a visually-authored container block by deriving branch structure from graph edge metadata.
         /// </summary>
         private bool TryGenerateContainerFromGraph(
@@ -1720,6 +1759,7 @@ namespace SSH_Helper.Services
             Dictionary<string, int> incomingCount,
             HashSet<string> consumedByContainer,
             FlowCanvasExportResult result,
+            CommentContext commentCtx,
             out string yaml)
         {
             yaml = string.Empty;
@@ -1809,7 +1849,7 @@ namespace SSH_Helper.Services
                 {
                     sb.AppendLine("    then:");
                     if (!TryGenerateBranchYaml(
-                            thenChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                            thenChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
                     {
                         return false;
                     }
@@ -1831,7 +1871,7 @@ namespace SSH_Helper.Services
                         {
                             sb.AppendLine("        then:");
                             if (!TryGenerateBranchYaml(
-                                    elifChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 10))
+                                    elifChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 10))
                             {
                                 return false;
                             }
@@ -1850,7 +1890,7 @@ namespace SSH_Helper.Services
                     {
                         sb.AppendLine("    else:");
                         if (!TryGenerateBranchYaml(
-                                elseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                                elseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
                         {
                             return false;
                         }
@@ -1883,7 +1923,7 @@ namespace SSH_Helper.Services
                 {
                     sb.AppendLine("    do:");
                     if (!TryGenerateBranchYaml(
-                            doChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                            doChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
                     {
                         return false;
                     }
@@ -1939,7 +1979,7 @@ namespace SSH_Helper.Services
                 {
                     sb.AppendLine("    do:");
                     if (!TryGenerateBranchYaml(
-                            doChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                            doChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
                     {
                         return false;
                     }
@@ -1956,7 +1996,7 @@ namespace SSH_Helper.Services
                     {
                         sb.AppendLine("    catch:");
                         if (!TryGenerateBranchYaml(
-                                catchChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                                catchChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
                         {
                             return false;
                         }
@@ -1974,7 +2014,7 @@ namespace SSH_Helper.Services
                     {
                         sb.AppendLine("    finally:");
                         if (!TryGenerateBranchYaml(
-                                finallyChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                                finallyChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
                         {
                             return false;
                         }
@@ -2042,7 +2082,7 @@ namespace SSH_Helper.Services
                     {
                         sb.AppendLine("        do:");
                         if (!TryGenerateBranchYaml(
-                                caseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 10))
+                                caseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 10))
                         {
                             return false;
                         }
@@ -2060,7 +2100,7 @@ namespace SSH_Helper.Services
                     {
                         sb.AppendLine("    default:");
                         if (!TryGenerateBranchYaml(
-                                defaultChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                                defaultChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
                         {
                             return false;
                         }
@@ -2111,7 +2151,7 @@ namespace SSH_Helper.Services
                     }
 
                     if (!TryGenerateSingleNodeYaml(
-                            branchChain[0], nodeMap, outgoing, incomingCount, consumedByContainer, result, out var branchYaml))
+                            branchChain[0], nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, out var branchYaml))
                     {
                         return false;
                     }
@@ -2174,6 +2214,7 @@ namespace SSH_Helper.Services
             Dictionary<string, int> incomingCount,
             HashSet<string> consumedByContainer,
             FlowCanvasExportResult result,
+            CommentContext commentCtx,
             out string nodeYaml)
         {
             nodeYaml = string.Empty;
@@ -2186,6 +2227,8 @@ namespace SSH_Helper.Services
             var nodeBlockType = nodeData?["blockType"]?.ToString() ?? "print";
             var snippet = nodeProps?["_yamlSnippet"]?.ToString();
             var forceGraphExport = HasForceGraphExport(nodeProps);
+            // Step path for path-keyed comment lookup (imported nodes carry _stepPath; canvas-authored ones don't).
+            var stepPath = nodeProps?["_stepPath"]?.ToString() ?? string.Empty;
 
             if (IsContainerBlockType(nodeBlockType) &&
                 (forceGraphExport ||
@@ -2201,17 +2244,20 @@ namespace SSH_Helper.Services
                         incomingCount,
                         consumedByContainer,
                         result,
+                        commentCtx,
                         out nodeYaml))
                 {
                     return false;
                 }
 
+                nodeYaml = BuildCommentedYaml(nodeYaml, nodeId, stepPath, commentCtx);
                 return true;
             }
 
             if (IsContainerBlockType(nodeBlockType) && !forceGraphExport && !string.IsNullOrWhiteSpace(snippet))
             {
-                nodeYaml = NormalizeTopLevelSnippetIndent(snippet).TrimEnd();
+                nodeYaml = BuildCommentedYaml(
+                    NormalizeTopLevelSnippetIndent(snippet).TrimEnd(), nodeId, stepPath, commentCtx);
                 return true;
             }
 
@@ -2226,7 +2272,27 @@ namespace SSH_Helper.Services
                 return false;
             }
 
+            nodeYaml = BuildCommentedYaml(nodeYaml, nodeId, stepPath, commentCtx);
             return true;
+        }
+
+        /// <summary>
+        /// Prepends any leading comment lines and appends an inline comment to a YAML step string.
+        /// Used when emitting nodes inside container branches, where comments would otherwise be dropped.
+        /// </summary>
+        private static string BuildCommentedYaml(string stepYaml, string nodeId, string stepPath, CommentContext commentCtx)
+        {
+            var leading = commentCtx.GetLeadingComments(nodeId, stepPath);
+            var inline = commentCtx.GetInlineComment(nodeId, stepPath);
+
+            if (leading == null && inline == null)
+                return stepYaml;
+
+            var sb = new StringBuilder();
+            if (leading != null)
+                foreach (var c in leading) sb.AppendLine($"# {c}");
+            sb.Append(AppendInlineComment(stepYaml, inline));
+            return sb.ToString();
         }
 
         /// <summary>
@@ -2239,6 +2305,7 @@ namespace SSH_Helper.Services
             Dictionary<string, int> incomingCount,
             HashSet<string> consumedByContainer,
             FlowCanvasExportResult result,
+            CommentContext commentCtx,
             StringBuilder sb,
             int indent)
         {
@@ -2251,6 +2318,7 @@ namespace SSH_Helper.Services
                         incomingCount,
                         consumedByContainer,
                         result,
+                        commentCtx,
                         out var childYaml))
                 {
                     return false;

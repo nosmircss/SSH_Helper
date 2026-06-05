@@ -3185,6 +3185,197 @@ public class FlowCanvasBridgeTests
         Assert.DoesNotContain("# Sticky visual note", result.Yaml);
     }
 
+    // R1 fix tests — prove comments inside container branches are not dropped.
+    // These tests use the REAL flat comments[] transport shape, not the TextToGraph shortcut.
+
+    [Fact]
+    public void Export_LeadingCommentOnThenBranchNode_EmitsHashLine()
+    {
+        // Canvas-authored comment (flat comments[]) attached to a node inside an if/then branch.
+        // Before the fix, TryGenerateBranchYaml had no access to comment dicts and silently dropped it.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject { ["condition"] = "true" }),
+                CreateBlockNode("then-1", "print", new JObject { ["message"] = "branch msg" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c1",
+                    ["text"] = "branch comment",
+                    ["kind"] = "comment",
+                    ["attachedToNodeId"] = "then-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# branch comment", result.Yaml);
+    }
+
+    [Fact]
+    public void Export_InlineCommentOnThenBranchNode_EmitsHashComment()
+    {
+        // Canvas-authored inline comment (flat comments[]) on a node inside an if/then branch.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject { ["condition"] = "true" }),
+                CreateBlockNode("then-1", "print", new JObject { ["message"] = "branch msg" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c2",
+                    ["text"] = "inline note",
+                    ["kind"] = "comment",
+                    ["attachedToNodeId"] = "then-1",
+                    ["anchor"] = new JObject { ["type"] = "inline" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# inline note", result.Yaml);
+    }
+
+    [Fact]
+    public void Export_CommentOnElseBranchNode_EmitsHashLine()
+    {
+        // Comment on a node inside the else branch must also survive export.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject { ["condition"] = "true" }),
+                CreateBlockNode("then-1", "print", new JObject { ["message"] = "then" }),
+                CreateBlockNode("else-1", "print", new JObject { ["message"] = "else" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+                CreateEdge("if-1", "else-1", branchPath: "else"),
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c3",
+                    ["text"] = "else comment",
+                    ["kind"] = "comment",
+                    ["attachedToNodeId"] = "else-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# else comment", result.Yaml);
+    }
+
+    [Fact]
+    public void Export_CommentOnForeachDoBranchNode_EmitsHashLine()
+    {
+        // Comment on a node inside a foreach/do branch.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("fe-1", "foreach", new JObject { ["iterator"] = "x in ${list}" }),
+                CreateBlockNode("do-1", "print", new JObject { ["message"] = "${x}" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "fe-1"),
+                CreateEdge("fe-1", "do-1", branchPath: "do"),
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c4",
+                    ["text"] = "foreach body",
+                    ["kind"] = "comment",
+                    ["attachedToNodeId"] = "do-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# foreach body", result.Yaml);
+    }
+
+    [Fact]
+    public void Export_StickyOnBranchNode_IsNotEmitted()
+    {
+        // A sticky kind comment inside a branch must remain visual-only and not inject a # line.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject { ["condition"] = "true" }),
+                CreateBlockNode("then-1", "print", new JObject { ["message"] = "branch msg" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "s1",
+                    ["text"] = "sticky branch note",
+                    ["kind"] = "sticky",
+                    ["attachedToNodeId"] = "then-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.DoesNotContain("# sticky branch note", result.Yaml);
+    }
+
     private static JObject CreateEdge(
         string source,
         string target,
