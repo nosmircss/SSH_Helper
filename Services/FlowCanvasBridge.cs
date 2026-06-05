@@ -1214,19 +1214,6 @@ namespace SSH_Helper.Services
                 // Single source for this step's comment anchor across all emission branches.
                 var stepPathForComments = result.NodeToStepPathMap.TryGetValue(nodeId, out var sp) ? sp : existingStepPath ?? "";
 
-                // Merge leading comments: byNode (authored canvas) + byPath (imported). Each comment lands in
-                // exactly one dictionary (byNode when attachedToNodeId present, byPath otherwise), so no duplicates.
-                IEnumerable<string>? GetLeadingComments()
-                {
-                    var byNode = leadingByNode.GetValueOrDefault(nodeId);
-                    var byPath = leadingByPath.GetValueOrDefault(stepPathForComments);
-                    if (byNode == null) return byPath;
-                    if (byPath == null) return byNode;
-                    return byNode.Concat(byPath);
-                }
-                string? GetInlineComment() =>
-                    inlineByNode.GetValueOrDefault(nodeId) ?? inlineByPath.GetValueOrDefault(stepPathForComments);
-
                 // Container blocks authored visually (branch metadata -> non-child targets)
                 // should be regenerated from graph structure even when a stale snippet exists.
                 // Also regenerate when the user has modified an imported container's branches
@@ -1247,8 +1234,8 @@ namespace SSH_Helper.Services
                             blockType, props, nodeId, outgoing, nodeMap, incomingCount,
                             consumedByContainer, result, commentCtx, out var containerYaml))
                     {
-                        AppendLeadingComments(sb, GetLeadingComments(), 0);
-                        sb.AppendLine(AppendInlineComment(containerYaml, GetInlineComment()));
+                        AppendLeadingComments(sb, commentCtx.GetLeadingComments(nodeId, stepPathForComments), 0);
+                        sb.AppendLine(AppendInlineComment(containerYaml, commentCtx.GetInlineComment(nodeId, stepPathForComments)));
                         continue;
                     }
                 }
@@ -1262,8 +1249,8 @@ namespace SSH_Helper.Services
                         ExportDiagnosticSeverity.Warning,
                         $"Container block '{blockType}' is exported from its stored YAML snippet.",
                         nodeId));
-                    AppendLeadingComments(sb, GetLeadingComments(), 0);
-                    var injected = AppendInlineComment(normalizedSnippet, GetInlineComment());
+                    AppendLeadingComments(sb, commentCtx.GetLeadingComments(nodeId, stepPathForComments), 0);
+                    var injected = AppendInlineComment(normalizedSnippet, commentCtx.GetInlineComment(nodeId, stepPathForComments));
                     sb.Append(injected);
                     if (!injected.EndsWith("\n"))
                         sb.AppendLine();
@@ -1272,8 +1259,8 @@ namespace SSH_Helper.Services
 
                 if (TryGenerateStepYaml(blockType, props, out var generatedYaml, out var error))
                 {
-                    AppendLeadingComments(sb, GetLeadingComments(), 0);
-                    sb.AppendLine(AppendInlineComment(generatedYaml, GetInlineComment()));
+                    AppendLeadingComments(sb, commentCtx.GetLeadingComments(nodeId, stepPathForComments), 0);
+                    sb.AppendLine(AppendInlineComment(generatedYaml, commentCtx.GetInlineComment(nodeId, stepPathForComments)));
                 }
                 else
                 {
@@ -4497,12 +4484,6 @@ namespace SSH_Helper.Services
             return t.TrimEnd();
         }
 
-        /// <summary>
-        /// Splits YAML text into individual top-level step snippets.
-        /// Each snippet is the complete YAML text for one step (including nested blocks).
-        /// Also records blank lines between steps, leading standalone comments, and an
-        /// optional inline trailing comment stripped from the step's first content line.
-        /// </summary>
         /// <summary>
         /// Splits YAML text into individual top-level step snippets.
         /// Each snippet is the complete YAML text for one step (including nested blocks).
