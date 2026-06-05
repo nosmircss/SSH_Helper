@@ -41,12 +41,13 @@ describe('computeHierarchicalLayout anchored comments', () => {
     expect(cElse.position.y).toBeLessThan(elseChild.position.y);
   });
 
-  it('places a branch-top comment ABOVE the band header (clear of the branch label)', () => {
+  it('places a BRANCH comment above the band header and a LEADING comment inside (above the block)', () => {
     const nodes = [
       { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', props: {} } },
       { id: 'if1', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'if', props: { condition: 'a', _stepPath: 'steps/0' } } },
       { id: 'elseChild', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'e', _isChildOf: 'if1', _stepPath: 'steps/0/else/0', _branchLabel: 'else' } } },
-      { id: 'cElse', type: 'comment', position: { x: 0, y: 0 }, data: { commentId: 'cElse', kind: 'comment', text: 'x', anchor: { type: 'leading', stepPath: 'steps/0/else/0' }, attachedToNodeId: 'elseChild' } },
+      { id: 'cBranch', type: 'comment', position: { x: 0, y: 0 }, data: { commentId: 'cBranch', kind: 'comment', text: 'b', anchor: { type: 'branch', stepPath: 'steps/0/else/0' }, attachedToNodeId: 'elseChild' } },
+      { id: 'cLead', type: 'comment', position: { x: 0, y: 0 }, data: { commentId: 'cLead', kind: 'comment', text: 'l', anchor: { type: 'leading', stepPath: 'steps/0/else/0' }, attachedToNodeId: 'elseChild' } },
     ];
     const edges = [
       { id: 'e0', source: '__start__', target: 'if1' },
@@ -54,9 +55,12 @@ describe('computeHierarchicalLayout anchored comments', () => {
     ];
     const out = computeHierarchicalLayout(nodes as never, edges as never, DEFAULT_BLOCK_SIZING);
     const elseChild = out.find((n) => n.id === 'elseChild')!;
-    const cElse = out.find((n) => n.id === 'cElse')!;
-    // band top = elseChild.y - BAND_PAD(18) - BAND_LABEL_HEADROOM(12); pill must be at/above it.
-    expect(cElse.position.y).toBeLessThanOrEqual(elseChild.position.y - 30);
+    const cBranch = out.find((n) => n.id === 'cBranch')!;
+    const cLead = out.find((n) => n.id === 'cLead')!;
+    // leading sits just above the block (inside the band, which grows to wrap it)
+    expect(cLead.position.y).toBe(elseChild.position.y - 28);
+    // branch sits above the (grown) band header: blockY - L*28 - BAND_PAD(18) - HEADROOM(12) - 28
+    expect(cBranch.position.y).toBeLessThan(cLead.position.y - 30);
   });
 
   it('reserves vertical space so a commented block sits lower than an uncommented one', () => {

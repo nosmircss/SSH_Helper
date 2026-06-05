@@ -2586,13 +2586,14 @@ public class FlowCanvasBridgeTests
         "        then:\n" +
         "          - print:\n" +
         "              message: \"did it\"\n" +
-        "      # nothing to do\n" +
-        "      else: \n" +   // trailing space after the branch keyword (matches real-world YAML)
+        "      # nothing to do\n" +    // ABOVE the keyword -> annotates the branch
+        "      else: \n" +             // trailing space after the keyword (matches real-world YAML)
+        "        # print\n" +          // BELOW the keyword, inside the body -> annotates the step
         "        - print:\n" +
         "            message: \"nope\"\n";
 
     [Fact]
-    public void TextToGraph_NestedLeadingComment_EmitsCommentNodeAnchoredToBranchChild()
+    public void TextToGraph_NestedComments_SplitIntoBranchAndLeadingAnchors()
     {
         var bridge = new FlowCanvasBridge();
         var (nodes, _) = bridge.TextToGraph(NestedCommentYaml);
@@ -2600,25 +2601,34 @@ public class FlowCanvasBridgeTests
         var elseChild = nodes.OfType<JObject>().FirstOrDefault(n =>
             n["data"]?["props"]?["_branchLabel"]?.ToString() == "else");
         Assert.NotNull(elseChild);
+        var elseId = elseChild!["id"]!.ToString();
 
-        var nested = nodes.OfType<JObject>().FirstOrDefault(n =>
-            n["data"]?["blockType"]?.ToString() == "comment" &&
+        // Comment ABOVE the 'else:' keyword annotates the branch -> anchor 'branch' (renders above band).
+        var aboveKeyword = nodes.OfType<JObject>().FirstOrDefault(n =>
             n["data"]?["text"]?.ToString() == "nothing to do");
-        Assert.NotNull(nested);
-        Assert.Equal("leading", nested!["data"]?["anchor"]?["type"]?.ToString());
-        Assert.Equal(elseChild!["id"]!.ToString(), nested["data"]?["attachedToNodeId"]?.ToString());
+        Assert.NotNull(aboveKeyword);
+        Assert.Equal("branch", aboveKeyword!["data"]?["anchor"]?["type"]?.ToString());
+        Assert.Equal(elseId, aboveKeyword["data"]?["attachedToNodeId"]?.ToString());
+
+        // Comment BELOW the keyword (inside the body) annotates the step -> anchor 'leading' (inside band).
+        var insideBody = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["text"]?.ToString() == "print");
+        Assert.NotNull(insideBody);
+        Assert.Equal("leading", insideBody!["data"]?["anchor"]?["type"]?.ToString());
+        Assert.Equal(elseId, insideBody["data"]?["attachedToNodeId"]?.ToString());
     }
 
     [Fact]
-    public void RoundTrip_NestedLeadingComment_PreservedExactlyOnce()
+    public void RoundTrip_NestedComments_PreservedExactlyOnce()
     {
         var result = RoundTripThroughBridge(NestedCommentYaml);
         Assert.True(result.Success, string.Join(" | ", result.Errors));
         Assert.Equal(1, CountOccurrences(result.Yaml, "# nothing to do"));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# print"));
     }
 
     [Fact]
-    public void Export_NestedLeadingComment_SurvivesContainerRegenerationExactlyOnce()
+    public void Export_NestedComments_SurviveContainerRegenerationExactlyOnce()
     {
         var bridge = new FlowCanvasBridge();
         var (nodes, edges) = bridge.TextToGraph(NestedCommentYaml);
@@ -2633,6 +2643,7 @@ public class FlowCanvasBridgeTests
         var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
         Assert.True(result.Success, string.Join(" | ", result.Errors));
         Assert.Equal(1, CountOccurrences(result.Yaml, "# nothing to do"));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# print"));
     }
 
     private static int CountOccurrences(string haystack, string needle)

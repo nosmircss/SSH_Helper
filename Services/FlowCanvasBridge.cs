@@ -636,30 +636,36 @@ namespace SSH_Helper.Services
             trimmed is "then:" or "else:" or "do:" or "catch:" or "finally:" or "default:";
 
         /// <summary>
-        /// Collects the "#" comment lines immediately preceding a nested step (located by its
-        /// 1-indexed LineNumber) in the original YAML. For the first step in a branch, a single
-        /// branch-keyword line (then:/else:/do:/...) is skipped so a comment written above the
-        /// keyword attaches to that branch. These comments ALSO remain verbatim in the container
-        /// snippet (round-trip export emits them from there); the container-regeneration export
-        /// path re-injects them from the emitted comment node — never both, so no duplication.
+        /// Collects the "#" comment lines preceding a nested step (located by its 1-indexed
+        /// LineNumber), SPLIT by the branch keyword: comments BELOW the keyword (inside the branch
+        /// body, directly above this step) are "leading" (render inside the band, above the block);
+        /// comments ABOVE the keyword (e.g. before "else:") are "branch" (annotate the branch,
+        /// render above the band). Only the branch's first step crosses the keyword. These comments
+        /// also remain verbatim in the container snippet (round-trip export emits them from there);
+        /// the container-regeneration path re-injects them from the emitted nodes — never both.
+        /// Trims both ends so a trailing space after a keyword (e.g. "else: ") still matches.
         /// </summary>
-        private List<string> CollectNestedLeadingComments(int lineNumber1, bool isFirstInBranch)
+        private (List<string> leading, List<string> branch) CollectNestedComments(int lineNumber1, bool isFirstInBranch)
         {
-            var result = new List<string>();
-            if (_yamlLines == null || lineNumber1 <= 1) return result;
+            var leading = new List<string>();
+            var branch = new List<string>();
+            if (_yamlLines == null || lineNumber1 <= 1) return (leading, branch);
             int i = lineNumber1 - 2; // line directly above the step (0-indexed)
-            bool skippedKeyword = false;
+            bool crossedKeyword = false;
             while (i >= 0)
             {
-                // Trim BOTH ends: real-world YAML often has a trailing space after a branch
-                // keyword (e.g. "else: "), which must still match IsBranchKeyword.
                 var t = _yamlLines[i].Trim();
                 if (t.Length == 0) { i--; continue; }
-                if (t.StartsWith("#")) { result.Insert(0, StripHash(t)); i--; continue; }
-                if (isFirstInBranch && !skippedKeyword && IsBranchKeyword(t)) { skippedKeyword = true; i--; continue; }
+                if (t.StartsWith("#"))
+                {
+                    var text = StripHash(t);
+                    if (crossedKeyword) branch.Insert(0, text); else leading.Insert(0, text);
+                    i--; continue;
+                }
+                if (isFirstInBranch && !crossedKeyword && IsBranchKeyword(t)) { crossedKeyword = true; i--; continue; }
                 break;
             }
-            return result;
+            return (leading, branch);
         }
 
         private List<string> ExpandMultiBranch(
@@ -746,13 +752,17 @@ namespace SSH_Helper.Services
                 };
                 nodes.Add(childNode);
 
-                // Surface branch-internal leading comments as anchored pills (Task 5b). The text
-                // is NOT stripped from the container snippet, so round-trip export keeps it in place;
-                // regeneration re-injects it from this node (see CollectNestedLeadingComments).
+                // Surface branch-internal comments as anchored pills (Task 5b). Comments inside the
+                // branch body render INSIDE the band ("leading"); comments above the branch keyword
+                // render ABOVE the band ("branch"). Text is NOT stripped from the container snippet,
+                // so round-trip export keeps it; regeneration re-injects from these nodes.
                 if (childStep.LineNumber > 0)
                 {
-                    foreach (var nc in CollectNestedLeadingComments(childStep.LineNumber, childIndex == 0))
+                    var (ncLeading, ncBranch) = CollectNestedComments(childStep.LineNumber, childIndex == 0);
+                    foreach (var nc in ncLeading)
                         nodes.Add(BuildCommentNode(nc, "leading", childStepPath, childNodeId));
+                    foreach (var nc in ncBranch)
+                        nodes.Add(BuildCommentNode(nc, "branch", childStepPath, childNodeId));
                 }
 
                 // Create edge from previous node to this child

@@ -2,7 +2,6 @@ import type { Edge, Node } from '@xyflow/react';
 import { buildLayoutTree } from './treeBuilder';
 import type { LayoutBranch, LayoutTree, LayoutTreeNode, Point } from './types';
 import { estimateNodeHeight, COLLAPSED_HEIGHT, BAND_PAD, BAND_LABEL_HEADROOM, BLOCK_WIDTH_INSET } from '../nodeSize';
-import { branchKeyFromStepPath } from '../branchBands';
 
 /** Single source of truth for layout spacing (ported from FlowCanvasBridge.cs). */
 export const LAYOUT = {
@@ -214,54 +213,43 @@ export function placeTree(tree: LayoutTree): Map<string, Point> {
  * comment sitting on top of a block, where its DOM then swallows clicks meant for that block.
  * Park comments in a gutter to the right of the widest placed node so they never overlap.
  */
-/** The top (band-header) child of each branch group — a comment anchored to it must sit ABOVE
- *  the branch band, clear of the branch label, not between the label and the block. Keyed by the
- *  min-Y member of each (_isChildOf, branchKey) group. */
-function computeBandTopIds(nodes: Node[], pos: Map<string, Point>): Set<string> {
-  const groupMinY = new Map<string, { id: string; y: number }>();
-  for (const n of nodes) {
-    if (n.type === 'comment') continue;
-    const props = (n.data as { props?: Record<string, unknown> } | undefined)?.props;
-    const parentId = props?.['_isChildOf'] as string | undefined;
-    if (!parentId) continue;
-    const p = pos.get(n.id);
-    if (!p) continue;
-    const branchKey = branchKeyFromStepPath(
-      props?.['_stepPath'] as string | undefined,
-      props?.['_branchLabel'] as string | undefined,
-    );
-    const key = `${parentId}::${branchKey}`;
-    const cur = groupMinY.get(key);
-    if (!cur || p.y < cur.y) groupMinY.set(key, { id: n.id, y: p.y });
-  }
-  return new Set([...groupMinY.values()].map((v) => v.id));
-}
-
 function placeComments(nodes: Node[], pos: Map<string, Point>): void {
   const comments = nodes.filter((n) => n.type === 'comment');
   if (comments.length === 0 || pos.size === 0) return;
   const gutterX = Math.max(...[...pos.values()].map((p) => p.x)) + activeSizing.columnWidth;
   let gutterY = LAYOUT.NODE_START_Y;
-  const bandTopIds = computeBandTopIds(nodes, pos);
-  // Stack multiple comments anchored to the same block upward.
-  const anchoredSibling = new Map<string, number>();
+
+  // 'leading'/'header' comments stack directly above their block (the band, if any, grows to wrap
+  // them — see computeBranchBands). 'branch' comments annotate the whole branch and sit ABOVE the
+  // band header, which is itself above any leading pills — so they need the leading count.
+  const leadingCount = new Map<string, number>();
+  for (const c of comments) {
+    const d = c.data as Record<string, unknown> | undefined;
+    const at = d?.attachedToNodeId as string | undefined;
+    if (at && (d?.anchor as { type?: string } | undefined)?.type === 'leading') {
+      leadingCount.set(at, (leadingCount.get(at) ?? 0) + 1);
+    }
+  }
+
+  const leadingSib = new Map<string, number>();
+  const branchSib = new Map<string, number>();
   for (const c of comments) {
     const data = c.data as Record<string, unknown> | undefined;
-    const anchor = data?.anchor as { type?: string } | undefined;
+    const anchor = (data?.anchor as { type?: string } | undefined)?.type;
     const attachedTo = data?.attachedToNodeId as string | undefined;
     const targetPos = attachedTo ? pos.get(attachedTo) : undefined;
 
-    // Anchored (leading/header) comments ride above their block — this must hold on EVERY layout
-    // pass (auto-layout, sizing/density reflow, settings restore), not only import. When the target
-    // is a branch's top child, sit above the branch BAND header (clear of the branch label) instead
-    // of between the label and the block. Free stickies stay in the gutter.
-    if (targetPos && (anchor?.type === 'leading' || anchor?.type === 'header')) {
-      const idx = anchoredSibling.get(attachedTo!) ?? 0;
-      anchoredSibling.set(attachedTo!, idx + 1);
-      const baseY = bandTopIds.has(attachedTo!)
-        ? targetPos.y - BAND_PAD - BAND_LABEL_HEADROOM // above the branch band header
-        : targetPos.y;                                  // above the block itself
-      pos.set(c.id, { x: targetPos.x, y: baseY - COMMENT_PILL_STEP * (idx + 1) });
+    if (targetPos && (anchor === 'leading' || anchor === 'header')) {
+      const idx = leadingSib.get(attachedTo!) ?? 0;
+      leadingSib.set(attachedTo!, idx + 1);
+      pos.set(c.id, { x: targetPos.x, y: targetPos.y - COMMENT_PILL_STEP * (idx + 1) });
+    } else if (targetPos && anchor === 'branch') {
+      const idx = branchSib.get(attachedTo!) ?? 0;
+      branchSib.set(attachedTo!, idx + 1);
+      const L = leadingCount.get(attachedTo!) ?? 0;
+      // Band top after it has grown up to wrap the L leading pills above the block.
+      const bandTop = targetPos.y - L * COMMENT_PILL_STEP - BAND_PAD - BAND_LABEL_HEADROOM;
+      pos.set(c.id, { x: targetPos.x, y: bandTop - COMMENT_PILL_STEP * (idx + 1) });
     } else {
       pos.set(c.id, { x: gutterX, y: gutterY });
       gutterY += activeSizing.nodeSpacingY;
@@ -288,7 +276,7 @@ export function computeHierarchicalLayout(nodes: Node[], edges: Edge[], sizing: 
     const data = n.data as Record<string, unknown> | undefined;
     const anchor = data?.anchor as { type?: string } | undefined;
     const attachedTo = data?.attachedToNodeId as string | undefined;
-    if (attachedTo && (anchor?.type === 'leading' || anchor?.type === 'header')) {
+    if (attachedTo && (anchor?.type === 'leading' || anchor?.type === 'header' || anchor?.type === 'branch')) {
       commentReserveByTarget.set(attachedTo, (commentReserveByTarget.get(attachedTo) ?? 0) + 1);
     }
   }

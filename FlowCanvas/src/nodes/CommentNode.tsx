@@ -4,7 +4,7 @@ import { useFlowStore } from '../stores/useFlowStore';
 import { DEFAULT_COMMENT_COLOR } from '../utils/tokens';
 
 export interface NoteAnchor {
-  type: 'header' | 'leading' | 'inline';
+  type: 'header' | 'leading' | 'inline' | 'branch';
   stepPath?: string;
   lineOffset?: number;
 }
@@ -28,7 +28,7 @@ function CommentNode({ data, id }: NodeProps) {
   const kind = (commentData.kind as 'comment' | 'sticky' | undefined) ?? 'sticky';
   const anchorType = commentData.anchor?.type;
   const isComment = kind === 'comment';
-  const renderPill = compact && isComment && (anchorType === 'leading' || anchorType === 'header');
+  const renderPill = compact && isComment && (anchorType === 'leading' || anchorType === 'header' || anchorType === 'branch');
 
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(commentData.text || '');

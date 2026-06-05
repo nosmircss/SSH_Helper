@@ -111,6 +111,18 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
   const stepPathById = new Map<string, string | undefined>();
   for (const n of nodes) stepPathById.set(n.id, stepPathOf(n));
 
+  // 'leading' comment pills sit just above their block and must be WRAPPED by the band (so the
+  // band label lands above the pill, not over it). 'branch'/'header' pills sit OUTSIDE the band
+  // and are excluded.
+  const leadingPillsByTarget = new Map<string, Node[]>();
+  for (const n of nodes) {
+    if (n.type !== 'comment') continue;
+    const d = n.data as { anchor?: { type?: string }; attachedToNodeId?: string } | undefined;
+    if (d?.anchor?.type !== 'leading' || !d.attachedToNodeId) continue;
+    const list = leadingPillsByTarget.get(d.attachedToNodeId);
+    if (list) list.push(n); else leadingPillsByTarget.set(d.attachedToNodeId, [n]);
+  }
+
   // Resolve a child's branch (key + subtree prefix) RELATIVE to its immediate container so a
   // compound branch like elif (path '.../elif/N/then/M') keys as 'elif' instead of the trailing
   // 'then' an end-walk returns. Falls back to the self-contained end-walk when the parent node
@@ -175,6 +187,12 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
       minY = Math.min(minY, n.position.y);
       maxX = Math.max(maxX, n.position.x + w);
       maxY = Math.max(maxY, n.position.y + h);
+      // Include this node's leading comment pills so the band grows up to wrap them.
+      for (const cm of leadingPillsByTarget.get(n.id) ?? []) {
+        minX = Math.min(minX, cm.position.x);
+        minY = Math.min(minY, cm.position.y);
+        maxX = Math.max(maxX, cm.position.x + childWidth);
+      }
     }
     const firstProps = (g.nodes[0]?.data as { props?: Record<string, unknown> } | undefined)?.props;
     const depth = branchDepth(firstProps?.['_stepPath'] as string | undefined);
