@@ -3,6 +3,8 @@ import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
 import { messageBus } from '../../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
+import { computeHierarchicalLayout } from '../../utils/layout/hierarchicalLayout';
+import { selectCanvasSizing } from './settingsSlice';
 
 export interface PanelSizes {
   rightPanelWidth: number;
@@ -138,11 +140,14 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   }),
   restoreBranchBands: (value) => set({ branchBandsEnabled: value }),
 
-  toggleCompactComments: () => set((s) => {
-    const next = !s.compactCommentsEnabled;
+  toggleCompactComments: () => {
+    const next = !get().compactCommentsEnabled;
     messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, compactCommentsEnabled: next });
-    return { compactCommentsEnabled: next };
-  }),
+    set({ compactCommentsEnabled: next });
+    // Comment height changes (pill <-> card), so reflow to re-reserve their vertical space.
+    const st = get();
+    if (st.nodes.length > 0) st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, selectCanvasSizing(st)));
+  },
   restoreCompactComments: (value) => set({ compactCommentsEnabled: value }),
 
   toggleSnapToGrid: () => set((s) => {
