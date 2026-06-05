@@ -29,10 +29,9 @@ export const createCommentSlice: StateCreator<FlowStore, [], [], CommentSlice> =
         kind: kind ?? 'sticky',
         ...(attachedToNodeId ? { anchor: { type: 'leading' as const } } : {}),
       },
-      style: {
-        width: 200,
-        height: 100,
-      },
+      // No fixed width/height: comments render as fit-content pills/cards, so React Flow auto-measures
+      // the visible card. A fixed box would create an oversized invisible hit area that hijacks drags
+      // meant for the block beneath or the branch-band handle (see utils/displayNodes.ts).
     };
     set((s) => ({ nodes: [...s.nodes, commentNode] }));
     // A space-reserving comment (leading/header/branch) needs the layout to make room above its

@@ -23,6 +23,7 @@ import StartNode from './nodes/StartNode';
 import AnimatedEdge from './nodes/AnimatedEdge';
 import { EdgeMarkers } from './nodes/EdgeMarkers';
 import BranchBandsLayer from './nodes/BranchBandsLayer';
+import { contentSizeComment, orderCommentsBehind } from './utils/displayNodes';
 import Palette from './panels/Palette';
 import Properties from './panels/Properties';
 import RightPanel from './panels/RightPanel';
@@ -319,14 +320,17 @@ function FlowCanvasInner() {
     : null;
 
   // Add visual selection and search highlight to nodes
-  const displayNodes = nodes.map((n) => ({
-    ...n,
+  // contentSizeComment strips comments' oversized fixed hit box so RF auto-measures the card;
+  // orderCommentsBehind renders comments behind blocks so a block always wins a pointer overlap.
+  // Together these stop a comment from hijacking drags meant for its block or the branch-band handle.
+  const displayNodes = orderCommentsBehind(nodes.map((n) => ({
+    ...contentSizeComment(n),
     selected: selectedNodeIds.has(n.id),
     className: [
       searchHighlightSet.has(n.id) ? 'search-match' : '',
       n.id === highlightedNodeId ? 'search-current' : '',
     ].filter(Boolean).join(' ') || undefined,
-  }));
+  })));
 
   // Canvas ships dark-only; values come from the token layer (styles/tokens.css).
   const canvasBg = 'var(--fc-canvas-bg)';
