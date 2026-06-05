@@ -219,10 +219,6 @@ namespace SSH_Helper
         private Label? _btnPresetSearchClear;
         private System.Windows.Forms.Timer? _presetSearchDebounceTimer;
 
-        // Canvas layout structure check
-        private System.Windows.Forms.Timer? _canvasLayoutCheckTimer;
-        private PresetHeaderIndicatorFormatter.CanvasLayoutState _canvasLayoutState;
-
         // Find dialog state
         private FindDialog? _findDialog;
         private string _lastFindTerm = "";
@@ -2414,62 +2410,8 @@ namespace SSH_Helper
                 currentPresetName,
                 isDirty);
 
-            // Immediately determine if canvas layout exists (cheap null check).
-            // If dirty, schedule a debounced structure hash check.
-            var hasLayout = !string.IsNullOrEmpty(_activePresetName)
-                && _presetManager.Get(_activePresetName)?.CanvasLayout != null;
-
-            if (!hasLayout)
-            {
-                _canvasLayoutState = PresetHeaderIndicatorFormatter.CanvasLayoutState.None;
-                _canvasLayoutCheckTimer?.Stop();
-            }
-            else if (!isDirty)
-            {
-                _canvasLayoutState = PresetHeaderIndicatorFormatter.CanvasLayoutState.Saved;
-                _canvasLayoutCheckTimer?.Stop();
-            }
-            else
-            {
-                // Dirty + has layout → debounce the structure hash check
-                ScheduleCanvasLayoutCheck();
-            }
-
-            lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty, _canvasLayoutState);
+            lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty);
             btnSavePreset.Text = PresetHeaderIndicatorFormatter.FormatSaveButtonLabel(isDirty);
-            ReflowScriptHeader();
-        }
-
-        private void ScheduleCanvasLayoutCheck()
-        {
-            if (_canvasLayoutCheckTimer == null)
-            {
-                _canvasLayoutCheckTimer = new System.Windows.Forms.Timer { Interval = 500 };
-                _canvasLayoutCheckTimer.Tick += (_, _) =>
-                {
-                    _canvasLayoutCheckTimer.Stop();
-                    CheckCanvasLayoutStructure();
-                };
-            }
-            _canvasLayoutCheckTimer.Stop();
-            _canvasLayoutCheckTimer.Start();
-        }
-
-        private void CheckCanvasLayoutStructure()
-        {
-            if (string.IsNullOrEmpty(_activePresetName)) return;
-
-            var preset = _presetManager.Get(_activePresetName);
-            var storedHash = preset?.CanvasLayout?.StructureHash;
-            if (string.IsNullOrEmpty(storedHash)) return;
-
-            var currentHash = FlowCanvasBridge.ComputeStructureHashFromYaml(txtCommand.Text);
-            _canvasLayoutState = currentHash != null && string.Equals(currentHash, storedHash, StringComparison.Ordinal)
-                ? PresetHeaderIndicatorFormatter.CanvasLayoutState.Saved
-                : PresetHeaderIndicatorFormatter.CanvasLayoutState.WillReset;
-
-            var isDirty = IsPresetDirty();
-            lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty, _canvasLayoutState);
             ReflowScriptHeader();
         }
 
@@ -15289,8 +15231,6 @@ namespace SSH_Helper
         /// </summary>
         private void CleanupSchedulerServices()
         {
-            _canvasLayoutCheckTimer?.Stop();
-            _canvasLayoutCheckTimer?.Dispose();
             _statusBarTimer?.Stop();
             _statusBarTimer?.Dispose();
             if (_jobExecutionService != null)
