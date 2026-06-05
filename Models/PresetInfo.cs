@@ -48,6 +48,12 @@ namespace SSH_Helper.Models
         public CanvasLayoutData? CanvasLayout { get; set; }
 
         /// <summary>
+        /// Per-preset Flow Canvas layout mode. Null = inherit the global default
+        /// (WindowState.FlowCanvasDefaultLayoutMode, itself defaulting to AutoFlow).
+        /// </summary>
+        public LayoutMode? LayoutMode { get; set; }
+
+        /// <summary>
         /// Gets the type of this preset (auto-detected from content).
         /// </summary>
         [JsonIgnore]
@@ -69,7 +75,8 @@ namespace SSH_Helper.Models
                 Timeout = Timeout,
                 IsFavorite = IsFavorite,
                 Folder = Folder,
-                CanvasLayout = CanvasLayout?.Clone()
+                CanvasLayout = CanvasLayout?.Clone(),
+                LayoutMode = LayoutMode
             };
         }
 
