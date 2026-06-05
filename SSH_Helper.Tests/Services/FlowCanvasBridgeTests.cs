@@ -3634,4 +3634,34 @@ public class FlowCanvasBridgeSplitYamlStepsTests
         Assert.Equal(line, code);
         Assert.Equal(string.Empty, comment);
     }
+
+    // R4 fix tests — Finding 1: TrySplitTrailingComment must not treat \" as a string boundary.
+    // A backslash-escaped double-quote inside a YAML double-quoted string must NOT prematurely
+    // close the string, causing a subsequent whitespace + '#' to be mis-read as a trailing comment.
+
+    [Fact]
+    public void TrySplitTrailingComment_BackslashEscapedDoubleQuoteWithHash_NotSplit()
+    {
+        // command: "echo \" # note"
+        // The \" is a YAML double-quote escape; the # is still inside the double-quoted string.
+        // Before the fix, the scanner would flip inDouble=false on the backslash-escaped ", then
+        // treat the subsequent " # note" fragment as outside the string and split on the #.
+        var line = @"command: ""echo \"" # note""";
+        var split = FlowCanvasBridge.TrySplitTrailingComment(line, out var code, out var comment);
+        Assert.False(split, "# is inside the double-quoted string after a backslash-escaped quote — must not split.");
+        Assert.Equal(line, code);
+        Assert.Equal(string.Empty, comment);
+    }
+
+    [Fact]
+    public void TrySplitTrailingComment_BackslashEscapedDoubleQuoteThenRealComment_SplitsCorrectly()
+    {
+        // command: "echo \"ok\""  # real trailing comment
+        // The \" pairs are escapes; the # after the closing " is a genuine trailing comment.
+        var line = @"command: ""echo \""ok\"""" # real note";
+        var split = FlowCanvasBridge.TrySplitTrailingComment(line, out var code, out var comment);
+        Assert.True(split, "Should detect the trailing comment after the closing double-quote.");
+        Assert.Equal(@"command: ""echo \""ok\""""", code);
+        Assert.Equal("real note", comment);
+    }
 }

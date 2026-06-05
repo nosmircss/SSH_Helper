@@ -4483,7 +4483,12 @@ namespace SSH_Helper.Services
                     else
                         inSingle = !inSingle;
                 }
-                else if (c == '"' && !inSingle) inDouble = !inDouble;
+                else if (c == '"' && !inSingle)
+                {
+                    // Skip toggling when the double-quote is backslash-escaped (YAML \" escape).
+                    if (i == 0 || line[i - 1] != '\\')
+                        inDouble = !inDouble;
+                }
                 else if (c == '#' && !inSingle && !inDouble && i > 0 && char.IsWhiteSpace(line[i - 1]))
                 {
                     comment = StripHash(line.Substring(i));
