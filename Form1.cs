@@ -2505,6 +2505,7 @@ namespace SSH_Helper
                 layout.Comments.Clear();
                 foreach (var c in comments)
                 {
+                    var anchorToken = c["anchor"] as JObject;
                     layout.Comments.Add(new Models.CanvasComment
                     {
                         Id = c["id"]?.ToString() ?? "",
@@ -2515,6 +2516,13 @@ namespace SSH_Helper
                         Width = c["width"]?.Value<double>() ?? 200,
                         Height = c["height"]?.Value<double>() ?? 100,
                         AttachedToNodeId = c["attachedToNodeId"]?.ToString(),
+                        Kind = c["kind"]?.ToString(),
+                        Anchor = anchorToken == null ? null : new Models.CanvasCommentAnchor
+                        {
+                            Type = anchorToken["type"]?.ToString(),
+                            StepPath = anchorToken["stepPath"]?.ToString(),
+                            LineOffset = anchorToken["lineOffset"]?.Value<int>(),
+                        },
                     });
                 }
             }

@@ -55,6 +55,13 @@ namespace SSH_Helper.Models
                     Width = c.Width,
                     Height = c.Height,
                     AttachedToNodeId = c.AttachedToNodeId,
+                    Kind = c.Kind,
+                    Anchor = c.Anchor == null ? null : new CanvasCommentAnchor
+                    {
+                        Type = c.Anchor.Type,
+                        StepPath = c.Anchor.StepPath,
+                        LineOffset = c.Anchor.LineOffset,
+                    },
                 }).ToList(),
                 DisabledBlockIds = new List<string>(DisabledBlockIds),
                 ExpandedNodeIds = new List<string>(ExpandedNodeIds),
@@ -78,5 +85,20 @@ namespace SSH_Helper.Models
         public double Width { get; set; } = 200;
         public double Height { get; set; } = 100;
         public string? AttachedToNodeId { get; set; }
+        /// <summary>
+        /// 'comment' (exports as a # line) or 'sticky' (visual-only). Defaults to 'sticky' when absent.
+        /// </summary>
+        public string? Kind { get; set; }
+        /// <summary>
+        /// Anchor describing how the comment attaches to a specific step position.
+        /// </summary>
+        public CanvasCommentAnchor? Anchor { get; set; }
+    }
+
+    public class CanvasCommentAnchor
+    {
+        public string? Type { get; set; }
+        public string? StepPath { get; set; }
+        public int? LineOffset { get; set; }
     }
 }

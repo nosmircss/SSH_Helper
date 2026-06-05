@@ -33,6 +33,10 @@ function doSend(): void {
         width: (node.style?.width as number) ?? 200,
         height: (node.style?.height as number) ?? 100,
         attachedToNodeId: data?.attachedToNodeId ? String(data.attachedToNodeId) : undefined,
+        kind: typeof data?.kind === 'string' ? data.kind : undefined,
+        anchor: (data?.anchor && typeof data.anchor === 'object')
+          ? (data.anchor as { type: string; stepPath?: string; lineOffset?: number })
+          : undefined,
       });
     } else {
       positions[node.id] = {

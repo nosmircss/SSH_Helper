@@ -5201,26 +5201,62 @@ namespace SSH_Helper.Services
                 }
             }
 
-            // Append comment nodes
+            // Build a set of existing comment node IDs to avoid duplicating TextToGraph-emitted nodes.
+            var existingCommentIds = new HashSet<string>(
+                nodes.Select(n => n["id"]?.ToString()).Where(id => id != null)!,
+                StringComparer.Ordinal);
+
+            // Merge comment nodes: reconcile position/data onto existing nodes, append new ones.
             foreach (var comment in layout.Comments)
             {
-                var commentNode = new JObject
+                // Build the data object (shared for both reconcile and new-node paths)
+                var data = new JObject
                 {
-                    ["id"] = comment.Id,
-                    ["type"] = "comment",
-                    ["position"] = new JObject { ["x"] = comment.X, ["y"] = comment.Y },
-                    ["style"] = new JObject { ["width"] = comment.Width, ["height"] = comment.Height },
-                    ["data"] = new JObject
-                    {
-                        ["commentId"] = comment.Id,
-                        ["text"] = comment.Text,
-                        ["color"] = comment.Color,
-                    },
+                    ["commentId"] = comment.Id,
+                    ["text"] = comment.Text,
+                    ["color"] = comment.Color,
                 };
                 if (comment.AttachedToNodeId != null)
-                    ((JObject)commentNode["data"]!)["attachedToNodeId"] = comment.AttachedToNodeId;
+                    data["attachedToNodeId"] = comment.AttachedToNodeId;
+                if (comment.Kind != null)
+                    data["kind"] = comment.Kind;
+                if (comment.Anchor != null)
+                {
+                    var anchorObj = new JObject();
+                    if (comment.Anchor.Type != null) anchorObj["type"] = comment.Anchor.Type;
+                    if (comment.Anchor.StepPath != null) anchorObj["stepPath"] = comment.Anchor.StepPath;
+                    if (comment.Anchor.LineOffset.HasValue) anchorObj["lineOffset"] = comment.Anchor.LineOffset.Value;
+                    data["anchor"] = anchorObj;
+                }
 
-                nodes.Add(commentNode);
+                if (existingCommentIds.Contains(comment.Id))
+                {
+                    // Reconcile: update position on the TextToGraph-emitted node and merge data.
+                    var existing = nodes.FirstOrDefault(n => n["id"]?.ToString() == comment.Id);
+                    if (existing != null)
+                    {
+                        existing["position"] = new JObject { ["x"] = comment.X, ["y"] = comment.Y };
+                        existing["style"] = new JObject { ["width"] = comment.Width, ["height"] = comment.Height };
+                        // Merge saved data fields into the existing data object (preserve fields the bridge set)
+                        var existingData = existing["data"] as JObject ?? new JObject();
+                        foreach (var prop in data.Properties())
+                            existingData[prop.Name] = prop.Value;
+                        existing["data"] = existingData;
+                    }
+                }
+                else
+                {
+                    var commentNode = new JObject
+                    {
+                        ["id"] = comment.Id,
+                        ["type"] = "comment",
+                        ["position"] = new JObject { ["x"] = comment.X, ["y"] = comment.Y },
+                        ["style"] = new JObject { ["width"] = comment.Width, ["height"] = comment.Height },
+                        ["data"] = data,
+                    };
+                    nodes.Add(commentNode);
+                    existingCommentIds.Add(comment.Id);
+                }
             }
         }
 
@@ -5258,6 +5294,7 @@ namespace SSH_Helper.Services
             {
                 foreach (var c in commentNodes)
                 {
+                    var anchorToken = c["anchor"] as JObject;
                     var comment = new CanvasComment
                     {
                         Id = c["id"]?.ToString() ?? "",
@@ -5268,6 +5305,13 @@ namespace SSH_Helper.Services
                         Width = c["width"]?.Value<double>() ?? 200,
                         Height = c["height"]?.Value<double>() ?? 100,
                         AttachedToNodeId = c["attachedToNodeId"]?.ToString(),
+                        Kind = c["kind"]?.ToString(),
+                        Anchor = anchorToken == null ? null : new CanvasCommentAnchor
+                        {
+                            Type = anchorToken["type"]?.ToString(),
+                            StepPath = anchorToken["stepPath"]?.ToString(),
+                            LineOffset = anchorToken["lineOffset"]?.Value<int>(),
+                        },
                     };
                     layout.Comments.Add(comment);
                 }
