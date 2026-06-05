@@ -358,11 +358,16 @@ namespace SSH_Helper.Services
 
         private static IEnumerable<string> ExtractPreambleComments(string preamble)
         {
+            // Group CONSECUTIVE comment lines into one multiline entry (one comment node). A blank or
+            // non-comment line breaks the run, so distinct comment blocks stay distinct.
+            var run = new List<string>();
             foreach (var raw in preamble.Split('\n'))
             {
                 var t = raw.TrimEnd('\r').TrimStart();
-                if (t.StartsWith("#")) yield return StripHash(t);
+                if (t.StartsWith("#")) { run.Add(StripHash(t)); continue; }
+                if (run.Count > 0) { yield return string.Join("\n", run); run.Clear(); }
             }
+            if (run.Count > 0) yield return string.Join("\n", run);
         }
 
         #region YAML → Graph (using raw text splitting)
@@ -652,19 +657,26 @@ namespace SSH_Helper.Services
             if (_yamlLines == null || lineNumber1 <= 1) return (leading, branch);
             int i = lineNumber1 - 2; // line directly above the step (0-indexed)
             bool crossedKeyword = false;
+            // Walk upward, accumulating a run of CONSECUTIVE comment lines (collected bottom-up). A
+            // blank line or the branch keyword flushes the run into a single multiline entry (one
+            // comment node), so consecutive '#' lines re-merge into one block on round-trip.
+            var run = new List<string>();
+            void FlushRun()
+            {
+                if (run.Count == 0) return;
+                run.Reverse(); // collected bottom-up -> restore top-down order
+                (crossedKeyword ? branch : leading).Insert(0, string.Join("\n", run));
+                run.Clear();
+            }
             while (i >= 0)
             {
                 var t = _yamlLines[i].Trim();
-                if (t.Length == 0) { i--; continue; }
-                if (t.StartsWith("#"))
-                {
-                    var text = StripHash(t);
-                    if (crossedKeyword) branch.Insert(0, text); else leading.Insert(0, text);
-                    i--; continue;
-                }
-                if (isFirstInBranch && !crossedKeyword && IsBranchKeyword(t)) { crossedKeyword = true; i--; continue; }
+                if (t.StartsWith("#")) { run.Add(StripHash(t)); i--; continue; }
+                if (t.Length == 0) { FlushRun(); i--; continue; }
+                if (isFirstInBranch && !crossedKeyword && IsBranchKeyword(t)) { FlushRun(); crossedKeyword = true; i--; continue; }
                 break;
             }
+            FlushRun();
             return (leading, branch);
         }
 
@@ -2521,7 +2533,13 @@ namespace SSH_Helper.Services
         {
             if (comments == null) return;
             var prefix = new string(' ', indent);
-            foreach (var c in comments) sb.AppendLine($"{prefix}# {c}");
+            foreach (var c in comments)
+            {
+                // A comment's text may be multiline (an authored multiline note). EVERY line must
+                // start with '#', or the trailing lines export as bare text -> invalid YAML.
+                foreach (var line in (c ?? string.Empty).Replace("\r\n", "\n").Split('\n'))
+                    sb.AppendLine(line.Length == 0 ? $"{prefix}#" : $"{prefix}# {line}");
+            }
         }
 
         /// <summary>Injects an inline comment onto the first line of a YAML step string.</summary>
@@ -4632,9 +4650,19 @@ namespace SSH_Helper.Services
             // so container body comments survive the round-trip (see NOTE in summary above).
             bool enteredNestedBody = false;
             int blankLinesBefore = 0, currentBlankLines = 0;
-            var pendingComments = new List<string>();
+            var pendingComments = new List<string>();   // current consecutive comment run
+            var pendingGroups = new List<string>();      // closed runs, one multiline entry each
             var currentLeading = new List<string>();
             string? currentInline = null;
+
+            // A run of consecutive comment lines becomes ONE comment node (multiline). A blank line
+            // breaks the run so distinct comment blocks stay distinct.
+            void FlushCommentRun()
+            {
+                if (pendingComments.Count == 0) return;
+                pendingGroups.Add(string.Join("\n", pendingComments));
+                pendingComments.Clear();
+            }
 
             void FinalizeStep()
             {
@@ -4652,6 +4680,7 @@ namespace SSH_Helper.Services
                 if (string.IsNullOrWhiteSpace(line))
                 {
                     if (inStep) currentStep.AppendLine(line);
+                    FlushCommentRun(); // a blank line ends a consecutive comment run
                     blankLinesBefore++;
                     continue;
                 }
@@ -4679,8 +4708,9 @@ namespace SSH_Helper.Services
                         if (inStep && currentStep.Length > 0) FinalizeStep();
 
                         currentStep.Clear();
-                        currentLeading = new List<string>(pendingComments);
-                        pendingComments.Clear();
+                        FlushCommentRun();
+                        currentLeading = new List<string>(pendingGroups);
+                        pendingGroups.Clear();
                         currentInline = null;
                         enteredNestedBody = false;
 

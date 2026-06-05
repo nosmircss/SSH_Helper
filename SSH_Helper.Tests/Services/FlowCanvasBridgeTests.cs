@@ -678,6 +678,94 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_MultilineComment_EmitsHashOnEveryLine()
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, edges) = bridge.TextToGraph("steps:\n- print:\n    message: hi\n");
+        var printId = nodes.First(n => n["data"]?["blockType"]?.ToString() == "print")["id"]!.ToString();
+        var graph = new JObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges,
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c1", ["text"] = "nothing to do\ntest", ["kind"] = "comment",
+                    ["anchor"] = new JObject { ["type"] = "leading" }, ["attachedToNodeId"] = printId
+                }
+            }
+        };
+
+        var export = bridge.ExportGraphToYaml(graph);
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        Assert.Contains("# nothing to do", export.Yaml);
+        Assert.Contains("# test", export.Yaml);
+        // 'test' must never appear as a bare (un-#'d) line — that would be invalid YAML.
+        var parser = new ScriptParser();
+        Assert.Empty(parser.Validate(parser.Parse(export.Yaml), export.Yaml, enforceCanonicalSyntax: true));
+    }
+
+    [Fact]
+    public void TextToGraph_ConsecutiveLeadingComments_MergeIntoOneNode()
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, _) = bridge.TextToGraph("steps:\n# nothing to do\n# test\n- print:\n    message: hi\n");
+        var comments = nodes.Where(n => n["type"]?.ToString() == "comment").ToList();
+        Assert.Single(comments);
+        Assert.Equal("nothing to do\ntest", comments[0]["data"]?["text"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_BlankSeparatedComments_StayDistinct()
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, _) = bridge.TextToGraph("steps:\n# group one\n\n# group two\n- print:\n    message: hi\n");
+        var comments = nodes.Where(n => n["type"]?.ToString() == "comment").ToList();
+        Assert.Equal(2, comments.Count);
+    }
+
+    [Fact]
+    public void RoundTrip_MultilineBranchComment_Regeneration()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml =
+            "steps:\n" +
+            "- if:\n" +
+            "    condition: a == \"b\"\n" +
+            "    then:\n" +
+            "      - print:\n" +
+            "          message: \"x\"\n" +
+            "    # nothing to do\n" +
+            "    # test\n" +
+            "    else:\n" +
+            "      - print:\n" +
+            "          message: \"y\"\n";
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+
+        var branchComment = nodes.FirstOrDefault(n =>
+            n["type"]?.ToString() == "comment" && n["data"]?["anchor"]?["type"]?.ToString() == "branch");
+        Assert.NotNull(branchComment);
+        Assert.Equal("nothing to do\ntest", branchComment!["data"]?["text"]?.ToString());
+
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var p = n["data"]?["props"] as JObject;
+            if (n["data"]?["blockType"]?.ToString() == "if" && p != null) p["_forceGraphExport"] = true;
+        }
+        var export = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+
+        var lines = export.Yaml.Replace("\r\n", "\n").Split('\n');
+        int elseIdx = Array.FindIndex(lines, l => l.Trim() == "else:");
+        Assert.True(elseIdx >= 2);
+        Assert.Equal("# test", lines[elseIdx - 1].Trim());
+        Assert.Equal("# nothing to do", lines[elseIdx - 2].Trim());
+        var parser = new ScriptParser();
+        Assert.Empty(parser.Validate(parser.Parse(export.Yaml), export.Yaml, enforceCanonicalSyntax: true));
+    }
+
+    [Fact]
     public void ExportGraphToYaml_ImportedOnlyNestedComment_RoundTripsViaSnippet_NotRegeneration()
     {
         // Scoping guard: a container whose only comments are IMPORTED (carry an anchor.stepPath) must
