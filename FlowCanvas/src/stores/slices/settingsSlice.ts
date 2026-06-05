@@ -33,8 +33,8 @@ export type CanvasSettings = Pick<SettingsSlice, 'blockWidth' | 'textScale' | 'd
  *  computeHierarchicalLayout so auto-layout, expand/collapse and import all honor the user's
  *  Display Settings instead of silently reverting to the factory 330/1/1 geometry. */
 export const selectCanvasSizing = (
-  s: Pick<SettingsSlice, 'blockWidth' | 'density' | 'textScale'>,
-): BlockSizing => ({ blockWidth: s.blockWidth, density: s.density, textScale: s.textScale });
+  s: Pick<SettingsSlice, 'blockWidth' | 'density' | 'textScale'> & { compactCommentsEnabled?: boolean },
+): BlockSizing => ({ blockWidth: s.blockWidth, density: s.density, textScale: s.textScale, compactComments: s.compactCommentsEnabled });
 
 export interface SettingsSlice {
   blockWidth: number;

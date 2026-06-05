@@ -103,12 +103,14 @@ function CommentNode({ data, id }: NodeProps) {
       style={{
         background: `${color}cc`,
         borderRadius: 6,
-        minWidth: 150,
-        minHeight: 80,
-        padding: 10,
+        minWidth: 90,
+        maxWidth: 240,
+        width: 'fit-content',
+        padding: '6px 8px',
         position: 'relative',
         cursor: editing ? 'text' : 'grab',
         boxShadow: 'var(--fc-shadow-sm)',
+        fontSize: 12,
       }}
     >
       {/* Delete button */}
@@ -173,7 +175,6 @@ function CommentNode({ data, id }: NodeProps) {
             lineHeight: 1.4,
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
-            minHeight: 40,
             paddingRight: 16,
           }}
         >

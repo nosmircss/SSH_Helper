@@ -29,11 +29,11 @@ export const LAYOUT = {
 } as const;
 
 /** User-facing canvas sizing. Defaults reproduce the historical fixed geometry. */
-export interface BlockSizing { blockWidth: number; density: number; textScale: number; }
-export const DEFAULT_BLOCK_SIZING: BlockSizing = { blockWidth: 330, density: 1, textScale: 1 };
+export interface BlockSizing { blockWidth: number; density: number; textScale: number; compactComments?: boolean; }
+export const DEFAULT_BLOCK_SIZING: BlockSizing = { blockWidth: 330, density: 1, textScale: 1, compactComments: true };
 
 interface ResolvedSizing {
-  childWidth: number; columnWidth: number; nodeSpacingY: number; branchOffset: number; textScale: number;
+  childWidth: number; columnWidth: number; nodeSpacingY: number; branchOffset: number; textScale: number; compactComments: boolean;
 }
 function resolveSizing(s: BlockSizing): ResolvedSizing {
   const childWidth = s.blockWidth - BLOCK_WIDTH_INSET;            // preserves the 30px child inset
@@ -45,20 +45,30 @@ function resolveSizing(s: BlockSizing): ResolvedSizing {
     // blockWidth/2 + BAND_PAD + 37 reproduces 330 -> 220 and keeps the gutter at every width.
     branchOffset: Math.round(s.blockWidth / 2 + BAND_PAD + 37),
     textScale: s.textScale,
+    compactComments: s.compactComments ?? true,
   };
 }
 // Set synchronously at the top of computeHierarchicalLayout (no await in the pass => no reentrancy).
 // computeBranchBands is a SEPARATE function (different file) with its own param and is unaffected.
 let activeSizing: ResolvedSizing = resolveSizing(DEFAULT_BLOCK_SIZING);
 
-// Vertical room one anchored comment pill occupies (pill height + gap). Used both to RESERVE
-// space above a commented block (so pills never overlap the block/band above) and to STACK
-// multiple pills. Set per computeHierarchicalLayout call alongside activeSizing.
+// Vertical space one anchored comment occupies above its block (height + a small gap). Compact
+// mode renders a slim fixed-height pill; non-compact renders a content-sized card that varies by
+// text. Used both to RESERVE room above a commented block (so comments never overlap the block/
+// band above) and to STACK multiple comments. Exported so the saved-layout placement pass uses
+// the identical metric.
 const COMMENT_PILL_STEP = 28;
-// attachedToNodeId -> count of leading/header comments anchored to it.
+const COMMENT_CARD_GAP = 8;
+export function estimateCommentStep(text: string, compact: boolean): number {
+  if (compact) return COMMENT_PILL_STEP;
+  const t = text ?? '';
+  const lines = Math.max(1, t.split('\n').length, Math.ceil(t.length / 33));
+  return 12 + lines * 17 + COMMENT_CARD_GAP; // card padding + wrapped lines + gap
+}
+// attachedToNodeId -> total reserved pixels for its anchored comments (pre-summed).
 let commentReserveByTarget: Map<string, number> = new Map();
 function reserveAbove(id: string): number {
-  return (commentReserveByTarget.get(id) ?? 0) * COMMENT_PILL_STEP;
+  return commentReserveByTarget.get(id) ?? 0;
 }
 
 function verticalGap(): number { return activeSizing.nodeSpacingY - COLLAPSED_HEIGHT; } // preserves collapsed spacing
@@ -219,37 +229,38 @@ function placeComments(nodes: Node[], pos: Map<string, Point>): void {
   const gutterX = Math.max(...[...pos.values()].map((p) => p.x)) + activeSizing.columnWidth;
   let gutterY = LAYOUT.NODE_START_Y;
 
+  const compact = activeSizing.compactComments;
+
   // 'leading'/'header' comments stack directly above their block (the band, if any, grows to wrap
   // them — see computeBranchBands). 'branch' comments annotate the whole branch and sit ABOVE the
-  // band header, which is itself above any leading pills — so they need the leading count.
-  const leadingCount = new Map<string, number>();
+  // band header, which is itself above the leading stack — so they need the total leading height.
+  const leadingHeight = new Map<string, number>();
   for (const c of comments) {
     const d = c.data as Record<string, unknown> | undefined;
     const at = d?.attachedToNodeId as string | undefined;
     if (at && (d?.anchor as { type?: string } | undefined)?.type === 'leading') {
-      leadingCount.set(at, (leadingCount.get(at) ?? 0) + 1);
+      leadingHeight.set(at, (leadingHeight.get(at) ?? 0) + estimateCommentStep(String(d?.text ?? ''), compact));
     }
   }
 
-  const leadingSib = new Map<string, number>();
-  const branchSib = new Map<string, number>();
+  const cumLeading = new Map<string, number>(); // running stacked height per target
+  const cumBranch = new Map<string, number>();
   for (const c of comments) {
     const data = c.data as Record<string, unknown> | undefined;
     const anchor = (data?.anchor as { type?: string } | undefined)?.type;
     const attachedTo = data?.attachedToNodeId as string | undefined;
     const targetPos = attachedTo ? pos.get(attachedTo) : undefined;
+    const step = estimateCommentStep(String(data?.text ?? ''), compact);
 
     if (targetPos && (anchor === 'leading' || anchor === 'header')) {
-      const idx = leadingSib.get(attachedTo!) ?? 0;
-      leadingSib.set(attachedTo!, idx + 1);
-      pos.set(c.id, { x: targetPos.x, y: targetPos.y - COMMENT_PILL_STEP * (idx + 1) });
+      const cum = (cumLeading.get(attachedTo!) ?? 0) + step;
+      cumLeading.set(attachedTo!, cum);
+      pos.set(c.id, { x: targetPos.x, y: targetPos.y - cum });
     } else if (targetPos && anchor === 'branch') {
-      const idx = branchSib.get(attachedTo!) ?? 0;
-      branchSib.set(attachedTo!, idx + 1);
-      const L = leadingCount.get(attachedTo!) ?? 0;
-      // Band top after it has grown up to wrap the L leading pills above the block.
-      const bandTop = targetPos.y - L * COMMENT_PILL_STEP - BAND_PAD - BAND_LABEL_HEADROOM;
-      pos.set(c.id, { x: targetPos.x, y: bandTop - COMMENT_PILL_STEP * (idx + 1) });
+      const bandTop = targetPos.y - (leadingHeight.get(attachedTo!) ?? 0) - BAND_PAD - BAND_LABEL_HEADROOM;
+      const cum = (cumBranch.get(attachedTo!) ?? 0) + step;
+      cumBranch.set(attachedTo!, cum);
+      pos.set(c.id, { x: targetPos.x, y: bandTop - cum });
     } else {
       pos.set(c.id, { x: gutterX, y: gutterY });
       gutterY += activeSizing.nodeSpacingY;
@@ -277,7 +288,8 @@ export function computeHierarchicalLayout(nodes: Node[], edges: Edge[], sizing: 
     const anchor = data?.anchor as { type?: string } | undefined;
     const attachedTo = data?.attachedToNodeId as string | undefined;
     if (attachedTo && (anchor?.type === 'leading' || anchor?.type === 'header' || anchor?.type === 'branch')) {
-      commentReserveByTarget.set(attachedTo, (commentReserveByTarget.get(attachedTo) ?? 0) + 1);
+      const step = estimateCommentStep(String(data?.text ?? ''), activeSizing.compactComments);
+      commentReserveByTarget.set(attachedTo, (commentReserveByTarget.get(attachedTo) ?? 0) + step);
     }
   }
   const tree = buildLayoutTree(nodes, edges);

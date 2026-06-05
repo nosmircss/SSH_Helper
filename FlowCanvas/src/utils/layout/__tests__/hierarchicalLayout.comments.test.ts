@@ -80,6 +80,21 @@ describe('computeHierarchicalLayout anchored comments', () => {
     expect(bWith).toBeGreaterThan(bWithout); // 'b' pushed down to make room for its comment pill
   });
 
+  it('reserves more space for a non-compact (card) comment than a compact pill', () => {
+    const mk = () => [
+      { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', props: {} } },
+      { id: 'a', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'a' } } },
+      { id: 'b', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'b' } } },
+      { id: 'c', type: 'comment', position: { x: 0, y: 0 }, data: { commentId: 'c', kind: 'comment', text: 'a longer multi-word note that wraps across lines', anchor: { type: 'leading', stepPath: 'steps/1' }, attachedToNodeId: 'b' } },
+    ];
+    const e = [{ id: 'e0', source: '__start__', target: 'a' }, { id: 'e1', source: 'a', target: 'b' }];
+    const compactOut = computeHierarchicalLayout(mk() as never, e as never, { ...DEFAULT_BLOCK_SIZING, compactComments: true });
+    const fullOut = computeHierarchicalLayout(mk() as never, e as never, { ...DEFAULT_BLOCK_SIZING, compactComments: false });
+    const bCompact = compactOut.find((n) => n.id === 'b')!.position.y;
+    const bFull = fullOut.find((n) => n.id === 'b')!.position.y;
+    expect(bFull).toBeGreaterThan(bCompact); // a non-compact card reserves more vertical room than a pill
+  });
+
   it('still gutters a free-floating sticky (no anchor)', () => {
     const nodes = [
       ...baseNodes(),
