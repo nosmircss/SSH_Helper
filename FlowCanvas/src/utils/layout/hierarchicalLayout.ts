@@ -201,14 +201,33 @@ export function placeTree(tree: LayoutTree): Map<string, Point> {
  * comment sitting on top of a block, where its DOM then swallows clicks meant for that block.
  * Park comments in a gutter to the right of the widest placed node so they never overlap.
  */
+// Vertical gap from a block's top to an anchored comment pill stacked above it.
+const COMMENT_ANCHOR_GAP = 34;
+
 function placeComments(nodes: Node[], pos: Map<string, Point>): void {
   const comments = nodes.filter((n) => n.type === 'comment');
   if (comments.length === 0 || pos.size === 0) return;
   const gutterX = Math.max(...[...pos.values()].map((p) => p.x)) + activeSizing.columnWidth;
-  let y = LAYOUT.NODE_START_Y;
+  let gutterY = LAYOUT.NODE_START_Y;
+  // Stack multiple comments anchored to the same block upward.
+  const anchoredSibling = new Map<string, number>();
   for (const c of comments) {
-    pos.set(c.id, { x: gutterX, y });
-    y += activeSizing.nodeSpacingY;
+    const data = c.data as Record<string, unknown> | undefined;
+    const anchor = data?.anchor as { type?: string } | undefined;
+    const attachedTo = data?.attachedToNodeId as string | undefined;
+    const targetPos = attachedTo ? pos.get(attachedTo) : undefined;
+
+    // Anchored (leading/header) comments ride directly above their block — this must
+    // hold on EVERY layout pass (auto-layout, sizing/density reflow, settings restore),
+    // not only on import, or they snap back to the gutter. Free stickies stay in the gutter.
+    if (targetPos && (anchor?.type === 'leading' || anchor?.type === 'header')) {
+      const idx = anchoredSibling.get(attachedTo!) ?? 0;
+      anchoredSibling.set(attachedTo!, idx + 1);
+      pos.set(c.id, { x: targetPos.x, y: targetPos.y - COMMENT_ANCHOR_GAP * (idx + 1) });
+    } else {
+      pos.set(c.id, { x: gutterX, y: gutterY });
+      gutterY += activeSizing.nodeSpacingY;
+    }
   }
 }
 
