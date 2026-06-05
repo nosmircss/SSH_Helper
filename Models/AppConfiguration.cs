@@ -517,7 +517,18 @@ namespace SSH_Helper.Models
         public bool? FlowCanvasSnapToGrid { get; set; }
         public bool? FlowCanvasBranchBands { get; set; }
         public bool? FlowCanvasCompactComments { get; set; }
+        /// <summary>
+        /// LEGACY: replaced by FlowCanvasDefaultLayoutMode. Still deserialized so the value can be
+        /// migrated on load (the migration nulls it). The canvas write-back to this field is removed
+        /// when the layout-mode UI lands (plan Phase 5); remove this property after one release cycle.
+        /// </summary>
         public bool? FlowCanvasAutoReflow { get; set; }
+
+        /// <summary>
+        /// Global default Flow Canvas layout mode for presets that have not set their own.
+        /// Null = AutoFlow (the historical default).
+        /// </summary>
+        public LayoutMode? FlowCanvasDefaultLayoutMode { get; set; }
     }
 
     /// <summary>

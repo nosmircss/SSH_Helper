@@ -62,6 +62,18 @@ namespace SSH_Helper.Services
                 var shouldPersistCompressedState = !hadCompressedSavedState && config.SavedState != null;
                 _cachedConfig = config;
 
+                // Migrate the legacy global "Auto-layout on edits" toggle into the new default layout mode.
+                // autoReflow ON  -> AutoFlow default; OFF -> Manual default. Runs once: after this the
+                // new field is set and FlowCanvasAutoReflow is ignored.
+                if (config.WindowState != null
+                    && config.WindowState.FlowCanvasDefaultLayoutMode == null
+                    && config.WindowState.FlowCanvasAutoReflow.HasValue)
+                {
+                    config.WindowState.FlowCanvasDefaultLayoutMode =
+                        config.WindowState.FlowCanvasAutoReflow.Value ? LayoutMode.AutoFlow : LayoutMode.Manual;
+                    config.WindowState.FlowCanvasAutoReflow = null;
+                }
+
                 if (shouldPersistCompressedState)
                 {
                     try
