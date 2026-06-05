@@ -22,7 +22,6 @@ export interface CommentNodeData {
 function CommentNode({ data, id }: NodeProps) {
   const commentData = data as CommentNodeData;
   const updateComment = useFlowStore((s) => s.updateComment);
-  const removeComment = useFlowStore((s) => s.removeComment);
   const compact = useFlowStore((s) => s.compactCommentsEnabled);
 
   const kind = (commentData.kind as 'comment' | 'sticky' | undefined) ?? 'sticky';
@@ -56,15 +55,6 @@ function CommentNode({ data, id }: NodeProps) {
     setEditing(false);
     updateComment(commentId, { text });
   }, [commentId, text, updateComment]);
-
-  const handleDelete = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-      removeComment(commentId);
-    },
-    [commentId, removeComment],
-  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -113,38 +103,6 @@ function CommentNode({ data, id }: NodeProps) {
         fontSize: 12,
       }}
     >
-      {/* Delete button */}
-      <button
-        onClick={handleDelete}
-        style={{
-          position: 'absolute',
-          top: 4,
-          right: 4,
-          width: 18,
-          height: 18,
-          background: 'var(--fc-comment-btn-scrim)',
-          border: 'none',
-          borderRadius: 3,
-          color: 'var(--fc-comment-ink)',
-          fontSize: 12,
-          lineHeight: '16px',
-          textAlign: 'center',
-          cursor: 'pointer',
-          padding: 0,
-          opacity: 0.6,
-          transition: 'opacity 0.15s',
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.opacity = '1';
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.opacity = '0.6';
-        }}
-        title="Delete comment"
-      >
-        &#10005;
-      </button>
-
       {editing ? (
         <textarea
           ref={textareaRef}
@@ -175,7 +133,6 @@ function CommentNode({ data, id }: NodeProps) {
             lineHeight: 1.4,
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
-            paddingRight: 16,
           }}
         >
           {text || 'Double-click to edit...'}
