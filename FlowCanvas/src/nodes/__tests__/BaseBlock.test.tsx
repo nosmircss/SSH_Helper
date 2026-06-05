@@ -28,6 +28,7 @@ const mock = vi.hoisted(() => ({
     nodes: [] as any[],
     blockWidth: 330,
     textScale: 1,
+    updateNodeData: vi.fn(),
   } as any,
 }));
 
@@ -36,7 +37,7 @@ vi.mock('../../stores/useFlowStore', () => ({
 }));
 
 // ── Import the component under test ─────────────────────────────────────────
-import BaseBlock from '../BaseBlock';
+import BaseBlock, { JUST_PLACED_ANIMATION, shouldClearJustPlaced } from '../BaseBlock';
 
 // Helper: minimal NodeProps shape required by BaseBlock
 function renderNode(overrides: { data: any; selected?: boolean; id?: string }) {
@@ -102,6 +103,39 @@ describe('BaseBlock', () => {
     renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
     expect(screen.getByText('Send').style.fontSize).toBe(`${13 * 1.15}px`); // '14.95px'
     mock.state.textScale = 1; // restore for other tests
+  });
+});
+
+describe('BaseBlock — just-placed entrance highlight', () => {
+  it('applies the just-placed highlight class for a newly placed block', () => {
+    mock.state.reducedMotion = false;
+    renderNode({ data: { blockType: 'send', label: 'Send', props: {}, _justPlaced: true } as any });
+    expect(screen.getByTestId('block-node').className).toContain('fc-just-placed');
+    mock.state.reducedMotion = false; // restore
+  });
+
+  it('omits the just-placed highlight under reduced motion', () => {
+    mock.state.reducedMotion = true;
+    renderNode({ data: { blockType: 'send', label: 'Send', props: {}, _justPlaced: true } as any });
+    expect(screen.getByTestId('block-node').className).not.toContain('fc-just-placed');
+    mock.state.reducedMotion = false; // restore
+  });
+
+  // The component's onAnimationEnd handler delegates to shouldClearJustPlaced, then calls the
+  // non-dirty updateNodeData(id, { _justPlaced: false }). React 19's delegated animation events
+  // don't fire under jsdom (no AnimationEvent constructor), so we assert the decision predicate
+  // directly — it's the load-bearing logic that decides whether to clear the flag.
+  it('shouldClearJustPlaced fires only for the entrance pulse on a still-flagged block', () => {
+    expect(shouldClearJustPlaced(JUST_PLACED_ANIMATION, true)).toBe(true);
+  });
+
+  it('shouldClearJustPlaced ignores an unrelated animation name', () => {
+    expect(shouldClearJustPlaced('fc-exec-running', true)).toBe(false);
+  });
+
+  it('shouldClearJustPlaced ignores the entrance pulse once the flag is already cleared', () => {
+    expect(shouldClearJustPlaced(JUST_PLACED_ANIMATION, false)).toBe(false);
+    expect(shouldClearJustPlaced(JUST_PLACED_ANIMATION, undefined)).toBe(false);
   });
 });
 

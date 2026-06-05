@@ -22,6 +22,16 @@ export interface BlockNodeData {
   [key: string]: unknown;
 }
 
+// Keyframe name of the one-shot entrance pulse (styles/justPlaced.css). Kept here so the
+// animationEnd guard and the CSS share one literal.
+export const JUST_PLACED_ANIMATION = 'fc-just-placed-pulse';
+
+// True only when an animationEnd belongs to the entrance pulse AND the flag is still set — i.e. the
+// moment to clear _justPlaced so the highlight can't replay on a later DOM remount.
+export function shouldClearJustPlaced(animationName: string, justPlacedFlag: unknown): boolean {
+  return animationName === JUST_PLACED_ANIMATION && justPlacedFlag === true;
+}
+
 // Token-driven heat ramp (Decision #4: no inline hex). cold→mid→hot interpolated
 // in OKLCH via color-mix so blocks tint by their relative run duration.
 function heatColor(ratio: number): string {
@@ -97,12 +107,23 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const selectNode = useFlowStore((s) => s.selectNode);
   const blockWidth = useFlowStore((s) => s.blockWidth);
   const textScale = useFlowStore((s) => s.textScale);
+  const updateNodeData = useFlowStore((s) => s.updateNodeData);
 
   const handleBreakpointToggle = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     toggleBreakpoint(id);
   }, [id, toggleBreakpoint]);
+
+  // Clear the one-shot _justPlaced flag when the entrance pulse ends so it can't replay on a later
+  // DOM remount. updateNodeData is a non-dirty cosmetic update (no isDirty, no export-status reset),
+  // matching execState writes — clearing the flag re-renders without fc-just-placed, so the animation
+  // doesn't restart and there's no loop. Guarded by animationName so unrelated animations don't fire it.
+  const handleAnimationEnd = useCallback((e: React.AnimationEvent) => {
+    if (shouldClearJustPlaced(e.animationName, (data as Record<string, unknown>)._justPlaced)) {
+      updateNodeData(id, { _justPlaced: false });
+    }
+  }, [id, data, updateNodeData]);
 
   // Live ticker — a hook, so it MUST run before the early return below (rules of hooks). It reads
   // `start` directly off the timings Map; `timing` itself stays declared in the badge block below.
@@ -175,6 +196,10 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const stateClass = execState === 'running' ? 'fc-exec-running'
     : execState === 'error' ? 'fc-exec-error'
       : undefined;
+
+  const justPlaced = (data as Record<string, unknown>)._justPlaced === true && !reducedMotion;
+  const blockClassName = [stateClass, justPlaced ? 'fc-just-placed' : undefined]
+    .filter(Boolean).join(' ') || undefined;
 
   // Category-tinted icon chip. color tints the stroke (currentColor); a faint category wash sits
   // behind it. mix() is the gate-safe color-mix helper — no new per-category token needed.
@@ -280,7 +305,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   ) : null;
 
   return (
-    <div className={stateClass} style={containerStyle} data-testid="block-node">
+    <div className={blockClassName} style={containerStyle} data-testid="block-node" onAnimationEnd={handleAnimationEnd}>
       {/* Running comet halo: a sweeping conic ring on the card edge. Render-only and gated by
           reduced motion (no comet, no churn when motion is off). inset:0 keeps it inside the
           border-box so it never grows the node or gets clipped. */}
