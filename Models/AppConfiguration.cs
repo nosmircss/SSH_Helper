@@ -517,6 +517,7 @@ namespace SSH_Helper.Models
         public bool? FlowCanvasSnapToGrid { get; set; }
         public bool? FlowCanvasBranchBands { get; set; }
         public bool? FlowCanvasCompactComments { get; set; }
+        public bool? FlowCanvasAutoReflow { get; set; }
     }
 
     /// <summary>

@@ -378,6 +378,7 @@ namespace SSH_Helper.UI
                 snapToGrid = ws.FlowCanvasSnapToGrid,
                 branchBandsEnabled = ws.FlowCanvasBranchBands,
                 compactCommentsEnabled = ws.FlowCanvasCompactComments,
+                autoReflowEnabled = ws.FlowCanvasAutoReflow,
             });
 
             var rm = ws.FlowCanvasReducedMotion;
@@ -400,9 +401,11 @@ namespace SSH_Helper.UI
             var snap = msg["snapToGrid"]?.Value<bool>();
             var bands = msg["branchBandsEnabled"]?.Value<bool>();
             var compact = msg["compactCommentsEnabled"]?.Value<bool>();
+            var autoReflow = msg["autoReflowEnabled"]?.Value<bool>();
 
             if (rightWidth == null && outputHeight == null && heatmap == null && blockWidth == null
-                && textScale == null && density == null && defaultExpanded == null && snap == null && bands == null && compact == null)
+                && textScale == null && density == null && defaultExpanded == null && snap == null && bands == null
+                && compact == null && autoReflow == null)
                 return;
 
             _configService.Update(c =>
@@ -418,6 +421,7 @@ namespace SSH_Helper.UI
                 if (snap.HasValue) c.WindowState.FlowCanvasSnapToGrid = snap.Value;
                 if (bands.HasValue) c.WindowState.FlowCanvasBranchBands = bands.Value;
                 if (compact.HasValue) c.WindowState.FlowCanvasCompactComments = compact.Value;
+                if (autoReflow.HasValue) c.WindowState.FlowCanvasAutoReflow = autoReflow.Value;
             });
         }
 

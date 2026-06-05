@@ -396,6 +396,9 @@ export function initMessageBridge(): () => void {
         store.getState().restorePanelSizes(sizes);
       }
       if (typeof msg.heatmapEnabled === 'boolean') store.getState().restoreHeatmapEnabled(msg.heatmapEnabled);
+      // Restore BEFORE the reflowing restores below (sizing / compact-comments) so their reflow
+      // honors the saved Auto-layout setting instead of the default-on value.
+      if (typeof msg.autoReflowEnabled === 'boolean') store.getState().restoreAutoReflow(msg.autoReflowEnabled);
 
       const cs: Partial<CanvasSettings> = {};
       if (typeof msg.blockWidth === 'number' && msg.blockWidth > 0) cs.blockWidth = msg.blockWidth;

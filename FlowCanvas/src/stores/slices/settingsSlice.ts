@@ -3,7 +3,7 @@ import type { FlowStore } from '../useFlowStore';
 import { messageBus } from '../../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
 import { sendLayoutAutosave } from '../../utils/layoutAutosave';
-import { computeHierarchicalLayout, type BlockSizing } from '../../utils/layout/hierarchicalLayout';
+import { reflowLayout } from '../reflow';
 import { selectCanvasSizing } from './canvasSizing';
 
 /** Width presets (px). Normal=330 is today's default. */
@@ -52,13 +52,10 @@ export interface SettingsSlice {
 }
 
 export const createSettingsSlice: StateCreator<FlowStore, [], [], SettingsSlice> = (set, get) => {
-  const sizing = (): BlockSizing => selectCanvasSizing(get());
-  // Reflow with the current sizing, persist the changed setting (layout-save) AND the new
-  // node positions (layout-autosave). Mirrors debugSlice's setAllExpanded side effects.
+  // Reflow (gated by the Auto-layout setting; keepOrphans inside reflowLayout), persist the changed
+  // setting (layout-save) AND the new node positions (layout-autosave).
   const reflowAndPersist = (changed: Record<string, unknown>) => {
-    const st = get();
-    // keepOrphans: a sizing change shouldn't yank unwired/manually-placed blocks onto the spine.
-    st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, sizing(), { keepOrphans: true }));
+    reflowLayout(get);
     messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, ...changed });
     sendLayoutAutosave();
   };
@@ -81,8 +78,7 @@ export const createSettingsSlice: StateCreator<FlowStore, [], [], SettingsSlice>
     // restore that arrives AFTER load-graph still re-lays-out at the saved sizing. No echo.
     restoreCanvasSettings: (s) => {
       set({ ...s });
-      const st = get();
-      if (st.nodes.length > 0) st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, sizing(), { keepOrphans: true }));
+      if (get().nodes.length > 0) reflowLayout(get);
     },
   };
 };

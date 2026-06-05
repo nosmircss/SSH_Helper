@@ -60,4 +60,17 @@ public class ConfigurationServiceWindowStateTests : IDisposable
         var reloaded = new ConfigurationService(_configPath).Load();
         reloaded.WindowState.FlowCanvasCompactComments.Should().BeFalse();
     }
+
+    [Fact]
+    public void SaveAndLoad_FlowCanvasAutoReflow_RoundTrips()
+    {
+        _configService.Load();
+        _configService.Update(config =>
+        {
+            config.WindowState.FlowCanvasAutoReflow = false;
+        });
+
+        var reloaded = new ConfigurationService(_configPath).Load();
+        reloaded.WindowState.FlowCanvasAutoReflow.Should().BeFalse();
+    }
 }

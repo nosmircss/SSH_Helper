@@ -74,6 +74,8 @@ export default function SettingsPopover() {
   const toggleBranchBands = useFlowStore((s) => s.toggleBranchBands);
   const compactCommentsEnabled = useFlowStore((s) => s.compactCommentsEnabled);
   const toggleCompactComments = useFlowStore((s) => s.toggleCompactComments);
+  const autoReflowEnabled = useFlowStore((s) => s.autoReflowEnabled);
+  const toggleAutoReflow = useFlowStore((s) => s.toggleAutoReflow);
   const heatmapEnabled = useFlowStore((s) => s.heatmapEnabled);
   const toggleHeatmap = useFlowStore((s) => s.toggleHeatmap);
   const reducedMotion = useFlowStore((s) => s.reducedMotion);
@@ -137,6 +139,7 @@ export default function SettingsPopover() {
           <Toggle label="Snap to grid" on={snapToGrid} onClick={toggleSnapToGrid} />
           <Toggle label="Branch bands" on={branchBandsEnabled} onClick={toggleBranchBands} />
           <Toggle label="Compact comments" on={compactCommentsEnabled} onClick={toggleCompactComments} />
+          <Toggle label="Auto-layout on edits" on={autoReflowEnabled} onClick={toggleAutoReflow} />
           <Toggle label="Heatmap" on={heatmapEnabled} onClick={toggleHeatmap} />
           <Toggle label="Reduced motion" on={reducedMotion} onClick={toggleReducedMotion} />
 

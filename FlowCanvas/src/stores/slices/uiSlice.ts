@@ -27,6 +27,7 @@ export interface UISlice {
   heatmapEnabled: boolean;
   branchBandsEnabled: boolean;
   compactCommentsEnabled: boolean;
+  autoReflowEnabled: boolean;
   snapToGrid: boolean;
   gridSize: number;
   searchQuery: string;
@@ -62,6 +63,8 @@ export interface UISlice {
   restoreBranchBands: (value: boolean) => void;
   toggleCompactComments: () => void;
   restoreCompactComments: (value: boolean) => void;
+  toggleAutoReflow: () => void;
+  restoreAutoReflow: (value: boolean) => void;
   toggleSnapToGrid: () => void;
   restoreSnapToGrid: (value: boolean) => void;
   setSearchQuery: (query: string) => void;
@@ -89,6 +92,7 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   heatmapEnabled: false,
   branchBandsEnabled: true,
   compactCommentsEnabled: true,
+  autoReflowEnabled: true,
   snapToGrid: false,
   gridSize: 20,
   searchQuery: '',
@@ -153,6 +157,16 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     // until the user presses Auto-Layout. Safe whether this fires before or after load-graph.
     reflowLayout(get);
   },
+
+  toggleAutoReflow: () => {
+    const next = !get().autoReflowEnabled;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, autoReflowEnabled: next });
+    set({ autoReflowEnabled: next });
+    // Re-enabling tidies the current graph immediately (reflowLayout now sees it ON); disabling
+    // just freezes future automatic reflows, leaving the current arrangement untouched.
+    if (next && get().nodes.length > 0) reflowLayout(get);
+  },
+  restoreAutoReflow: (value) => set({ autoReflowEnabled: value }), // host-driven, no echo/reflow
 
   toggleSnapToGrid: () => set((s) => {
     const next = !s.snapToGrid;
