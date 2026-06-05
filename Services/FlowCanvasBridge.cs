@@ -5328,14 +5328,70 @@ namespace SSH_Helper.Services
         /// </summary>
         public static void MergeLayout(JArray nodes, CanvasLayoutData layout)
         {
-            // Override positions for existing nodes
+            // Override positions for existing nodes (id-keyed; valid because the caller only uses
+            // this path when the structure hash matches exactly).
             foreach (var node in nodes)
             {
                 var id = node["id"]?.ToString();
                 if (id != null && layout.Positions.TryGetValue(id, out var pos))
-                {
                     node["position"] = new JObject { ["x"] = pos.X, ["y"] = pos.Y };
-                }
+            }
+            MergeAuxiliaryLayout(nodes, layout);
+        }
+
+        /// <summary>
+        /// Prefix-safe partial merge for Manual mode when the structure has changed.
+        /// Matches saved positions to nodes by (stepPath:blockType) tuple. Returns Safe=true only
+        /// when every saved tuple still exists (pure move / end-append); applies the saved positions
+        /// and returns the ids of genuinely-new blocks for the caller to near-neighbor place. Returns
+        /// Safe=false (mid-body edit / removal / pre-migration data) so the caller clean-reflows.
+        /// </summary>
+        public static (bool Safe, List<string> NewNodeIds) TryMergeLayoutByTuple(
+            JArray nodes, CanvasLayoutData layout)
+        {
+            var savedByTuple = new Dictionary<string, NodePosition>(StringComparer.Ordinal);
+            foreach (var p in layout.Positions.Values)
+            {
+                if (string.IsNullOrEmpty(p.StepPath)) continue; // pre-migration entry: no stable key
+                savedByTuple[$"{p.StepPath}:{p.BlockType}"] = p;
+            }
+            if (savedByTuple.Count == 0) return (false, new List<string>());
+
+            var currentTuples = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var n in nodes)
+            {
+                if (n["id"]?.ToString() == "__start__" || n["type"]?.ToString() == "comment") continue;
+                var bt = n["data"]?["blockType"]?.ToString() ?? "";
+                var sp = n["data"]?["props"]?["_stepPath"]?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(sp)) currentTuples.Add($"{sp}:{bt}");
+            }
+
+            // Safe only if every saved tuple survives (move/append). A vanished tuple = mid-edit/removal.
+            foreach (var t in savedByTuple.Keys)
+                if (!currentTuples.Contains(t)) return (false, new List<string>());
+
+            var newIds = new List<string>();
+            foreach (var n in nodes)
+            {
+                var id = n["id"]?.ToString();
+                if (id == null || id == "__start__" || n["type"]?.ToString() == "comment") continue;
+                var bt = n["data"]?["blockType"]?.ToString() ?? "";
+                var sp = n["data"]?["props"]?["_stepPath"]?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(sp) && savedByTuple.TryGetValue($"{sp}:{bt}", out var pos))
+                    n["position"] = new JObject { ["x"] = pos.X, ["y"] = pos.Y };
+                else
+                    newIds.Add(id);
+            }
+
+            MergeAuxiliaryLayout(nodes, layout);
+            return (true, newIds);
+        }
+
+        private static void MergeAuxiliaryLayout(JArray nodes, CanvasLayoutData layout)
+        {
+            foreach (var node in nodes)
+            {
+                var id = node["id"]?.ToString();
 
                 // Mark disabled blocks
                 if (id != null && layout.DisabledBlockIds.Contains(id))
