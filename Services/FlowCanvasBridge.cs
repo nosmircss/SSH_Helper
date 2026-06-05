@@ -1231,6 +1231,12 @@ namespace SSH_Helper.Services
                 // should be regenerated from graph structure even when a stale snippet exists.
                 // Also regenerate when the user has modified an imported container's branches
                 // (e.g., deleted an else edge) — the stored snippet would be stale.
+                //
+                // NOTE: when a container is regenerated from graph, inline comments that lived
+                // inside its branch bodies (do:/then:/else:/...) are NOT re-emitted — they only
+                // survive via the snippet round-trip path below. Task 5b (propagating branch-body
+                // comments through graph regeneration) is intentionally deferred; see
+                // docs/superpowers/plans/2026-06-04-flow-canvas-comment-flow.md.
                 if (IsContainerBlockType(blockType) &&
                     (forceGraphExport ||
                      string.IsNullOrWhiteSpace(yamlSnippet) ||
@@ -4497,6 +4503,18 @@ namespace SSH_Helper.Services
         /// Also records blank lines between steps, leading standalone comments, and an
         /// optional inline trailing comment stripped from the step's first content line.
         /// </summary>
+        /// <summary>
+        /// Splits YAML text into individual top-level step snippets.
+        /// Each snippet is the complete YAML text for one step (including nested blocks).
+        /// Also records blank lines between steps, leading standalone comments, and an
+        /// optional inline trailing comment stripped from the step's OWN (non-nested-body)
+        /// lines only.
+        ///
+        /// NOTE: branch-internal inline comments (inside do:/then:/else:/... list bodies)
+        /// survive only via the snippet round-trip, NOT through the InlineComment field.
+        /// Container regeneration from graph does not re-emit them (Task 5b intentionally
+        /// deferred; see docs/superpowers/plans/2026-06-04-flow-canvas-comment-flow.md).
+        /// </summary>
         internal static List<StepSnippetInfo> SplitYamlSteps(string yamlText)
         {
             var steps = new List<StepSnippetInfo>();
@@ -4513,6 +4531,10 @@ namespace SSH_Helper.Services
             int stepIndent = -1;
             var currentStep = new StringBuilder();
             bool inStep = false;
+            // Set to true once we see the first nested list item (trimmed "- " at indent > stepIndent).
+            // After that point we no longer strip inline comments — they belong in the snippet verbatim
+            // so container body comments survive the round-trip (see NOTE in summary above).
+            bool enteredNestedBody = false;
             int blankLinesBefore = 0, currentBlankLines = 0;
             var pendingComments = new List<string>();
             var currentLeading = new List<string>();
@@ -4564,13 +4586,19 @@ namespace SSH_Helper.Services
                         currentLeading = new List<string>(pendingComments);
                         pendingComments.Clear();
                         currentInline = null;
+                        enteredNestedBody = false;
 
-                        AppendStepLine(currentStep, line, ref currentInline);
+                        AppendStepLine(currentStep, line, ref currentInline, captureInline: true);
                         currentBlankLines = inStep ? blankLinesBefore : 0;
                         blankLinesBefore = 0;
                         inStep = true;
                         continue;
                     }
+
+                    // A nested list item (indent > stepIndent) marks the start of a container
+                    // body. From here on, inline comments belong in the snippet, not hoisted up.
+                    if (inStep && indent > stepIndent)
+                        enteredNestedBody = true;
                 }
 
                 blankLinesBefore = 0;
@@ -4578,7 +4606,7 @@ namespace SSH_Helper.Services
                 if (inStep && (indent > stepIndent ||
                     (indent <= stepIndent && !trimmed.StartsWith("- "))))
                 {
-                    AppendStepLine(currentStep, line, ref currentInline);
+                    AppendStepLine(currentStep, line, ref currentInline, captureInline: !enteredNestedBody);
                 }
             }
 
@@ -4586,10 +4614,11 @@ namespace SSH_Helper.Services
             return steps;
         }
 
-        private static void AppendStepLine(StringBuilder sb, string line, ref string? inlineComment)
+        private static void AppendStepLine(StringBuilder sb, string line, ref string? inlineComment, bool captureInline = true)
         {
-            // Capture the first inline comment found anywhere in the step snippet.
-            if (inlineComment == null && TrySplitTrailingComment(line, out var code, out var comment))
+            // Only strip a trailing inline comment when captureInline is true (i.e. we are still
+            // on the step's own header lines, before any nested body list item was seen).
+            if (captureInline && inlineComment == null && TrySplitTrailingComment(line, out var code, out var comment))
             {
                 inlineComment = comment;
                 sb.AppendLine(code);

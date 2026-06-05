@@ -2505,6 +2505,29 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void Export_NestedInlineComment_StaysOnItsLine()
+    {
+        // An inline comment on a line INSIDE a container's branch body must survive the round-trip
+        // verbatim on the original line — not be hoisted to the foreach header and not be lost.
+        // This test uses RoundTripThroughBridge which exercises the real TextToGraph→SplitYamlSteps
+        // snippet capture, then ExportGraphToYaml's snippet round-trip path for the imported foreach.
+        // Before the fix, SplitYamlSteps hoisted "inner note" to InlineComment and stripped it from
+        // the snippet, causing the export to place it on the foreach: header line instead.
+        var yaml = "steps:\n  - foreach:\n      iterator: h in ${hosts}\n      do:\n        - print:\n            message: ${h}  # inner note\n";
+        var result = RoundTripThroughBridge(yaml);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        // The comment must appear exactly once (not duplicated or lost)
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# inner note"));
+        // The comment must be on the message line, not on the foreach header
+        var lines = result.Yaml.Split('\n');
+        var messageLine = lines.FirstOrDefault(l => l.Contains("message:") && l.Contains("# inner note"));
+        var foreachLine = lines.FirstOrDefault(l => l.TrimStart().StartsWith("- foreach:") && l.Contains("# inner note"));
+        Assert.NotNull(messageLine);
+        Assert.Null(foreachLine);
+    }
+
+    [Fact]
     public void Export_ContainerRegeneration_EmitsLeadingComment()
     {
         var bridge = new FlowCanvasBridge();
@@ -3432,6 +3455,20 @@ public class FlowCanvasBridgeSplitYamlStepsTests
         Assert.Single(steps);
         Assert.Equal("needs vdom", steps[0].InlineComment);
         Assert.DoesNotContain("needs vdom", steps[0].Snippet);
+    }
+
+    [Fact]
+    public void SplitYamlSteps_NestedInlineComment_StaysInSnippet()
+    {
+        // A comment on a line INSIDE a container's body (do:/then:/else:/ nested list item)
+        // must NOT be hoisted onto the container's InlineComment field. It must stay verbatim
+        // in the snippet so the round-trip preserves it on the correct line.
+        var yaml = "steps:\n  - foreach:\n      iterator: h in ${hosts}\n      do:\n        - print:\n            message: ${h}  # inner note\n";
+        var steps = FlowCanvasBridge.SplitYamlSteps(yaml);
+
+        Assert.Single(steps);
+        Assert.Null(steps[0].InlineComment);
+        Assert.Contains("inner note", steps[0].Snippet);
     }
 
     [Fact]
