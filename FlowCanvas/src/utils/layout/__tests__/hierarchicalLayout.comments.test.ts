@@ -20,6 +20,27 @@ describe('computeHierarchicalLayout anchored comments', () => {
     expect(c1.position.y).toBeLessThan(b1.position.y);  // directly above it
   });
 
+  it('places a comment anchored to a deeply-nested branch child above that child', () => {
+    // Mirrors the real case: a comment anchored to an if/else branch child node.
+    const nodes = [
+      { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', props: {} } },
+      { id: 'if1', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'if', props: { condition: 'a', _stepPath: 'steps/0' } } },
+      { id: 'thenChild', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 't', _isChildOf: 'if1', _stepPath: 'steps/0/then/0', _branchLabel: 'then' } } },
+      { id: 'elseChild', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'e', _isChildOf: 'if1', _stepPath: 'steps/0/else/0', _branchLabel: 'else' } } },
+      { id: 'cElse', type: 'comment', position: { x: 0, y: 0 }, data: { commentId: 'cElse', kind: 'comment', text: 'nothing to do', anchor: { type: 'leading', stepPath: 'steps/0/else/0' }, attachedToNodeId: 'elseChild' } },
+    ];
+    const nestedEdges = [
+      { id: 'e0', source: '__start__', target: 'if1' },
+      { id: 'e1', source: 'if1', target: 'thenChild', label: 'then' },
+      { id: 'e2', source: 'if1', target: 'elseChild', sourceHandle: 'false', label: 'else' },
+    ];
+    const out = computeHierarchicalLayout(nodes as never, nestedEdges as never, DEFAULT_BLOCK_SIZING);
+    const elseChild = out.find((n) => n.id === 'elseChild')!;
+    const cElse = out.find((n) => n.id === 'cElse')!;
+    expect(cElse.position.x).toBe(elseChild.position.x);          // above the branch child, not gutter
+    expect(cElse.position.y).toBeLessThan(elseChild.position.y);
+  });
+
   it('still gutters a free-floating sticky (no anchor)', () => {
     const nodes = [
       ...baseNodes(),
