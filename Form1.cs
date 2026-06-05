@@ -6841,24 +6841,42 @@ namespace SSH_Helper
                 var bridge = new FlowCanvasBridge();
                 var (nodes, edges) = bridge.TextToGraph(scriptText);
 
-                // Merge stored canvas layout if the script structure hasn't changed.
-                bool hasUserLayout = false;
+                // Resolve the effective mode: preset override, else the global default (else AutoFlow).
+                var ws = _configService.GetCurrent().WindowState;
+                var defaultMode = ws?.FlowCanvasDefaultLayoutMode ?? Models.LayoutMode.AutoFlow;
+                var effectiveMode = defaultMode;
+                var layoutAction = "reflow";
+                var newNodeIds = new JArray();
+
                 if (!string.IsNullOrEmpty(_activePresetName))
                 {
                     var preset = _presetManager.Get(_activePresetName);
+                    effectiveMode = preset?.LayoutMode ?? defaultMode;
                     var layout = preset?.CanvasLayout;
-                    if (layout != null)
+
+                    // Only Manual presets preserve positions. Auto-flow always re-lays-out.
+                    if (effectiveMode == Models.LayoutMode.Manual && layout != null && layout.Positions.Count > 0)
                     {
                         var currentHash = FlowCanvasBridge.ComputeStructureHash(nodes);
                         if (string.Equals(currentHash, layout.StructureHash, StringComparison.Ordinal))
                         {
-                            FlowCanvasBridge.MergeLayout(nodes, layout);
-                            hasUserLayout = true;
+                            FlowCanvasBridge.MergeLayout(nodes, layout); // identical structure: id-keyed
+                            layoutAction = "keep";
+                        }
+                        else
+                        {
+                            var (safe, ids) = FlowCanvasBridge.TryMergeLayoutByTuple(nodes, layout);
+                            if (safe)
+                            {
+                                layoutAction = "keep";
+                                foreach (var id in ids) newNodeIds.Add(id);
+                            }
+                            // unsafe -> layoutAction stays "reflow" (clean), never mis-maps
                         }
                     }
                 }
 
-                _flowCanvasForm.LoadGraph(nodes, edges, hasUserLayout);
+                _flowCanvasForm.LoadGraph(nodes, edges, effectiveMode, layoutAction, newNodeIds);
             }
             catch
             {

@@ -7,6 +7,7 @@ using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using SSH_Helper.Models;
 using SSH_Helper.Services;
 using SSH_Helper.Utilities;
 
@@ -325,14 +326,27 @@ namespace SSH_Helper.UI
 
         /// <summary>
         /// Sends a load-graph message to display nodes and edges.
-        /// <paramref name="hasUserLayout"/> tells the canvas whether the positions are a
-        /// saved user arrangement (true → keep) or algorithmic defaults (false → the canvas
-        /// will run its hierarchical auto-layout).
+        /// <paramref name="layoutMode"/> is the active preset's effective mode (drives the toolbar
+        /// toggle + future reflow gating). <paramref name="layoutAction"/> is what to do on THIS load:
+        /// "reflow" (auto presets, or manual presets whose saved layout can't be safely reused) or
+        /// "keep" (positions already merged; near-neighbor the ids in <paramref name="newNodeIds"/>).
         /// </summary>
-        public void LoadGraph(object nodes, object edges, bool hasUserLayout = false)
+        public void LoadGraph(object nodes, object edges, LayoutMode layoutMode, string layoutAction, object newNodeIds)
         {
-            SendMessage(new { type = "load-graph", nodes, edges, hasUserLayout });
+            SendMessage(new
+            {
+                type = "load-graph",
+                nodes,
+                edges,
+                layoutMode = layoutMode == LayoutMode.Manual ? "manual" : "auto",
+                layoutAction,
+                newNodeIds,
+            });
         }
+
+        /// <summary>Back-compat overload: auto-flow, clean reflow, no new ids.</summary>
+        public void LoadGraph(object nodes, object edges)
+            => LoadGraph(nodes, edges, LayoutMode.AutoFlow, "reflow", new JArray());
 
         // Events for messages from the React app
         public event Action<JObject>? OnApplyYaml;

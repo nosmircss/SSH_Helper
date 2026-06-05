@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using FluentAssertions;
 using Newtonsoft.Json.Linq;
+using SSH_Helper.Models;
 using SSH_Helper.Services;
 using SSH_Helper.UI;
 using Xunit;
@@ -75,6 +76,21 @@ public sealed class FlowCanvasFormLayoutTests
             JObject.FromObject(new { type = "layout-save", heatmapEnabled = true }));
 
         act.Should().NotThrow();
+    }
+
+    [WinFormsFact]
+    public void LoadGraph_includes_layoutMode_action_and_newNodeIds()
+    {
+        using var flowCanvas = new FlowCanvasForm(darkMode: false, configService: null);
+
+        var pendingMessages = GetField<ConcurrentQueue<string>>(flowCanvas, "_pendingMessages");
+        flowCanvas.LoadGraph(new JArray(), new JArray(), LayoutMode.Manual, "keep", new JArray { "node-2" });
+
+        var load = ReadMessageOfType(pendingMessages, "load-graph");
+        load.Should().NotBeNull();
+        load!["layoutMode"]?.Value<string>().Should().Be("manual");
+        load["layoutAction"]?.Value<string>().Should().Be("keep");
+        load["newNodeIds"]?.Values<string>().Should().Contain("node-2");
     }
 
     private static JObject? ReadMessageOfType(ConcurrentQueue<string> queue, string expectedType)
