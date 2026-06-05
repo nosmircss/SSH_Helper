@@ -651,7 +651,9 @@ namespace SSH_Helper.Services
             bool skippedKeyword = false;
             while (i >= 0)
             {
-                var t = _yamlLines[i].TrimEnd('\r').TrimStart();
+                // Trim BOTH ends: real-world YAML often has a trailing space after a branch
+                // keyword (e.g. "else: "), which must still match IsBranchKeyword.
+                var t = _yamlLines[i].Trim();
                 if (t.Length == 0) { i--; continue; }
                 if (t.StartsWith("#")) { result.Insert(0, StripHash(t)); i--; continue; }
                 if (isFirstInBranch && !skippedKeyword && IsBranchKeyword(t)) { skippedKeyword = true; i--; continue; }

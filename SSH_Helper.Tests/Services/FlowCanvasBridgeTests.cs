@@ -2587,7 +2587,7 @@ public class FlowCanvasBridgeTests
         "          - print:\n" +
         "              message: \"did it\"\n" +
         "      # nothing to do\n" +
-        "      else:\n" +
+        "      else: \n" +   // trailing space after the branch keyword (matches real-world YAML)
         "        - print:\n" +
         "            message: \"nope\"\n";
 
