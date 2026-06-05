@@ -10,6 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-05-flow-canvas-layout-mode-design.md`
 
+**Deviation log (kept current during execution):**
+- 2026-06-05, Task 1.2: the legacy `SaveAndLoad_FlowCanvasAutoReflow_RoundTrips` test was **deleted** in Task 1.2 (the migration nulls `FlowCanvasAutoReflow` on every load, so the round-trip assertion is obsolete). The plan originally deferred this to Task 5.3 — Task 5.3 Step 1 is updated below accordingly. `DefaultLayoutMode` config persistence is already covered by `ConfigurationServiceLayoutModeTests.DefaultLayoutMode_roundTrips`.
+
 **Design decisions (locked):**
 - Mode is per-preset; a global default (Auto-flow) applies to unset presets.
 - Auto-flow = transient positions, always re-lays-out on reopen/edit. Manual = positions preserved.
@@ -1331,29 +1334,39 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - Modify: `Form1.cs` (subscribe `OnSetLayoutMode`, add `ApplySetLayoutMode`)
 - Test: `SSH_Helper.Tests/Services/ConfigurationServiceWindowStateTests.cs` (replace the autoReflow round-trip)
 
-- [ ] **Step 1: Update the round-trip test**
+- [ ] **Step 1: Test the FlowCanvasForm persistence/routing (the actual new behavior here)**
 
-In `SSH_Helper.Tests/Services/ConfigurationServiceWindowStateTests.cs`, replace `SaveAndLoad_FlowCanvasAutoReflow_RoundTrips` (lines 65-75) with:
+> DEVIATION: the legacy `SaveAndLoad_FlowCanvasAutoReflow_RoundTrips` test was already deleted in Task 1.2, and `DefaultLayoutMode` config persistence is already covered by `ConfigurationServiceLayoutModeTests.DefaultLayoutMode_roundTrips`. So do NOT re-add a plain config round-trip. The new behavior in THIS task is the `FlowCanvasForm` bridge: a `layout-save` carrying `defaultLayoutMode` must persist `WindowState.FlowCanvasDefaultLayoutMode`, and a `set-layout-mode` message must raise `OnSetLayoutMode`.
+
+Add a test to `SSH_Helper.Tests/UI/FlowCanvasFormLayoutTests.cs` (mirror that file's existing `[WinFormsFact]` construction + how it injects a `ConfigurationService` and simulates an inbound web message — follow the pattern Task 3.1 used). Assertions:
 
 ```csharp
-    [Fact]
-    public void SaveAndLoad_FlowCanvasDefaultLayoutMode_RoundTrips()
+    [WinFormsFact]
+    public void Inbound_layout_save_persists_default_layout_mode()
     {
-        var svc = new ConfigurationService(_configPath);
-        svc.Update(config =>
-        {
-            config.WindowState.FlowCanvasDefaultLayoutMode = SSH_Helper.Models.LayoutMode.Manual;
-        });
+        // construct the form with a temp-path ConfigurationService (this file's existing helper)
+        // simulate an inbound { type:"layout-save", defaultLayoutMode:"manual" } web message
+        configService.GetCurrent().WindowState.FlowCanvasDefaultLayoutMode
+            .Should().Be(SSH_Helper.Models.LayoutMode.Manual);
+    }
 
-        var reloaded = new ConfigurationService(_configPath).Load();
-        reloaded.WindowState.FlowCanvasDefaultLayoutMode.Should().Be(SSH_Helper.Models.LayoutMode.Manual);
+    [WinFormsFact]
+    public void Inbound_set_layout_mode_raises_OnSetLayoutMode()
+    {
+        JObject? received = null;
+        form.OnSetLayoutMode += m => received = m;
+        // simulate an inbound { type:"set-layout-mode", mode:"manual" } web message
+        received.Should().NotBeNull();
+        received!["mode"]!.ToString().Should().Be("manual");
     }
 ```
 
-- [ ] **Step 2: Run to verify it fails / compiles against new API**
+> If `FlowCanvasFormLayoutTests` cannot drive `OnWebMessageReceived` directly (it's private), assert through whatever seam the file already uses for inbound messages; if there is no such seam, cover the persistence via the `SavePanelSizes`-equivalent path the harness exposes and note any gap. Don't invent a new harness.
 
-Run: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter FullyQualifiedName~ConfigurationServiceWindowStateTests`
-Expected: FAIL/compile error until the persistence wiring below exists.
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter FullyQualifiedName~FlowCanvasFormLayoutTests`
+Expected: FAIL — `defaultLayoutMode` not yet persisted / `OnSetLayoutMode` not yet defined.
 
 - [ ] **Step 3: Route `set-layout-mode` + add the event (FlowCanvasForm.cs)**
 
