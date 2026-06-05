@@ -475,6 +475,114 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_AuthoredLeadingCommentOnLeafBlock_ExportsAsHashLine()
+    {
+        // Repro: user imports YAML, right-clicks a leaf (parse) block, "Add Comment (#)",
+        // types text, then Apply YAML. The authored comment arrives in comments[] keyed by
+        // attachedToNodeId (no stepPath). It must export as a leading "# ..." line.
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            name: Comment Export Repro
+            steps:
+              - send: "show"
+              - parse:
+                  format: fortigate
+                  from: raw
+                  into: fortigate
+              - set: "port = 1"
+            """;
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+
+        var parseNode = nodes.First(n => n["data"]?["blockType"]?.ToString() == "parse");
+        var parseId = parseNode["id"]!.ToString();
+
+        var graph = new JObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges,
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "comment-1",
+                    ["text"] = "trest",
+                    ["kind"] = "comment",
+                    ["anchor"] = new JObject { ["type"] = "leading" },
+                    ["attachedToNodeId"] = parseId
+                }
+            }
+        };
+
+        var export = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        Assert.Contains("# trest", export.Yaml);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_AuthoredLeadingCommentOnNestedLeafBlock_ExportsAsHashLine()
+    {
+        // Repro: the parse block lives INSIDE an imported container (foreach). The container
+        // round-trips via its stored snippet, so the child is skipped in the main loop. An
+        // authored comment keyed by the CHILD node id must still export as a "# ..." line.
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            name: Nested Comment Export Repro
+            steps:
+              - foreach: h in hosts
+                do:
+                  - send: "show"
+                  - parse:
+                      format: fortigate
+                      from: raw
+                      into: fortigate
+                  - set: "port = 1"
+            """;
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+
+        var parseNode = nodes.First(n => n["data"]?["blockType"]?.ToString() == "parse");
+        var parseId = parseNode["id"]!.ToString();
+
+        var graph = new JObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges,
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "comment-1",
+                    ["text"] = "trest",
+                    ["kind"] = "comment",
+                    ["anchor"] = new JObject { ["type"] = "leading" },
+                    ["attachedToNodeId"] = parseId
+                }
+            }
+        };
+
+        var export = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        Assert.Contains("# trest", export.Yaml);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ImportedOnlyNestedComment_RoundTripsViaSnippet_NotRegeneration()
+    {
+        // Scoping guard: a container whose only comments are IMPORTED (carry an anchor.stepPath) must
+        // keep exporting from its verbatim snippet — NOT regenerate — so untouched scripts stay stable.
+        // Only canvas-authored comments (no stepPath) should force regeneration.
+        var bridge = new FlowCanvasBridge();
+        var (nodes, edges) = bridge.TextToGraph(NestedCommentYaml);
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains(result.Diagnostics, d => d.Message.Contains("stored YAML snippet", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ExportGraphToYaml_IfWithElifAndElse_BranchMetadataProducesCanonicalYaml()
     {
         var bridge = new FlowCanvasBridge();

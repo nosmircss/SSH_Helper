@@ -1147,6 +1147,11 @@ namespace SSH_Helper.Services
             var leadingByPath = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             var inlineByPath = new Dictionary<string, string>(StringComparer.Ordinal);
             var headerComments = new List<string>();
+            // Target node ids of comments authored on the canvas (attachedToNodeId, no anchor.stepPath).
+            // Imported comments carry a stepPath and already round-trip inside their container's verbatim
+            // snippet, so only authored comments require forcing a container to regenerate (see
+            // ContainerHasDescendantComment). This keeps untouched imported scripts byte-stable.
+            var authoredCommentTargets = new HashSet<string>(StringComparer.Ordinal);
 
             void IndexComment(string text, string? atype, string? attachedToNodeId, string? spath)
             {
@@ -1154,6 +1159,7 @@ namespace SSH_Helper.Services
                 // Use attachedToNodeId as primary key when present; stepPath as fallback.
                 if (!string.IsNullOrEmpty(attachedToNodeId))
                 {
+                    if (string.IsNullOrEmpty(spath)) authoredCommentTargets.Add(attachedToNodeId!);
                     if (atype == "inline") inlineByNode[attachedToNodeId!] = text;
                     else // leading (or unspecified non-header)
                     {
@@ -1219,7 +1225,7 @@ namespace SSH_Helper.Services
                 sb.AppendLine("steps:");
 
             // Bundle comment dictionaries so they can be threaded into container/branch helpers.
-            var commentCtx = new CommentContext(leadingByNode, inlineByNode, leadingByPath, inlineByPath);
+            var commentCtx = new CommentContext(leadingByNode, inlineByNode, leadingByPath, inlineByPath, authoredCommentTargets);
 
             // Tracks nodes consumed as branch children by container blocks (if/foreach/while).
             // These are skipped in the main export loop since they're nested inside their parent's YAML.
@@ -1287,7 +1293,8 @@ namespace SSH_Helper.Services
                     (forceGraphExport ||
                      string.IsNullOrWhiteSpace(yamlSnippet) ||
                      HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap) ||
-                     HasImportedContainerBeenModified(nodeId, outgoing, nodeMap, yamlSnippet)))
+                     HasImportedContainerBeenModified(nodeId, outgoing, nodeMap, yamlSnippet) ||
+                     ContainerHasDescendantComment(nodeId, nodeMap, commentCtx)))
                 {
                     if (TryGenerateContainerFromGraph(
                             blockType, props, nodeId, outgoing, nodeMap, incomingCount,
@@ -1391,6 +1398,46 @@ namespace SSH_Helper.Services
         /// container's child nodes with the edges actually connecting them. If a branch's
         /// first child is no longer reachable from the container, the snippet is stale.
         /// </summary>
+        /// <summary>
+        /// True when any node nested under this container is the target of a canvas-authored comment.
+        /// Imported containers export verbatim from their stored snippet, which never consults per-child
+        /// comment lookups — so an authored comment on a descendant would be silently dropped. Detecting
+        /// it here forces graph regeneration (which DOES inject per-node comments via
+        /// TryGenerateSingleNodeYaml/BuildCommentedYaml), mirroring how a prop edit forces regeneration
+        /// through _forceGraphExport. Only AUTHORED comments count: imported comments already round-trip
+        /// inside the verbatim snippet, so triggering on them would needlessly canonicalize untouched
+        /// scripts. Descendants are matched by _stepPath prefix, covering any nesting depth.
+        /// </summary>
+        private static bool ContainerHasDescendantComment(
+            string nodeId,
+            Dictionary<string, JToken> nodeMap,
+            CommentContext commentCtx)
+        {
+            if (commentCtx.AuthoredCommentTargets.Count == 0)
+                return false;
+
+            var containerStepPath = nodeMap.TryGetValue(nodeId, out var containerNode)
+                ? (containerNode["data"]?["props"] as JObject)?["_stepPath"]?.ToString() ?? ""
+                : "";
+            if (string.IsNullOrEmpty(containerStepPath))
+                return false;
+
+            var prefix = containerStepPath + "/";
+            foreach (var kvp in nodeMap)
+            {
+                if (kvp.Key == nodeId) continue;
+                if (!commentCtx.IsAuthoredCommentTarget(kvp.Key)) continue;
+
+                var childStepPath = (kvp.Value["data"]?["props"] as JObject)?["_stepPath"]?.ToString();
+                if (!string.IsNullOrEmpty(childStepPath) &&
+                    childStepPath.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private static bool HasImportedContainerBeenModified(
             string nodeId,
             Dictionary<string, List<EdgeInfo>> outgoing,
@@ -1773,17 +1820,20 @@ namespace SSH_Helper.Services
             public readonly Dictionary<string, string> InlineByNode;
             public readonly Dictionary<string, List<string>> LeadingByPath;
             public readonly Dictionary<string, string> InlineByPath;
+            public readonly HashSet<string> AuthoredCommentTargets;
 
             public CommentContext(
                 Dictionary<string, List<string>> leadingByNode,
                 Dictionary<string, string> inlineByNode,
                 Dictionary<string, List<string>> leadingByPath,
-                Dictionary<string, string> inlineByPath)
+                Dictionary<string, string> inlineByPath,
+                HashSet<string> authoredCommentTargets)
             {
                 LeadingByNode = leadingByNode;
                 InlineByNode = inlineByNode;
                 LeadingByPath = leadingByPath;
                 InlineByPath = inlineByPath;
+                AuthoredCommentTargets = authoredCommentTargets;
             }
 
             public IEnumerable<string>? GetLeadingComments(string nodeId, string stepPath)
@@ -1797,6 +1847,10 @@ namespace SSH_Helper.Services
 
             public string? GetInlineComment(string nodeId, string stepPath) =>
                 InlineByNode.GetValueOrDefault(nodeId) ?? InlineByPath.GetValueOrDefault(stepPath);
+
+            /// <summary>True when a canvas-authored (non-imported) comment targets this node id.</summary>
+            public bool IsAuthoredCommentTarget(string nodeId) =>
+                AuthoredCommentTargets.Contains(nodeId);
         }
 
         /// <summary>
@@ -2294,7 +2348,8 @@ namespace SSH_Helper.Services
             if (IsContainerBlockType(nodeBlockType) &&
                 (forceGraphExport ||
                  string.IsNullOrWhiteSpace(snippet) ||
-                  HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap)))
+                  HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap) ||
+                  ContainerHasDescendantComment(nodeId, nodeMap, commentCtx)))
             {
                 if (!TryGenerateContainerFromGraph(
                         nodeBlockType,
