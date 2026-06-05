@@ -99,11 +99,19 @@ describe('buildLayoutTree (edge fallback + robustness)', () => {
     expect(tree.spine[0].branches[0].children.map((c) => c.id)).toEqual(['body']);
   });
 
-  it('keeps orphan (disconnected) nodes on the spine', () => {
+  it('keeps orphan (disconnected) nodes on the spine by default', () => {
     const nodes: Node[] = [
       { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start' } } as Node,
       { id: 'orphan', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: {} } } as Node,
     ];
     expect(buildLayoutTree(nodes, []).spine.map((n) => n.id)).toEqual(['orphan']);
+  });
+
+  it('with keepOrphans, leaves disconnected nodes OFF the spine (so the layout keeps their position)', () => {
+    const nodes: Node[] = [
+      { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start' } } as Node,
+      { id: 'orphan', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: {} } } as Node,
+    ];
+    expect(buildLayoutTree(nodes, [], true).spine.map((n) => n.id)).toEqual([]);
   });
 });

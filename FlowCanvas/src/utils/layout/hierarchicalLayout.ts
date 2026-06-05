@@ -297,7 +297,15 @@ export function anchorReservesLayoutSpace(node: Node): boolean {
 // from settingsSlice for store callers, or DEFAULT_BLOCK_SIZING for the factory geometry). Making it
 // required is deliberate — a silent default let the Layout button / expand-all revert wide/roomy
 // graphs to 330/1/1 geometry (band overlap + apparent settings reset).
-export function computeHierarchicalLayout(nodes: Node[], edges: Edge[], sizing: BlockSizing): Node[] {
+// keepOrphans (default false): forwarded to buildLayoutTree — true preserves the position of
+// disconnected/unwired blocks (automatic reflows), false organizes them onto the spine (the
+// explicit Auto-Layout button and initial import).
+export function computeHierarchicalLayout(
+  nodes: Node[],
+  edges: Edge[],
+  sizing: BlockSizing,
+  opts: { keepOrphans?: boolean } = {},
+): Node[] {
   activeSizing = resolveSizing(sizing);
   // Tally leading/header comments per target block so placeTree/placeBranchSteps can reserve
   // vertical room above each commented block (pills never overlap the block or band above).
@@ -309,7 +317,7 @@ export function computeHierarchicalLayout(nodes: Node[], edges: Edge[], sizing: 
     const step = estimateCommentStep(String(data.text ?? ''), activeSizing.compactComments);
     commentReserveByTarget.set(attachedTo, (commentReserveByTarget.get(attachedTo) ?? 0) + step);
   }
-  const tree = buildLayoutTree(nodes, edges);
+  const tree = buildLayoutTree(nodes, edges, opts.keepOrphans ?? false);
   const pos = placeTree(tree);
   placeComments(nodes, pos);
   return nodes.map((n) => {

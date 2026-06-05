@@ -57,7 +57,8 @@ export const createSettingsSlice: StateCreator<FlowStore, [], [], SettingsSlice>
   // node positions (layout-autosave). Mirrors debugSlice's setAllExpanded side effects.
   const reflowAndPersist = (changed: Record<string, unknown>) => {
     const st = get();
-    st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, sizing()));
+    // keepOrphans: a sizing change shouldn't yank unwired/manually-placed blocks onto the spine.
+    st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, sizing(), { keepOrphans: true }));
     messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, ...changed });
     sendLayoutAutosave();
   };
@@ -81,7 +82,7 @@ export const createSettingsSlice: StateCreator<FlowStore, [], [], SettingsSlice>
     restoreCanvasSettings: (s) => {
       set({ ...s });
       const st = get();
-      if (st.nodes.length > 0) st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, sizing()));
+      if (st.nodes.length > 0) st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, sizing(), { keepOrphans: true }));
     },
   };
 };

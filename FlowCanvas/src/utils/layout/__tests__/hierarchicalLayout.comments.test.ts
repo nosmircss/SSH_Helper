@@ -122,6 +122,19 @@ describe('computeHierarchicalLayout anchored comments', () => {
     expect(bMulti).toBeGreaterThan(bSingle); // multiline pill pushes its block lower
   });
 
+  it('keepOrphans preserves a dropped (disconnected) block position; default organizes it', () => {
+    const nodes = () => [
+      { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', props: {} } },
+      { id: 'a', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'a' } } },
+      { id: 'dropped', type: 'block', position: { x: 999, y: 777 }, data: { blockType: 'print', props: { message: 'd' } } },
+    ];
+    const e = [{ id: 'e0', source: '__start__', target: 'a' }];
+    const kept = computeHierarchicalLayout(nodes() as never, e as never, DEFAULT_BLOCK_SIZING, { keepOrphans: true });
+    const organized = computeHierarchicalLayout(nodes() as never, e as never, DEFAULT_BLOCK_SIZING);
+    expect(kept.find((n) => n.id === 'dropped')!.position).toEqual({ x: 999, y: 777 }); // stays where dropped
+    expect(organized.find((n) => n.id === 'dropped')!.position).not.toEqual({ x: 999, y: 777 }); // organized onto spine
+  });
+
   it('still gutters a free-floating sticky (no anchor)', () => {
     const nodes = [
       ...baseNodes(),

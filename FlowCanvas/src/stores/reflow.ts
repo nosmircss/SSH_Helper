@@ -15,7 +15,8 @@ import type { FlowStore } from './useFlowStore';
  */
 export function reflowLayout(get: () => FlowStore): void {
   const st = get();
-  if (st.nodes.length > 0) {
-    st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, selectCanvasSizing(st)));
-  }
+  if (st.nodes.length === 0) return;
+  // keepOrphans: this is an automatic reflow, so don't yank unwired/manually-placed orphan blocks
+  // onto the spine — only the explicit Auto-Layout button organizes them.
+  st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, selectCanvasSizing(st), { keepOrphans: true }));
 }

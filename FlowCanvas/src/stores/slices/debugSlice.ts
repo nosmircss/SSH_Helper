@@ -84,9 +84,10 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
     });
     // Carrier flag for layout/persistence (NOT node.data.props — never leaks to YAML).
     get().updateNodeData(nodeId, { expanded: nowExpanded });
-    // Reflow so the taller/shorter block pushes neighbors (height-aware layout).
+    // Reflow so the taller/shorter block pushes neighbors (height-aware layout). keepOrphans so an
+    // unwired/manually-placed block isn't yanked onto the spine by this incidental reflow.
     const st = get();
-    st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, selectCanvasSizing(st)));
+    st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, selectCanvasSizing(st), { keepOrphans: true }));
     sendLayoutAutosave();
   },
   setAllExpanded: (expanded) => {
@@ -99,7 +100,7 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
     const withFlag = st.nodes.map((n) =>
       n.type === 'block' ? { ...n, data: { ...n.data, expanded } } : n,
     );
-    st.setNodes(computeHierarchicalLayout(withFlag, st.edges, selectCanvasSizing(st)));
+    st.setNodes(computeHierarchicalLayout(withFlag, st.edges, selectCanvasSizing(st), { keepOrphans: true }));
     sendLayoutAutosave();
   },
   restoreExpandedNodes: (nodeIds) => {
