@@ -64,6 +64,7 @@ export default function BlockContextMenu() {
 
   // Find node position for comment placement
   const node = nodes.find((n) => n.id === nodeId);
+  const isComment = node?.type === 'comment';
   const commentPos = node
     ? { x: node.position.x + 200, y: node.position.y - 20 }
     : { x, y };
@@ -109,7 +110,7 @@ export default function BlockContextMenu() {
     ...(!isStartNode ? [
       { separator: true } as Separator,
       {
-        label: 'Delete Block',
+        label: isComment ? 'Delete Comment' : 'Delete Block',
         icon: '\uD83D\uDDD1',
         action: () => {
           removeNodes([nodeId]);
