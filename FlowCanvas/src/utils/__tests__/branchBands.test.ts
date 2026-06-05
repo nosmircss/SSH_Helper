@@ -8,6 +8,10 @@ function child(id: string, parent: string, stepPath: string, x: number, y: numbe
   return { id, position: { x, y }, data: { props: { _isChildOf: parent, _stepPath: stepPath } } } as Node;
 }
 
+function comment(id: string, attachedToNodeId: string, anchorType: string, x: number, y: number): Node {
+  return { id, type: 'comment', position: { x, y }, data: { attachedToNodeId, anchor: { type: anchorType } } } as Node;
+}
+
 describe('branchBands', () => {
   it('uses 18px padding', () => { expect(BAND_PAD).toBe(18); });
 
@@ -26,6 +30,22 @@ describe('branchBands', () => {
     expect(b.x).toBe(100 - 18);
     expect(b.width).toBe(300 + 18 * 2); // child width 300 + pad both sides
     expect(b.branchKey).toBe('then');
+  });
+
+  it('includes comments anchored to a member in memberIds so the band drags them too', () => {
+    const block = child('c1', 'p', 'steps/0/else/0', 100, 200);
+    const lead = comment('cm-lead', 'c1', 'leading', 100, 170);
+    const branch = comment('cm-branch', 'c1', 'branch', 100, 140);
+    const bands = computeBranchBands([block, lead, branch]);
+    expect(bands).toHaveLength(1);
+    expect(bands[0].memberIds).toEqual(expect.arrayContaining(['c1', 'cm-lead', 'cm-branch']));
+  });
+
+  it('does not balloon the band width for a leading comment aligned above its block', () => {
+    const block = child('c1', 'p', 'steps/0/else/0', 100, 200);
+    const lead = comment('cm', 'c1', 'leading', 100, 170);
+    const b = computeBranchBands([block, lead])[0];
+    expect(b.width).toBe(300 + 18 * 2); // childWidth 300 + pad, NOT stretched by the comment
   });
 
   it('insets a nested band on the LEFT only, preserving top/right/bottom padding', () => {

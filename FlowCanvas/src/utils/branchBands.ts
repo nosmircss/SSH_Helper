@@ -115,10 +115,18 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
   // band label lands above the pill, not over it). 'branch'/'header' pills sit OUTSIDE the band
   // and are excluded.
   const leadingPillsByTarget = new Map<string, Node[]>();
+  // EVERY comment anchored to a block (leading/branch/inline) must move WITH the band when it is
+  // dragged — otherwise comments are left behind and the band's box stretches to wrap the orphan.
+  // Collected by attached block id and folded into each band's memberIds below. Comment nodes carry
+  // attachedToNodeId on data directly (no props._stepPath), so they never appear in boxNodes.
+  const commentIdsByTarget = new Map<string, string[]>();
   for (const n of nodes) {
     if (n.type !== 'comment') continue;
     const d = n.data as { anchor?: { type?: string }; attachedToNodeId?: string } | undefined;
-    if (d?.anchor?.type !== 'leading' || !d.attachedToNodeId) continue;
+    if (!d?.attachedToNodeId) continue;
+    const ids = commentIdsByTarget.get(d.attachedToNodeId);
+    if (ids) ids.push(n.id); else commentIdsByTarget.set(d.attachedToNodeId, [n.id]);
+    if (d.anchor?.type !== 'leading') continue;
     const list = leadingPillsByTarget.get(d.attachedToNodeId);
     if (list) list.push(n); else leadingPillsByTarget.set(d.attachedToNodeId, [n]);
   }
@@ -202,6 +210,12 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
     // Capped at BAND_PAD - 4 so the band still clears its leftmost child.
     const leftInset = Math.min(depth * NESTED_BAND_INSET, BAND_PAD - 4);
     const memberIds = boxNodes.map((n) => n.id);
+    // Include comments anchored to any member so "drag the band" moves them too (keeps them aligned
+    // above their block; a left-behind leading comment would otherwise balloon the band's width).
+    for (const n of boxNodes) {
+      const cids = commentIdsByTarget.get(n.id);
+      if (cids) memberIds.push(...cids);
+    }
     prelims.push({
       id: groupId, parentId: g.parentId, branchKey: g.branchKey, depth, leftInset,
       memberIds, memberSet: new Set(memberIds),
