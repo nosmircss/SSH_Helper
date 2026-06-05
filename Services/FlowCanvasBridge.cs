@@ -1187,7 +1187,12 @@ namespace SSH_Helper.Services
                 var isChildNode = props?["_isChildOf"] != null;
 
                 // Comment nodes are consumed by the index built above; silently skip them here.
-                if (string.Equals(blockType, "comment", StringComparison.OrdinalIgnoreCase))
+                // Guard on BOTH type and blockType: if blockType is absent (data missing), the
+                // ?? "print" fallback above would produce blockType="print" and bypass a blockType-only
+                // check, causing the node to attempt YAML generation and produce a corrupt step.
+                var nodeType = node["type"]?.ToString();
+                if (string.Equals(nodeType, "comment", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(blockType, "comment", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 if (!string.IsNullOrWhiteSpace(existingStepPath))
@@ -2200,6 +2205,15 @@ namespace SSH_Helper.Services
             return null;
         }
 
+        /// <summary>
+        /// Generates YAML for a single non-container node (or a container node that is being
+        /// regenerated from the graph).  The returned <paramref name="nodeYaml"/> string is
+        /// ALWAYS at zero indentation — callers inside branch bodies MUST wrap it with
+        /// <see cref="IndentYaml"/> before appending to the branch output.
+        /// <c>TryGenerateBranchYaml</c> does this correctly via <c>IndentYaml(childYaml.TrimEnd(), indent)</c>.
+        /// Any future caller that omits that step will emit comment lines at column 0 inside
+        /// an indented branch body, producing invalid YAML.
+        /// </summary>
         private bool TryGenerateSingleNodeYaml(
             string nodeId,
             Dictionary<string, JToken> nodeMap,
@@ -4462,7 +4476,13 @@ namespace SSH_Helper.Services
             for (int i = 0; i < line.Length; i++)
             {
                 char c = line[i];
-                if (c == '\'' && !inDouble) inSingle = !inSingle;
+                if (c == '\'' && !inDouble)
+                {
+                    if (inSingle && i + 1 < line.Length && line[i + 1] == '\'')
+                        i++; // '' is an escaped single-quote inside a single-quoted string — skip both chars
+                    else
+                        inSingle = !inSingle;
+                }
                 else if (c == '"' && !inSingle) inDouble = !inDouble;
                 else if (c == '#' && !inSingle && !inDouble && i > 0 && char.IsWhiteSpace(line[i - 1]))
                 {

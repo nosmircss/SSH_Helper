@@ -3430,6 +3430,51 @@ public class FlowCanvasBridgeTests
 
         return edge;
     }
+
+    // R3 fix tests — Finding 3: the comment-node guard must fire when blockType is absent.
+
+    [Fact]
+    public void ExportGraphToYaml_CommentNodeWithMissingBlockType_IsSkippedNotCorrupted()
+    {
+        // Simulate a comment node whose data object lacks the blockType key entirely.
+        // The ?? "print" fallback would give blockType="print", so a blockType-only guard
+        // would miss it and attempt to generate a "- print:" step — corrupt output.
+        // The fixed guard additionally checks node["type"] == "comment" and must skip it.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                new JObject
+                {
+                    ["id"] = "comment-missing-bt",
+                    ["type"] = "comment",           // type = comment
+                    ["position"] = new JObject { ["x"] = 10, ["y"] = 10 },
+                    ["data"] = new JObject          // blockType deliberately absent
+                    {
+                        ["label"] = "Visual note",
+                        ["props"] = new JObject()
+                    }
+                },
+                CreateBlockNode("node-1", "print", new JObject { ["message"] = "hello" })
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "node-1")
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        // The comment node must not have produced a "print:" step from the ?? fallback
+        Assert.DoesNotContain("- print:\n    message:", result.Yaml, StringComparison.Ordinal);
+        // The real print node must still appear
+        Assert.Contains("print:", result.Yaml);
+        // The comment node must not have a step-path mapping
+        Assert.DoesNotContain("comment-missing-bt", result.NodeToStepPathMap.Keys);
+    }
 }
 
 public class FlowCanvasBridgeSplitYamlStepsTests
@@ -3546,5 +3591,47 @@ public class FlowCanvasBridgeSplitYamlStepsTests
             Assert.False(target != null && target.StartsWith("comment-"),
                 $"start wired to a comment node: {target}");
         }
+    }
+
+    // R3 fix tests — Finding 2: TrySplitTrailingComment must handle '' (escaped single-quote).
+    // A '' pair inside a single-quoted YAML value must NOT be treated as two string boundaries.
+
+    [Fact]
+    public void TrySplitTrailingComment_EscapedSingleQuoteInValue_NoFalseCommentSplit()
+    {
+        // command: 'it''s a test'  — the '' is an escaped single-quote; no trailing comment present.
+        // Before the fix the toggle approach would exit inSingle=false after the second ', causing
+        // any subsequent # to be treated as a comment when it is still inside the string.
+        var line = "command: 'it''s a test'";
+        var split = FlowCanvasBridge.TrySplitTrailingComment(line, out var code, out var comment);
+        Assert.False(split, "Should not see a trailing comment — the # is absent.");
+        Assert.Equal(line, code);
+        Assert.Equal(string.Empty, comment);
+    }
+
+    [Fact]
+    public void TrySplitTrailingComment_EscapedSingleQuoteThenRealComment_SplitsCorrectly()
+    {
+        // command: 'it''s ok'  # real trailing comment
+        // The '' is an escaped single-quote inside the string. The # after the closing ' is
+        // a genuine trailing comment.
+        var line = "command: 'it''s ok'  # real note";
+        var split = FlowCanvasBridge.TrySplitTrailingComment(line, out var code, out var comment);
+        Assert.True(split, "Should detect the trailing comment after the closing quote.");
+        Assert.Equal("command: 'it''s ok'", code);
+        Assert.Equal("real note", comment);
+    }
+
+    [Fact]
+    public void TrySplitTrailingComment_HashInsideEscapedSingleQuoteValue_NotSplit()
+    {
+        // command: 'it'' # note'  — the '' is escaped; the # is still inside the string.
+        // Before the fix, toggle logic would leave inSingle=false after the second quote of ''
+        // so the # would be incorrectly treated as a trailing comment, stripping part of the value.
+        var line = "command: 'it'' # note'";
+        var split = FlowCanvasBridge.TrySplitTrailingComment(line, out var code, out var comment);
+        Assert.False(split, "# is inside the single-quoted string after an escaped quote — must not split.");
+        Assert.Equal(line, code);
+        Assert.Equal(string.Empty, comment);
     }
 }
