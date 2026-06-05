@@ -269,6 +269,21 @@ function placeComments(nodes: Node[], pos: Map<string, Point>): void {
 }
 
 /**
+ * True when a comment node reserves vertical layout space above its block — i.e. it stacks above
+ * the block (leading/header) or above the band (branch). 'inline' comments and free-floating
+ * stickies reserve nothing. This is the SINGLE source of truth for the reserve rule below, and it
+ * is also what callers should use to decide whether adding/removing a comment warrants a reflow —
+ * keeping the reflow trigger from drifting away from what the layout actually reserves.
+ */
+export function anchorReservesLayoutSpace(node: Node): boolean {
+  if (node.type !== 'comment') return false;
+  const data = node.data as Record<string, unknown> | undefined;
+  if (!data?.attachedToNodeId) return false;
+  const t = (data.anchor as { type?: string } | undefined)?.type;
+  return t === 'leading' || t === 'header' || t === 'branch';
+}
+
+/**
  * Structure-aware layout: rebuild the container/branch tree and position it with the
  * smart-hybrid rules. Returns new node objects with updated positions; nodes not in the
  * tree (the start node, orphans the builder left unplaced) keep their position.
@@ -283,14 +298,11 @@ export function computeHierarchicalLayout(nodes: Node[], edges: Edge[], sizing: 
   // vertical room above each commented block (pills never overlap the block or band above).
   commentReserveByTarget = new Map();
   for (const n of nodes) {
-    if (n.type !== 'comment') continue;
-    const data = n.data as Record<string, unknown> | undefined;
-    const anchor = data?.anchor as { type?: string } | undefined;
-    const attachedTo = data?.attachedToNodeId as string | undefined;
-    if (attachedTo && (anchor?.type === 'leading' || anchor?.type === 'header' || anchor?.type === 'branch')) {
-      const step = estimateCommentStep(String(data?.text ?? ''), activeSizing.compactComments);
-      commentReserveByTarget.set(attachedTo, (commentReserveByTarget.get(attachedTo) ?? 0) + step);
-    }
+    if (!anchorReservesLayoutSpace(n)) continue;
+    const data = n.data as Record<string, unknown>;
+    const attachedTo = data.attachedToNodeId as string;
+    const step = estimateCommentStep(String(data.text ?? ''), activeSizing.compactComments);
+    commentReserveByTarget.set(attachedTo, (commentReserveByTarget.get(attachedTo) ?? 0) + step);
   }
   const tree = buildLayoutTree(nodes, edges);
   const pos = placeTree(tree);

@@ -2,6 +2,8 @@ import type { StateCreator } from 'zustand';
 import type { FlowStore } from '../useFlowStore';
 import { sendLayoutAutosave } from '../../utils/layoutAutosave';
 import { DEFAULT_COMMENT_COLOR } from '../../utils/tokens';
+import { reflowLayout } from '../reflow';
+import { anchorReservesLayoutSpace } from '../../utils/layout/hierarchicalLayout';
 
 export interface CommentSlice {
   addComment: (position: { x: number; y: number }, attachedToNodeId?: string, kind?: 'comment' | 'sticky') => void;
@@ -33,6 +35,11 @@ export const createCommentSlice: StateCreator<FlowStore, [], [], CommentSlice> =
       },
     };
     set((s) => ({ nodes: [...s.nodes, commentNode] }));
+    // A space-reserving comment (leading/header/branch) needs the layout to make room above its
+    // block, so reflow to place it there and push everything below down. Comments that reserve
+    // nothing (inline, or free-floating stickies) skip the reflow so they neither re-gutter nor
+    // discard a manual arrangement. anchorReservesLayoutSpace is the same rule the layout reserves by.
+    if (anchorReservesLayoutSpace(commentNode as never)) reflowLayout(get);
     sendLayoutAutosave();
   },
 
@@ -66,10 +73,14 @@ export const createCommentSlice: StateCreator<FlowStore, [], [], CommentSlice> =
 
   removeComment: (id) => {
     get().pushSnapshot('Remove comment');
+    const removed = get().nodes.find((n) => n.id === id);
+    const wasReserving = !!removed && anchorReservesLayoutSpace(removed);
     set((s) => ({
       nodes: s.nodes.filter((n) => n.id !== id),
       selectedNodeIds: new Set([...s.selectedNodeIds].filter((selectedId) => selectedId !== id)),
     }));
+    // Reclaim space only if the comment actually reserved any (inline/free-floating reserved none).
+    if (wasReserving) reflowLayout(get);
     sendLayoutAutosave();
   },
 });

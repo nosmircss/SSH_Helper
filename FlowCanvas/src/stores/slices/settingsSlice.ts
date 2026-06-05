@@ -4,6 +4,7 @@ import { messageBus } from '../../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
 import { sendLayoutAutosave } from '../../utils/layoutAutosave';
 import { computeHierarchicalLayout, type BlockSizing } from '../../utils/layout/hierarchicalLayout';
+import { selectCanvasSizing } from './canvasSizing';
 
 /** Width presets (px). Normal=330 is today's default. */
 export const WIDTH_PRESETS = [
@@ -32,9 +33,9 @@ export type CanvasSettings = Pick<SettingsSlice, 'blockWidth' | 'textScale' | 'd
 /** Live canvas sizing read from the store — the single shape every reflow caller MUST thread into
  *  computeHierarchicalLayout so auto-layout, expand/collapse and import all honor the user's
  *  Display Settings instead of silently reverting to the factory 330/1/1 geometry. */
-export const selectCanvasSizing = (
-  s: Pick<SettingsSlice, 'blockWidth' | 'density' | 'textScale'> & { compactCommentsEnabled?: boolean },
-): BlockSizing => ({ blockWidth: s.blockWidth, density: s.density, textScale: s.textScale, compactComments: s.compactCommentsEnabled });
+// Re-exported from the runtime-leaf module so existing importers keep working; the canonical
+// definition lives in ./canvasSizing to avoid an init-order cycle (see that file).
+export { selectCanvasSizing };
 
 export interface SettingsSlice {
   blockWidth: number;

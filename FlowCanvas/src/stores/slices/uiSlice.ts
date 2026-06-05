@@ -3,8 +3,7 @@ import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
 import { messageBus } from '../../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
-import { computeHierarchicalLayout } from '../../utils/layout/hierarchicalLayout';
-import { selectCanvasSizing } from './settingsSlice';
+import { reflowLayout } from '../reflow';
 
 export interface PanelSizes {
   rightPanelWidth: number;
@@ -145,16 +144,14 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, compactCommentsEnabled: next });
     set({ compactCommentsEnabled: next });
     // Comment height changes (pill <-> card), so reflow to re-reserve their vertical space.
-    const st = get();
-    if (st.nodes.length > 0) st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, selectCanvasSizing(st)));
+    reflowLayout(get);
   },
   restoreCompactComments: (value) => {
     set({ compactCommentsEnabled: value });
     // Reflow so comment spacing matches the restored setting (cards reserve more than pills).
     // Without this, an import reflow that ran under the default setting leaves cards overlapping
     // until the user presses Auto-Layout. Safe whether this fires before or after load-graph.
-    const st = get();
-    if (st.nodes.length > 0) st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, selectCanvasSizing(st)));
+    reflowLayout(get);
   },
 
   toggleSnapToGrid: () => set((s) => {

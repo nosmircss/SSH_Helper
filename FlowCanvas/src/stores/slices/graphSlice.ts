@@ -6,8 +6,19 @@ import { blockDefMap } from '../../blockDefs/registry';
 import { isConnectionAllowed } from '../../utils/connectionRules';
 import { branchColorVar } from '../../utils/branchBands';
 import { deriveChildMembership, applyChildMembership, clearConnectAuthoredMembership } from '../../utils/childMembership';
+import { reflowLayout } from '../reflow';
+import { anchorReservesLayoutSpace } from '../../utils/layout/hierarchicalLayout';
 
 export const START_NODE_ID = '__start__';
+
+/** A comment is attached to a block when it carries attachedToNodeId (any anchor type, incl. inline).
+ *  Used for orphan cascade-delete — NOT for the reflow trigger, which must match the layout's reserve
+ *  rule (anchorReservesLayoutSpace) so deleting a non-reserving comment never reflows. */
+function commentAttachedTo(node: Node): string | undefined {
+  if (node.type !== 'comment') return undefined;
+  const attachedTo = (node.data as Record<string, unknown> | undefined)?.attachedToNodeId;
+  return typeof attachedTo === 'string' ? attachedTo : undefined;
+}
 
 function clearedExportStatusState(): Pick<FlowStore, 'exportStatus' | 'diagnostics'> {
   return {
@@ -233,11 +244,25 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
     const filtered = changes.filter(
       (c) => c.type !== 'remove' || c.id !== START_NODE_ID,
     );
+    // For remove events, cascade to comment nodes attached to the removed blocks.
+    const removedIds = new Set(
+      filtered.filter((c) => c.type === 'remove').map((c) => c.id),
+    );
+    // Reflow only when a remove takes a SPACE-RESERVING comment with it (directly or via its host
+    // block). Computed before the mutation; strictly gated to removes so drag/select changes never
+    // reflow, and to reserving anchors so removing an inline comment never disturbs the layout.
+    let removedReservingComment = false;
+    if (removedIds.size > 0) {
+      for (const n of get().nodes) {
+        if (!anchorReservesLayoutSpace(n)) continue;
+        const attachedTo = (n.data as Record<string, unknown>).attachedToNodeId as string;
+        if (removedIds.has(n.id) || removedIds.has(attachedTo)) {
+          removedReservingComment = true;
+          break;
+        }
+      }
+    }
     set((state) => {
-      // For remove events, cascade to comment nodes attached to the removed blocks.
-      const removedIds = new Set(
-        filtered.filter((c) => c.type === 'remove').map((c) => c.id),
-      );
       let allChanges = filtered;
       if (removedIds.size > 0) {
         const attachedCommentIds: string[] = [];
@@ -267,6 +292,7 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
         ...(hasGraphMutation ? clearedExportStatusState() : {}),
       };
     });
+    if (removedReservingComment) reflowLayout(get);
   },
 
   onEdgesChange: (changes) => {
@@ -360,25 +386,29 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
     if (filtered.length === 0) return;
     get().pushSnapshot('Delete blocks');
     const idSet = new Set(filtered);
-    set((state) => {
-      // Cascade: also remove comment nodes whose attachedToNodeId is in the deleted set.
-      const toRemove = new Set(idSet);
-      for (const n of state.nodes) {
-        if (n.type === 'comment') {
-          const attachedTo = (n.data as Record<string, unknown>)?.attachedToNodeId;
-          if (typeof attachedTo === 'string' && toRemove.has(attachedTo)) {
-            toRemove.add(n.id);
-          }
-        }
-      }
-      return {
-        nodes: state.nodes.filter((n) => !toRemove.has(n.id)),
-        edges: state.edges.filter((e) => !toRemove.has(e.source) && !toRemove.has(e.target)),
-        selectedNodeIds: new Set([...state.selectedNodeIds].filter((id) => !toRemove.has(id))),
-        isDirty: true,
-        ...clearedExportStatusState(),
-      };
-    });
+    // Resolve the full removal set (including comments cascaded by their host block) up front, and
+    // separately track whether a SPACE-RESERVING comment is leaving. Cascade removes ANY attached
+    // comment (incl. inline) so none is orphaned; the reflow fires only when a comment that actually
+    // reserved vertical space is removed, so deleting an inline comment never disturbs the layout.
+    const toRemove = new Set(idSet);
+    let removedReservingComment = false;
+    for (const n of get().nodes) {
+      const attachedTo = commentAttachedTo(n);
+      if (attachedTo === undefined) continue;
+      const hostDeleted = idSet.has(attachedTo);
+      const selfDeleted = idSet.has(n.id);
+      if (!hostDeleted && !selfDeleted) continue;
+      toRemove.add(n.id);
+      if (anchorReservesLayoutSpace(n)) removedReservingComment = true;
+    }
+    set((state) => ({
+      nodes: state.nodes.filter((n) => !toRemove.has(n.id)),
+      edges: state.edges.filter((e) => !toRemove.has(e.source) && !toRemove.has(e.target)),
+      selectedNodeIds: new Set([...state.selectedNodeIds].filter((id) => !toRemove.has(id))),
+      isDirty: true,
+      ...clearedExportStatusState(),
+    }));
+    if (removedReservingComment) reflowLayout(get);
   },
 
   removeEdges: (ids) => {
