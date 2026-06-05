@@ -328,3 +328,48 @@ export function computeHierarchicalLayout(
     return p ? { ...n, position: p } : n;
   });
 }
+
+/**
+ * Manual-mode placement for blocks that have no saved position yet (added in the text editor while
+ * the preset was Manual). Existing/placed blocks never move. Each new block is dropped just below
+ * its predecessor (the source of its incoming edge) in the USER's arrangement, aligned to the
+ * predecessor's x, then nudged downward off any block already occupying that point. New blocks are
+ * tagged data._justPlaced so the node can show a brief "new" highlight. Comments are handled by the
+ * caller (placeAnchoredComments).
+ */
+export function placeNewBlocksNearNeighbors(
+  nodes: Node[],
+  edges: Edge[],
+  newIds: Set<string>,
+  sizing: BlockSizing,
+): Node[] {
+  if (newIds.size === 0) return nodes;
+  const step = Math.round(LAYOUT.NODE_SPACING_Y * sizing.density);
+  const predOf = new Map<string, string>(); // target -> source
+  for (const e of edges) if (!predOf.has(e.target)) predOf.set(e.target, e.source);
+
+  const posById = new Map<string, Point>();
+  for (const n of nodes) if (n.position) posById.set(n.id, { x: n.position.x, y: n.position.y });
+
+  const occupied = (): Point[] =>
+    nodes.filter((n) => n.type !== 'comment' && !newIds.has(n.id))
+      .map((n) => posById.get(n.id)!).filter(Boolean);
+
+  const ordered = nodes.filter((n) => newIds.has(n.id));
+  for (const node of ordered) {
+    const pred = predOf.get(node.id);
+    const base = (pred && posById.get(pred)) || { x: LAYOUT.NODE_START_X, y: LAYOUT.NODE_START_Y };
+    let y = base.y + step;
+    const x = base.x;
+    const taken = occupied();
+    while (taken.some((p) => Math.abs(p.x - x) < 1 && Math.abs(p.y - y) < step - 1)) y += step;
+    const p = { x, y };
+    posById.set(node.id, p);
+  }
+
+  return nodes.map((n) => {
+    if (!newIds.has(n.id)) return n;
+    const p = posById.get(n.id)!;
+    return { ...n, position: p, data: { ...(n.data as object), _justPlaced: true } };
+  });
+}
