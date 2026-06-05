@@ -4713,8 +4713,15 @@ namespace SSH_Helper.Services
         private static void AppendStepLine(StringBuilder sb, string line, ref string? inlineComment, bool captureInline = true)
         {
             // Only strip a trailing inline comment when captureInline is true (i.e. we are still
-            // on the step's own header lines, before any nested body list item was seen).
-            if (captureInline && inlineComment == null && TrySplitTrailingComment(line, out var code, out var comment))
+            // on the step's own header lines, before any nested body list item was seen) AND the line
+            // has actual code before the '#'. A standalone comment-only line (empty code) is NOT an
+            // inline comment — it's a leading/branch comment for a following nested step. Capturing it
+            // here would strip it from the snippet AND duplicate it on export (a stray '# x' on the
+            // container header line, plus the correct copy above the branch keyword). Leave it verbatim
+            // so CollectNestedComments anchors it as the single source.
+            if (captureInline && inlineComment == null &&
+                TrySplitTrailingComment(line, out var code, out var comment) &&
+                code.Trim().Length > 0)
             {
                 inlineComment = comment;
                 sb.AppendLine(code);

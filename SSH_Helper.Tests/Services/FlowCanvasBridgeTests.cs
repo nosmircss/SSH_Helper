@@ -569,6 +569,64 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_SingleBranchComment_NotDoubledOnRegeneration_Foreach()
+    {
+        // A comment between a single-branch container's header and its branch keyword must export
+        // ONCE (above the keyword), not also as a stray inline comment on the container header line.
+        var bridge = new FlowCanvasBridge();
+        var yaml =
+            "steps:\n" +
+            "- foreach: x in items\n" +
+            "  # loop body\n" +        // between header and do: -> branch comment only
+            "  do:\n" +
+            "    - print:\n" +
+            "        message: \"hi\"\n";
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var props = n["data"]?["props"] as JObject;
+            if (n["data"]?["blockType"]?.ToString() == "foreach" && props != null)
+                props["_forceGraphExport"] = true;
+        }
+
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# loop body"));
+        var lines = result.Yaml.Replace("\r\n", "\n").Split('\n');
+        Assert.DoesNotContain(lines, l => l.Contains("foreach") && l.Contains("#")); // no stray inline on header
+        int doIdx = Array.FindIndex(lines, l => l.Trim() == "do:");
+        int cIdx = Array.FindIndex(lines, l => l.Trim() == "# loop body");
+        Assert.True(doIdx >= 0 && cIdx == doIdx - 1, "comment sits directly above 'do:'");
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_SingleBranchComment_NotDoubledOnRegeneration_IfThenOnly()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml =
+            "steps:\n" +
+            "- if:\n" +
+            "    condition: a == \"b\"\n" +
+            "    # do the thing\n" +    // between condition and then: -> branch comment only
+            "    then:\n" +
+            "      - print:\n" +
+            "          message: \"hi\"\n";
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var props = n["data"]?["props"] as JObject;
+            if (n["data"]?["blockType"]?.ToString() == "if" && props != null)
+                props["_forceGraphExport"] = true;
+        }
+
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# do the thing"));
+        var lines = result.Yaml.Replace("\r\n", "\n").Split('\n');
+        Assert.DoesNotContain(lines, l => l.TrimStart().StartsWith("- if:") && l.Contains("#"));
+    }
+
+    [Fact]
     public void ExportGraphToYaml_BranchCommentRegeneration_EmitsBranchCommentAboveKeyword()
     {
         // Repro: a branch comment (above 'else:') and a leading comment (inside the else body) must
