@@ -31,6 +31,9 @@ export default function Toolbar() {
   const hasPath = pathVisible && blockStates.size > 0;
   const autoLayout = useAutoLayout();
 
+  const layoutMode = useFlowStore((s) => s.layoutMode);
+  const setLayoutMode = useFlowStore((s) => s.setLayoutMode);
+
   const nodes = useFlowStore((s) => s.nodes);
   const expandedNodes = useFlowStore((s) => s.expandedNodes);
   const setAllExpanded = useFlowStore((s) => s.setAllExpanded);
@@ -186,6 +189,15 @@ export default function Toolbar() {
       {/* Canvas controls */}
       <button onClick={autoLayout} style={btnStyle('var(--fc-cat-data-border)', true)} title="Auto-organize layout">
         ⊞ Layout
+      </button>
+      <button
+        onClick={() => setLayoutMode(layoutMode === 'manual' ? 'auto' : 'manual')}
+        style={btnStyle(layoutMode === 'manual' ? 'var(--fc-state-success)' : 'var(--fc-cat-data-border)', true)}
+        title={layoutMode === 'manual'
+          ? 'Manual layout — your arrangement is kept. Click for Auto-flow.'
+          : 'Auto-flow — canvas re-tidies itself. Click to keep your arrangement (Manual).'}
+      >
+        {layoutMode === 'manual' ? '🔒 Manual' : '✨ Auto-flow'}
       </button>
       <button onClick={toggleSearch} style={btnStyle(searchVisible ? 'var(--fc-accent)' : 'var(--fc-text-muted)', true)} title="Search blocks (Ctrl+F)">
         🔍
