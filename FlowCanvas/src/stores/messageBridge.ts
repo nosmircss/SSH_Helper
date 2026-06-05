@@ -11,7 +11,7 @@ import type { NodeDiagnostic } from './slices/uiSlice';
 import { isConnectionAllowed } from '../utils/connectionRules';
 import type { ConnectionVerdict } from '../utils/connectionRules';
 import type { Connection } from '@xyflow/react';
-import { computeHierarchicalLayout } from '../utils/layout/hierarchicalLayout';
+import { computeHierarchicalLayout, placeNewBlocksNearNeighbors } from '../utils/layout/hierarchicalLayout';
 import { placeAnchoredComments } from '../utils/layout/placeAnchoredComments';
 import type { CanvasSettings } from './slices/settingsSlice';
 
@@ -132,18 +132,22 @@ export function initMessageBridge(): () => void {
         store.getState().setEdges(msg.edges as Edge[]);
         ensureStartNodeExists(store);
 
-        // No saved arrangement → lay it out with the structure-aware engine. Compute then
-        // setNodes once (synchronous, before paint) so there is no flash of raw positions.
-        const hasUserLayout = (msg as { hasUserLayout?: boolean }).hasUserLayout === true;
-        if (!hasUserLayout) {
-          const s = store.getState();
-          // computeHierarchicalLayout already places anchored comments (band-aware) + reserves
-          // their vertical space, so no separate placeAnchoredComments pass here.
-          store.getState().setNodes(computeHierarchicalLayout(s.nodes, s.edges,
-            { blockWidth: s.blockWidth, density: s.density, textScale: s.textScale, compactComments: s.compactCommentsEnabled }));
+        // Mode-aware layout: the host tells us the preset's mode and what to do on this load.
+        const layoutMode = (msg as { layoutMode?: string }).layoutMode === 'manual' ? 'manual' : 'auto';
+        const layoutAction = (msg as { layoutAction?: string }).layoutAction === 'keep' ? 'keep' : 'reflow';
+        const rawNewIds = (msg as { newNodeIds?: unknown[] }).newNodeIds;
+        const newNodeIds: string[] = Array.isArray(rawNewIds) ? rawNewIds.map(String) : [];
+        store.getState().restoreLayoutMode(layoutMode); // host-driven, no echo
+
+        const s = store.getState();
+        const sizing = { blockWidth: s.blockWidth, density: s.density, textScale: s.textScale, compactComments: s.compactCommentsEnabled };
+        if (layoutAction === 'reflow') {
+          store.getState().setNodes(computeHierarchicalLayout(s.nodes, s.edges, sizing));
         } else {
-          // Saved user layout: keep block positions, only (re-)anchor comments above their block/band.
-          store.getState().setNodes(placeAnchoredComments(store.getState().nodes, store.getState().compactCommentsEnabled));
+          // Manual keep: positions already merged by the host. Place only the new blocks near their
+          // neighbor, then (re-)anchor comments above their block/band.
+          const placed = placeNewBlocksNearNeighbors(s.nodes, s.edges, new Set(newNodeIds), sizing);
+          store.getState().setNodes(placeAnchoredComments(placed, store.getState().compactCommentsEnabled));
         }
 
         resetGraphSessionState(store);
@@ -396,9 +400,11 @@ export function initMessageBridge(): () => void {
         store.getState().restorePanelSizes(sizes);
       }
       if (typeof msg.heatmapEnabled === 'boolean') store.getState().restoreHeatmapEnabled(msg.heatmapEnabled);
-      // Restore BEFORE the reflowing restores below (sizing / compact-comments) so their reflow
-      // honors the saved Auto-layout setting instead of the default-on value.
-      if (typeof msg.autoReflowEnabled === 'boolean') store.getState().restoreAutoReflow(msg.autoReflowEnabled);
+      // Restore the global DEFAULT mode (settings popover). The active preset's mode arrives via
+      // load-graph (restoreLayoutMode), so this only seeds the default shown in settings.
+      if (msg.defaultLayoutMode === 'auto' || msg.defaultLayoutMode === 'manual') {
+        store.getState().restoreDefaultLayoutMode(msg.defaultLayoutMode);
+      }
 
       const cs: Partial<CanvasSettings> = {};
       if (typeof msg.blockWidth === 'number' && msg.blockWidth > 0) cs.blockWidth = msg.blockWidth;

@@ -17,12 +17,12 @@ import type { FlowStore } from './useFlowStore';
 export function reflowLayout(get: () => FlowStore): void {
   const st = get();
   if (st.nodes.length === 0) return;
-  if (st.autoReflowEnabled) {
-    // keepOrphans: an automatic reflow must not yank unwired/manually-placed orphan blocks onto the
-    // spine — only the explicit Auto-Layout button organizes them.
+  if (st.layoutMode === 'auto') {
+    // Auto-flow mode: keepOrphans so an automatic reflow doesn't yank unwired/manually-placed orphan
+    // blocks onto the spine — only the explicit Auto-Layout button organizes them.
     st.setNodes(computeHierarchicalLayout(st.nodes, st.edges, selectCanvasSizing(st), { keepOrphans: true }));
   } else {
-    // Auto-reflow off: freeze block positions; only re-anchor comments above their blocks so a
+    // Manual mode: freeze block positions; only re-anchor comments above their blocks so a
     // newly added/edited comment still lands in the right place without moving any block.
     st.setNodes(placeAnchoredComments(st.nodes, st.compactCommentsEnabled));
   }

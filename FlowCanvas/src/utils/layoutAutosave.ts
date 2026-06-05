@@ -16,6 +16,12 @@ export function sendLayoutAutosave(): void {
   debounceTimer = setTimeout(doSend, 300);
 }
 
+/** Sends the layout autosave immediately (used by the Manual-mode freeze on mode switch). */
+export function flushLayoutAutosave(): void {
+  if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+  doSend();
+}
+
 function doSend(): void {
   debounceTimer = null;
   const state = useFlowStore.getState();

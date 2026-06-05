@@ -4,6 +4,7 @@ import { blockDefMap } from '../../blockDefs/registry';
 import { messageBus } from '../../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
 import { reflowLayout } from '../reflow';
+import { flushLayoutAutosave } from '../../utils/layoutAutosave';
 
 export interface PanelSizes {
   rightPanelWidth: number;
@@ -27,7 +28,8 @@ export interface UISlice {
   heatmapEnabled: boolean;
   branchBandsEnabled: boolean;
   compactCommentsEnabled: boolean;
-  autoReflowEnabled: boolean;
+  layoutMode: 'auto' | 'manual';          // active preset's mode (drives reflow gating + toolbar)
+  defaultLayoutMode: 'auto' | 'manual';   // global default for new/unset presets (settings popover)
   snapToGrid: boolean;
   gridSize: number;
   searchQuery: string;
@@ -63,8 +65,10 @@ export interface UISlice {
   restoreBranchBands: (value: boolean) => void;
   toggleCompactComments: () => void;
   restoreCompactComments: (value: boolean) => void;
-  toggleAutoReflow: () => void;
-  restoreAutoReflow: (value: boolean) => void;
+  setLayoutMode: (mode: 'auto' | 'manual') => void;       // user toggle: echoes + side effects
+  restoreLayoutMode: (mode: 'auto' | 'manual') => void;   // host-driven (load-graph), no echo
+  setDefaultLayoutMode: (mode: 'auto' | 'manual') => void;
+  restoreDefaultLayoutMode: (mode: 'auto' | 'manual') => void;
   toggleSnapToGrid: () => void;
   restoreSnapToGrid: (value: boolean) => void;
   setSearchQuery: (query: string) => void;
@@ -92,7 +96,8 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   heatmapEnabled: false,
   branchBandsEnabled: true,
   compactCommentsEnabled: true,
-  autoReflowEnabled: true,
+  layoutMode: 'auto',
+  defaultLayoutMode: 'auto',
   snapToGrid: false,
   gridSize: 20,
   searchQuery: '',
@@ -158,15 +163,25 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     reflowLayout(get);
   },
 
-  toggleAutoReflow: () => {
-    const next = !get().autoReflowEnabled;
-    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, autoReflowEnabled: next });
-    set({ autoReflowEnabled: next });
-    // Re-enabling tidies the current graph immediately (reflowLayout now sees it ON); disabling
-    // just freezes future automatic reflows, leaving the current arrangement untouched.
-    if (next && get().nodes.length > 0) reflowLayout(get);
+  setLayoutMode: (mode) => {
+    if (get().layoutMode === mode) return;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.setLayoutMode, mode });
+    set({ layoutMode: mode });
+    if (mode === 'auto') {
+      // Auto-flow tidies immediately; the arrangement stays in host storage for a later flip back.
+      if (get().nodes.length > 0) reflowLayout(get);
+    } else {
+      // Switching INTO Manual freezes the current on-screen positions as the saved layout.
+      flushLayoutAutosave();
+    }
   },
-  restoreAutoReflow: (value) => set({ autoReflowEnabled: value }), // host-driven, no echo/reflow
+  restoreLayoutMode: (mode) => set({ layoutMode: mode }), // host-driven, no echo/reflow
+
+  setDefaultLayoutMode: (mode) => {
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, defaultLayoutMode: mode });
+    set({ defaultLayoutMode: mode });
+  },
+  restoreDefaultLayoutMode: (mode) => set({ defaultLayoutMode: mode }),
 
   toggleSnapToGrid: () => set((s) => {
     const next = !s.snapToGrid;

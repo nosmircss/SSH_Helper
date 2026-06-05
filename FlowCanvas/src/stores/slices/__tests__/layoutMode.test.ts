@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-vi.mock('../../../utils/layoutAutosave', () => ({ sendLayoutAutosave: vi.fn() }));
+vi.mock('../../../utils/layoutAutosave', () => ({ sendLayoutAutosave: vi.fn(), flushLayoutAutosave: vi.fn() }));
 vi.mock('../../../MessageBus', () => ({ messageBus: { send: vi.fn() }, CANVAS_HOST_MESSAGES: { outgoing: {} } }));
 import { useFlowStore } from '../../useFlowStore';
 import { computeHierarchicalLayout, DEFAULT_BLOCK_SIZING } from '../../../utils/layout/hierarchicalLayout';
@@ -19,41 +19,40 @@ function seed() {
   s0.setNodes(computeHierarchicalLayout(s0.nodes, s0.edges, DEFAULT_BLOCK_SIZING));
 }
 
-describe('autoReflow setting', () => {
+describe('layout mode', () => {
   beforeEach(() => {
-    useFlowStore.setState({ nodes: [], edges: [], expandedNodes: new Set(), autoReflowEnabled: true });
+    useFlowStore.setState({ nodes: [], edges: [], expandedNodes: new Set(), layoutMode: 'auto' });
     vi.clearAllMocks();
   });
 
-  it('toggleAutoReflow flips the flag', () => {
-    useFlowStore.getState().toggleAutoReflow();
-    expect(useFlowStore.getState().autoReflowEnabled).toBe(false);
-    useFlowStore.getState().toggleAutoReflow();
-    expect(useFlowStore.getState().autoReflowEnabled).toBe(true);
+  it('setLayoutMode flips the active mode', () => {
+    useFlowStore.getState().setLayoutMode('manual');
+    expect(useFlowStore.getState().layoutMode).toBe('manual');
+    useFlowStore.getState().setLayoutMode('auto');
+    expect(useFlowStore.getState().layoutMode).toBe('auto');
   });
 
-  it('with auto-reflow ON, expanding a block pushes its successor down', () => {
+  it('in Auto-flow, expanding a block pushes its successor down', () => {
     seed();
     const before = yPos('B');
     useFlowStore.getState().toggleExpanded('A');
     expect(yPos('B')).toBeGreaterThan(before);
   });
 
-  it('with auto-reflow OFF, expanding a block does NOT move its successor (layout frozen)', () => {
+  it('in Manual, expanding a block does NOT move its successor (layout frozen)', () => {
     seed();
-    useFlowStore.setState({ autoReflowEnabled: false });
+    useFlowStore.setState({ layoutMode: 'manual' });
     const before = yPos('B');
     useFlowStore.getState().toggleExpanded('A');
     expect(yPos('B')).toBe(before);
   });
 
-  it('with auto-reflow OFF, adding an anchored comment does not move blocks', () => {
+  it('in Manual, adding an anchored comment does not move blocks', () => {
     seed();
-    useFlowStore.setState({ autoReflowEnabled: false });
+    useFlowStore.setState({ layoutMode: 'manual' });
     const before = yPos('B');
     useFlowStore.getState().addComment({ x: 0, y: 0 }, 'A', 'comment');
     expect(yPos('B')).toBe(before);
-    // the comment still got anchored above its block (placeAnchoredComments ran)
     const c = useFlowStore.getState().nodes.find((n) => n.type === 'comment')!;
     expect(c.position.x).toBe(useFlowStore.getState().nodes.find((n) => n.id === 'A')!.position.x);
   });
