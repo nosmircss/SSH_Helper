@@ -203,6 +203,18 @@ namespace SSH_Helper.UI
             {
                 var json = e.WebMessageAsJson;
                 var msg = JObject.Parse(json);
+                HandleHostMessage(msg);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Message error: {ex.Message}");
+            }
+        }
+
+        internal void HandleHostMessage(JObject msg)
+        {
+            try
+            {
                 var type = msg["type"]?.ToString();
 
                 switch (type)
@@ -263,6 +275,10 @@ namespace SSH_Helper.UI
 
                     case "layout-autosave":
                         OnLayoutAutosave?.Invoke(msg);
+                        break;
+
+                    case "set-layout-mode":
+                        OnSetLayoutMode?.Invoke(msg);
                         break;
 
                     case "browse-path":
@@ -358,6 +374,7 @@ namespace SSH_Helper.UI
         public event Action<JObject>? OnDisableBlock;
         public event Action<JObject>? OnTestDataBlock;
         public event Action<JObject>? OnLayoutAutosave;
+        public event Action<JObject>? OnSetLayoutMode;
         public event Action<JObject>? OnBrowsePath;
 
         private void ApplyTheme()
@@ -392,7 +409,7 @@ namespace SSH_Helper.UI
                 snapToGrid = ws.FlowCanvasSnapToGrid,
                 branchBandsEnabled = ws.FlowCanvasBranchBands,
                 compactCommentsEnabled = ws.FlowCanvasCompactComments,
-                autoReflowEnabled = ws.FlowCanvasAutoReflow,
+                defaultLayoutMode = (ws.FlowCanvasDefaultLayoutMode ?? Models.LayoutMode.AutoFlow) == Models.LayoutMode.Manual ? "manual" : "auto",
             });
 
             var rm = ws.FlowCanvasReducedMotion;
@@ -415,11 +432,11 @@ namespace SSH_Helper.UI
             var snap = msg["snapToGrid"]?.Value<bool>();
             var bands = msg["branchBandsEnabled"]?.Value<bool>();
             var compact = msg["compactCommentsEnabled"]?.Value<bool>();
-            var autoReflow = msg["autoReflowEnabled"]?.Value<bool>();
+            var defaultLayoutMode = msg["defaultLayoutMode"]?.ToString();
 
             if (rightWidth == null && outputHeight == null && heatmap == null && blockWidth == null
                 && textScale == null && density == null && defaultExpanded == null && snap == null && bands == null
-                && compact == null && autoReflow == null)
+                && compact == null && defaultLayoutMode == null)
                 return;
 
             _configService.Update(c =>
@@ -435,7 +452,9 @@ namespace SSH_Helper.UI
                 if (snap.HasValue) c.WindowState.FlowCanvasSnapToGrid = snap.Value;
                 if (bands.HasValue) c.WindowState.FlowCanvasBranchBands = bands.Value;
                 if (compact.HasValue) c.WindowState.FlowCanvasCompactComments = compact.Value;
-                if (autoReflow.HasValue) c.WindowState.FlowCanvasAutoReflow = autoReflow.Value;
+                if (defaultLayoutMode == "auto" || defaultLayoutMode == "manual")
+                    c.WindowState.FlowCanvasDefaultLayoutMode =
+                        defaultLayoutMode == "manual" ? Models.LayoutMode.Manual : Models.LayoutMode.AutoFlow;
             });
         }
 

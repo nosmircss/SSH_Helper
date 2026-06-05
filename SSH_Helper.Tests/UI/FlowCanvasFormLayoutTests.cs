@@ -93,6 +93,44 @@ public sealed class FlowCanvasFormLayoutTests
         load["newNodeIds"]?.Values<string>().Should().Contain("node-2");
     }
 
+    [WinFormsFact]
+    public void Inbound_layout_save_persists_default_layout_mode()
+    {
+        var testDir = Path.Combine(Path.GetTempPath(), $"FlowCanvasLayoutTests_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testDir);
+        try
+        {
+            var configService = new ConfigurationService(Path.Combine(testDir, "config.json"));
+
+            using var flowCanvas = new FlowCanvasForm(darkMode: false, configService: configService);
+
+            flowCanvas.HandleHostMessage(
+                JObject.Parse("{\"type\":\"layout-save\",\"defaultLayoutMode\":\"manual\"}"));
+
+            configService.GetCurrent().WindowState.FlowCanvasDefaultLayoutMode
+                .Should().Be(LayoutMode.Manual);
+        }
+        finally
+        {
+            try { Directory.Delete(testDir, true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    [WinFormsFact]
+    public void Inbound_set_layout_mode_raises_OnSetLayoutMode()
+    {
+        using var flowCanvas = new FlowCanvasForm(darkMode: false, configService: null);
+
+        JObject? received = null;
+        flowCanvas.OnSetLayoutMode += m => received = m;
+
+        flowCanvas.HandleHostMessage(
+            JObject.Parse("{\"type\":\"set-layout-mode\",\"mode\":\"manual\"}"));
+
+        received.Should().NotBeNull();
+        received!["mode"]!.ToString().Should().Be("manual");
+    }
+
     private static JObject? ReadMessageOfType(ConcurrentQueue<string> queue, string expectedType)
     {
         foreach (var json in queue.ToArray())

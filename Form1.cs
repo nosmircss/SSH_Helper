@@ -2558,6 +2558,16 @@ namespace SSH_Helper
             _presetManager.UpdateCanvasLayout(_activePresetName, layout);
         }
 
+        private void ApplySetLayoutMode(JObject msg)
+        {
+            if (string.IsNullOrEmpty(_activePresetName)) return;
+            var mode = msg["mode"]?.ToString();
+            if (mode != "auto" && mode != "manual") return;
+            _presetManager.UpdateLayoutMode(
+                _activePresetName,
+                mode == "manual" ? Models.LayoutMode.Manual : Models.LayoutMode.AutoFlow);
+        }
+
         private void UpdateHostCount()
         {
             int count = dgv_variables.Rows.Cast<DataGridViewRow>()
@@ -6807,6 +6817,11 @@ namespace SSH_Helper
             _flowCanvasForm.OnLayoutAutosave += (msg) =>
             {
                 BeginInvoke(() => ApplyLayoutAutosave(msg));
+            };
+
+            _flowCanvasForm.OnSetLayoutMode += (msg) =>
+            {
+                BeginInvoke(() => ApplySetLayoutMode(msg));
             };
 
             _flowCanvasForm.OnBrowsePath += (msg) =>
