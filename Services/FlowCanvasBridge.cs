@@ -1146,12 +1146,23 @@ namespace SSH_Helper.Services
             var inlineByNode = new Dictionary<string, string>(StringComparer.Ordinal);
             var leadingByPath = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             var inlineByPath = new Dictionary<string, string>(StringComparer.Ordinal);
+            // 'branch'-anchored comments annotate the BRANCH (they sat above a branch keyword like
+            // 'else:'), so they must re-emit ABOVE the keyword, not as a leading comment inside the
+            // body. Kept in their own bucket; emitted by EmitBranch during graph regeneration.
+            var branchByNode = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var branchByPath = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             var headerComments = new List<string>();
             // Target node ids of comments authored on the canvas (attachedToNodeId, no anchor.stepPath).
             // Imported comments carry a stepPath and already round-trip inside their container's verbatim
             // snippet, so only authored comments require forcing a container to regenerate (see
             // ContainerHasDescendantComment). This keeps untouched imported scripts byte-stable.
             var authoredCommentTargets = new HashSet<string>(StringComparer.Ordinal);
+
+            static void AddListEntry(Dictionary<string, List<string>> map, string key, string text)
+            {
+                if (!map.TryGetValue(key, out var list)) map[key] = list = new List<string>();
+                list.Add(text);
+            }
 
             void IndexComment(string text, string? atype, string? attachedToNodeId, string? spath)
             {
@@ -1161,20 +1172,14 @@ namespace SSH_Helper.Services
                 {
                     if (string.IsNullOrEmpty(spath)) authoredCommentTargets.Add(attachedToNodeId!);
                     if (atype == "inline") inlineByNode[attachedToNodeId!] = text;
-                    else // leading (or unspecified non-header)
-                    {
-                        if (!leadingByNode.TryGetValue(attachedToNodeId!, out var nl)) leadingByNode[attachedToNodeId!] = nl = new List<string>();
-                        nl.Add(text);
-                    }
+                    else if (atype == "branch") AddListEntry(branchByNode, attachedToNodeId!, text);
+                    else AddListEntry(leadingByNode, attachedToNodeId!, text); // leading (or unspecified non-header)
                 }
                 else if (!string.IsNullOrEmpty(spath))
                 {
                     if (atype == "inline") inlineByPath[spath!] = text;
-                    else
-                    {
-                        if (!leadingByPath.TryGetValue(spath!, out var pl)) leadingByPath[spath!] = pl = new List<string>();
-                        pl.Add(text);
-                    }
+                    else if (atype == "branch") AddListEntry(branchByPath, spath!, text);
+                    else AddListEntry(leadingByPath, spath!, text);
                 }
             }
 
@@ -1225,7 +1230,7 @@ namespace SSH_Helper.Services
                 sb.AppendLine("steps:");
 
             // Bundle comment dictionaries so they can be threaded into container/branch helpers.
-            var commentCtx = new CommentContext(leadingByNode, inlineByNode, leadingByPath, inlineByPath, authoredCommentTargets);
+            var commentCtx = new CommentContext(leadingByNode, inlineByNode, leadingByPath, inlineByPath, branchByNode, branchByPath, authoredCommentTargets);
 
             // Tracks nodes consumed as branch children by container blocks (if/foreach/while).
             // These are skipped in the main export loop since they're nested inside their parent's YAML.
@@ -1820,6 +1825,8 @@ namespace SSH_Helper.Services
             public readonly Dictionary<string, string> InlineByNode;
             public readonly Dictionary<string, List<string>> LeadingByPath;
             public readonly Dictionary<string, string> InlineByPath;
+            public readonly Dictionary<string, List<string>> BranchByNode;
+            public readonly Dictionary<string, List<string>> BranchByPath;
             public readonly HashSet<string> AuthoredCommentTargets;
 
             public CommentContext(
@@ -1827,12 +1834,16 @@ namespace SSH_Helper.Services
                 Dictionary<string, string> inlineByNode,
                 Dictionary<string, List<string>> leadingByPath,
                 Dictionary<string, string> inlineByPath,
+                Dictionary<string, List<string>> branchByNode,
+                Dictionary<string, List<string>> branchByPath,
                 HashSet<string> authoredCommentTargets)
             {
                 LeadingByNode = leadingByNode;
                 InlineByNode = inlineByNode;
                 LeadingByPath = leadingByPath;
                 InlineByPath = inlineByPath;
+                BranchByNode = branchByNode;
+                BranchByPath = branchByPath;
                 AuthoredCommentTargets = authoredCommentTargets;
             }
 
@@ -1845,12 +1856,62 @@ namespace SSH_Helper.Services
                 return byNode.Concat(byPath);
             }
 
+            /// <summary>'branch'-anchored comments for the branch whose first child is nodeId — these
+            /// re-emit ABOVE the branch keyword (e.g. above 'else:').</summary>
+            public IEnumerable<string>? GetBranchComments(string nodeId, string stepPath)
+            {
+                var byNode = BranchByNode.GetValueOrDefault(nodeId);
+                var byPath = BranchByPath.GetValueOrDefault(stepPath);
+                if (byNode == null) return byPath;
+                if (byPath == null) return byNode;
+                return byNode.Concat(byPath);
+            }
+
             public string? GetInlineComment(string nodeId, string stepPath) =>
                 InlineByNode.GetValueOrDefault(nodeId) ?? InlineByPath.GetValueOrDefault(stepPath);
 
             /// <summary>True when a canvas-authored (non-imported) comment targets this node id.</summary>
             public bool IsAuthoredCommentTarget(string nodeId) =>
                 AuthoredCommentTargets.Contains(nodeId);
+        }
+
+        /// <summary>
+        /// Emits one container branch during graph regeneration: any 'branch'-anchored comments first
+        /// (at the keyword's indent, so a comment that sat above e.g. 'else:' lands there again), then
+        /// the keyword line, then the branch body. An empty branch emits "&lt;keyword&gt;: []". The branch
+        /// comment is keyed to the branch's first child (chain[0]). Returns false if body generation fails.
+        /// </summary>
+        private bool EmitBranch(
+            StringBuilder sb,
+            string keyword,
+            List<string> chain,
+            int bodyIndent,
+            Dictionary<string, JToken> nodeMap,
+            Dictionary<string, List<EdgeInfo>> outgoing,
+            Dictionary<string, int> incomingCount,
+            HashSet<string> consumedByContainer,
+            FlowCanvasExportResult result,
+            CommentContext commentCtx)
+        {
+            var keywordIndent = Math.Max(0, bodyIndent - 2);
+            if (chain.Count > 0)
+            {
+                var firstId = chain[0];
+                var firstStepPath = nodeMap.TryGetValue(firstId, out var fn)
+                    ? (fn["data"]?["props"] as JObject)?["_stepPath"]?.ToString() ?? string.Empty
+                    : string.Empty;
+                AppendLeadingComments(sb, commentCtx.GetBranchComments(firstId, firstStepPath), keywordIndent);
+            }
+
+            var pad = new string(' ', keywordIndent);
+            if (chain.Count == 0)
+            {
+                sb.AppendLine($"{pad}{keyword}: []");
+                return true;
+            }
+
+            sb.AppendLine($"{pad}{keyword}:");
+            return TryGenerateBranchYaml(chain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, bodyIndent);
         }
 
         /// <summary>
@@ -1947,18 +2008,9 @@ namespace SSH_Helper.Services
                 }
 
                 var thenChain = CollectBranchChain(thenTarget, outgoing, incomingCount, branchVisited, nodeMap);
-                if (thenChain.Count == 0)
+                if (!EmitBranch(sb, "then", thenChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                 {
-                    sb.AppendLine("    then: []");
-                }
-                else
-                {
-                    sb.AppendLine("    then:");
-                    if (!TryGenerateBranchYaml(
-                            thenChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
 
                 if (elifBranches.Count > 0)
@@ -1969,18 +2021,9 @@ namespace SSH_Helper.Services
                         var elifCondition = string.IsNullOrWhiteSpace(elif.Condition) ? "false" : elif.Condition!;
                         sb.AppendLine($"      - condition: {EscapeYamlString(elifCondition)}");
                         var elifChain = CollectBranchChain(elif.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
-                        if (elifChain.Count == 0)
+                        if (!EmitBranch(sb, "then", elifChain, 10, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                         {
-                            sb.AppendLine("        then: []");
-                        }
-                        else
-                        {
-                            sb.AppendLine("        then:");
-                            if (!TryGenerateBranchYaml(
-                                    elifChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 10))
-                            {
-                                return false;
-                            }
+                            return false;
                         }
                     }
                 }
@@ -1988,18 +2031,9 @@ namespace SSH_Helper.Services
                 if (elseTarget != null)
                 {
                     var elseChain = CollectBranchChain(elseTarget, outgoing, incomingCount, branchVisited, nodeMap);
-                    if (elseChain.Count == 0)
+                    if (!EmitBranch(sb, "else", elseChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                     {
-                        sb.AppendLine("    else: []");
-                    }
-                    else
-                    {
-                        sb.AppendLine("    else:");
-                        if (!TryGenerateBranchYaml(
-                                elseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
             }
@@ -2021,18 +2055,9 @@ namespace SSH_Helper.Services
                 }
 
                 var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
-                if (doChain.Count == 0)
+                if (!EmitBranch(sb, "do", doChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                 {
-                    sb.AppendLine("    do: []");
-                }
-                else
-                {
-                    sb.AppendLine("    do:");
-                    if (!TryGenerateBranchYaml(
-                            doChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
             }
             else if (string.Equals(blockType, "try", StringComparison.OrdinalIgnoreCase))
@@ -2077,53 +2102,26 @@ namespace SSH_Helper.Services
                 }
 
                 var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
-                if (doChain.Count == 0)
+                if (!EmitBranch(sb, "do", doChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                 {
-                    sb.AppendLine("    do: []");
-                }
-                else
-                {
-                    sb.AppendLine("    do:");
-                    if (!TryGenerateBranchYaml(
-                            doChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
 
                 if (catchEdge != null)
                 {
                     var catchChain = CollectBranchChain(catchEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
-                    if (catchChain.Count == 0)
+                    if (!EmitBranch(sb, "catch", catchChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                     {
-                        sb.AppendLine("    catch: []");
-                    }
-                    else
-                    {
-                        sb.AppendLine("    catch:");
-                        if (!TryGenerateBranchYaml(
-                                catchChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
 
                 if (finallyEdge != null)
                 {
                     var finallyChain = CollectBranchChain(finallyEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
-                    if (finallyChain.Count == 0)
+                    if (!EmitBranch(sb, "finally", finallyChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                     {
-                        sb.AppendLine("    finally: []");
-                    }
-                    else
-                    {
-                        sb.AppendLine("    finally:");
-                        if (!TryGenerateBranchYaml(
-                                finallyChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
             }
@@ -2180,36 +2178,18 @@ namespace SSH_Helper.Services
                 {
                     var caseChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
                     sb.AppendLine($"      - value: {EscapeYamlString(branch.CaseValue ?? $"case_{branch.Index + 1}")}");
-                    if (caseChain.Count == 0)
+                    if (!EmitBranch(sb, "do", caseChain, 10, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                     {
-                        sb.AppendLine("        do: []");
-                    }
-                    else
-                    {
-                        sb.AppendLine("        do:");
-                        if (!TryGenerateBranchYaml(
-                                caseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 10))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
 
                 if (defaultTarget != null)
                 {
                     var defaultChain = CollectBranchChain(defaultTarget, outgoing, incomingCount, branchVisited, nodeMap);
-                    if (defaultChain.Count == 0)
+                    if (!EmitBranch(sb, "default", defaultChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                     {
-                        sb.AppendLine("    default: []");
-                    }
-                    else
-                    {
-                        sb.AppendLine("    default:");
-                        if (!TryGenerateBranchYaml(
-                                defaultChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, 6))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
             }

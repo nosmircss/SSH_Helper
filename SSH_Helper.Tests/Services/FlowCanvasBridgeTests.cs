@@ -569,6 +569,57 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_BranchCommentRegeneration_EmitsBranchCommentAboveKeyword()
+    {
+        // Repro: a branch comment (above 'else:') and a leading comment (inside the else body) must
+        // keep their positions when the if regenerates from graph. The bug emitted BOTH as leading
+        // comments inside the body. The branch comment must re-emit ABOVE 'else:'.
+        var bridge = new FlowCanvasBridge();
+        var yaml =
+            "steps:\n" +
+            "- if:\n" +
+            "    condition: a == \"b\"\n" +
+            "    then:\n" +
+            "      - print:\n" +
+            "          message: \"did it\"\n" +
+            "    # nothing to do\n" +   // ABOVE else: -> branch comment
+            "    else:\n" +
+            "      # print\n" +         // inside else body, above the step -> leading comment
+            "      - print:\n" +
+            "          message: \"nope\"\n";
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        // Force the if to regenerate from graph (the path where the bug surfaced).
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var props = n["data"]?["props"] as JObject;
+            if (n["data"]?["blockType"]?.ToString() == "if" && props != null)
+                props["_forceGraphExport"] = true;
+        }
+
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var lines = result.Yaml.Replace("\r\n", "\n").Split('\n');
+        int elseIdx = Array.FindIndex(lines, l => l.Trim() == "else:");
+        int branchIdx = Array.FindIndex(lines, l => l.Trim() == "# nothing to do");
+        int leadingIdx = Array.FindIndex(lines, l => l.Trim() == "# print");
+
+        Assert.True(elseIdx >= 0, "else: present");
+        Assert.True(branchIdx >= 0, "branch comment present");
+        Assert.True(leadingIdx >= 0, "leading comment present");
+        Assert.Equal(elseIdx - 1, branchIdx);          // branch comment sits directly above 'else:'
+        Assert.True(leadingIdx > elseIdx, "leading comment is inside the else body, below the keyword");
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# nothing to do"));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# print"));
+
+        // The regenerated YAML must still parse cleanly.
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        Assert.Empty(parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true));
+    }
+
+    [Fact]
     public void ExportGraphToYaml_ImportedOnlyNestedComment_RoundTripsViaSnippet_NotRegeneration()
     {
         // Scoping guard: a container whose only comments are IMPORTED (carry an anchor.stepPath) must
