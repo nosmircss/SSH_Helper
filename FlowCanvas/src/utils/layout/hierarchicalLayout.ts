@@ -1,7 +1,8 @@
 import type { Edge, Node } from '@xyflow/react';
 import { buildLayoutTree } from './treeBuilder';
 import type { LayoutBranch, LayoutTree, LayoutTreeNode, Point } from './types';
-import { estimateNodeHeight, COLLAPSED_HEIGHT, BAND_PAD, BLOCK_WIDTH_INSET } from '../nodeSize';
+import { estimateNodeHeight, COLLAPSED_HEIGHT, BAND_PAD, BAND_LABEL_HEADROOM, BLOCK_WIDTH_INSET } from '../nodeSize';
+import { branchKeyFromStepPath } from '../branchBands';
 
 /** Single source of truth for layout spacing (ported from FlowCanvasBridge.cs). */
 export const LAYOUT = {
@@ -50,6 +51,16 @@ function resolveSizing(s: BlockSizing): ResolvedSizing {
 // Set synchronously at the top of computeHierarchicalLayout (no await in the pass => no reentrancy).
 // computeBranchBands is a SEPARATE function (different file) with its own param and is unaffected.
 let activeSizing: ResolvedSizing = resolveSizing(DEFAULT_BLOCK_SIZING);
+
+// Vertical room one anchored comment pill occupies (pill height + gap). Used both to RESERVE
+// space above a commented block (so pills never overlap the block/band above) and to STACK
+// multiple pills. Set per computeHierarchicalLayout call alongside activeSizing.
+const COMMENT_PILL_STEP = 28;
+// attachedToNodeId -> count of leading/header comments anchored to it.
+let commentReserveByTarget: Map<string, number> = new Map();
+function reserveAbove(id: string): number {
+  return (commentReserveByTarget.get(id) ?? 0) * COMMENT_PILL_STEP;
+}
 
 function verticalGap(): number { return activeSizing.nodeSpacingY - COLLAPSED_HEIGHT; } // preserves collapsed spacing
 
@@ -134,6 +145,7 @@ function placeBranchSteps(
 ): number {
   let y = startY;
   for (const child of children) {
+    y += reserveAbove(child.id); // make room for this child's leading-comment pills
     pos.set(child.id, { x: childX, y });
     y += advanceFor(child);
     if (child.isContainer && depth < LAYOUT.MAX_NESTING_DEPTH && nonEmptyBranches(child).length > 0) {
@@ -186,6 +198,7 @@ export function placeTree(tree: LayoutTree): Map<string, Point> {
   const pos = new Map<string, Point>();
   let currentY = LAYOUT.NODE_START_Y + activeSizing.nodeSpacingY;
   for (const node of tree.spine) {
+    currentY += reserveAbove(node.id); // make room for this node's leading-comment pills
     pos.set(node.id, { x: LAYOUT.NODE_START_X, y: currentY });
     currentY += advanceFor(node);
     if (node.isContainer && nonEmptyBranches(node).length > 0) {
@@ -201,14 +214,35 @@ export function placeTree(tree: LayoutTree): Map<string, Point> {
  * comment sitting on top of a block, where its DOM then swallows clicks meant for that block.
  * Park comments in a gutter to the right of the widest placed node so they never overlap.
  */
-// Vertical gap from a block's top to an anchored comment pill stacked above it.
-const COMMENT_ANCHOR_GAP = 34;
+/** The top (band-header) child of each branch group — a comment anchored to it must sit ABOVE
+ *  the branch band, clear of the branch label, not between the label and the block. Keyed by the
+ *  min-Y member of each (_isChildOf, branchKey) group. */
+function computeBandTopIds(nodes: Node[], pos: Map<string, Point>): Set<string> {
+  const groupMinY = new Map<string, { id: string; y: number }>();
+  for (const n of nodes) {
+    if (n.type === 'comment') continue;
+    const props = (n.data as { props?: Record<string, unknown> } | undefined)?.props;
+    const parentId = props?.['_isChildOf'] as string | undefined;
+    if (!parentId) continue;
+    const p = pos.get(n.id);
+    if (!p) continue;
+    const branchKey = branchKeyFromStepPath(
+      props?.['_stepPath'] as string | undefined,
+      props?.['_branchLabel'] as string | undefined,
+    );
+    const key = `${parentId}::${branchKey}`;
+    const cur = groupMinY.get(key);
+    if (!cur || p.y < cur.y) groupMinY.set(key, { id: n.id, y: p.y });
+  }
+  return new Set([...groupMinY.values()].map((v) => v.id));
+}
 
 function placeComments(nodes: Node[], pos: Map<string, Point>): void {
   const comments = nodes.filter((n) => n.type === 'comment');
   if (comments.length === 0 || pos.size === 0) return;
   const gutterX = Math.max(...[...pos.values()].map((p) => p.x)) + activeSizing.columnWidth;
   let gutterY = LAYOUT.NODE_START_Y;
+  const bandTopIds = computeBandTopIds(nodes, pos);
   // Stack multiple comments anchored to the same block upward.
   const anchoredSibling = new Map<string, number>();
   for (const c of comments) {
@@ -217,13 +251,17 @@ function placeComments(nodes: Node[], pos: Map<string, Point>): void {
     const attachedTo = data?.attachedToNodeId as string | undefined;
     const targetPos = attachedTo ? pos.get(attachedTo) : undefined;
 
-    // Anchored (leading/header) comments ride directly above their block — this must
-    // hold on EVERY layout pass (auto-layout, sizing/density reflow, settings restore),
-    // not only on import, or they snap back to the gutter. Free stickies stay in the gutter.
+    // Anchored (leading/header) comments ride above their block — this must hold on EVERY layout
+    // pass (auto-layout, sizing/density reflow, settings restore), not only import. When the target
+    // is a branch's top child, sit above the branch BAND header (clear of the branch label) instead
+    // of between the label and the block. Free stickies stay in the gutter.
     if (targetPos && (anchor?.type === 'leading' || anchor?.type === 'header')) {
       const idx = anchoredSibling.get(attachedTo!) ?? 0;
       anchoredSibling.set(attachedTo!, idx + 1);
-      pos.set(c.id, { x: targetPos.x, y: targetPos.y - COMMENT_ANCHOR_GAP * (idx + 1) });
+      const baseY = bandTopIds.has(attachedTo!)
+        ? targetPos.y - BAND_PAD - BAND_LABEL_HEADROOM // above the branch band header
+        : targetPos.y;                                  // above the block itself
+      pos.set(c.id, { x: targetPos.x, y: baseY - COMMENT_PILL_STEP * (idx + 1) });
     } else {
       pos.set(c.id, { x: gutterX, y: gutterY });
       gutterY += activeSizing.nodeSpacingY;
@@ -242,6 +280,18 @@ function placeComments(nodes: Node[], pos: Map<string, Point>): void {
 // graphs to 330/1/1 geometry (band overlap + apparent settings reset).
 export function computeHierarchicalLayout(nodes: Node[], edges: Edge[], sizing: BlockSizing): Node[] {
   activeSizing = resolveSizing(sizing);
+  // Tally leading/header comments per target block so placeTree/placeBranchSteps can reserve
+  // vertical room above each commented block (pills never overlap the block or band above).
+  commentReserveByTarget = new Map();
+  for (const n of nodes) {
+    if (n.type !== 'comment') continue;
+    const data = n.data as Record<string, unknown> | undefined;
+    const anchor = data?.anchor as { type?: string } | undefined;
+    const attachedTo = data?.attachedToNodeId as string | undefined;
+    if (attachedTo && (anchor?.type === 'leading' || anchor?.type === 'header')) {
+      commentReserveByTarget.set(attachedTo, (commentReserveByTarget.get(attachedTo) ?? 0) + 1);
+    }
+  }
   const tree = buildLayoutTree(nodes, edges);
   const pos = placeTree(tree);
   placeComments(nodes, pos);

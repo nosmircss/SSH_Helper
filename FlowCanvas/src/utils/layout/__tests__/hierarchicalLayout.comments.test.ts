@@ -41,6 +41,41 @@ describe('computeHierarchicalLayout anchored comments', () => {
     expect(cElse.position.y).toBeLessThan(elseChild.position.y);
   });
 
+  it('places a branch-top comment ABOVE the band header (clear of the branch label)', () => {
+    const nodes = [
+      { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', props: {} } },
+      { id: 'if1', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'if', props: { condition: 'a', _stepPath: 'steps/0' } } },
+      { id: 'elseChild', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'e', _isChildOf: 'if1', _stepPath: 'steps/0/else/0', _branchLabel: 'else' } } },
+      { id: 'cElse', type: 'comment', position: { x: 0, y: 0 }, data: { commentId: 'cElse', kind: 'comment', text: 'x', anchor: { type: 'leading', stepPath: 'steps/0/else/0' }, attachedToNodeId: 'elseChild' } },
+    ];
+    const edges = [
+      { id: 'e0', source: '__start__', target: 'if1' },
+      { id: 'e1', source: 'if1', target: 'elseChild', sourceHandle: 'false', label: 'else' },
+    ];
+    const out = computeHierarchicalLayout(nodes as never, edges as never, DEFAULT_BLOCK_SIZING);
+    const elseChild = out.find((n) => n.id === 'elseChild')!;
+    const cElse = out.find((n) => n.id === 'cElse')!;
+    // band top = elseChild.y - BAND_PAD(18) - BAND_LABEL_HEADROOM(12); pill must be at/above it.
+    expect(cElse.position.y).toBeLessThanOrEqual(elseChild.position.y - 30);
+  });
+
+  it('reserves vertical space so a commented block sits lower than an uncommented one', () => {
+    const base = () => [
+      { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', props: {} } },
+      { id: 'a', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'a' } } },
+      { id: 'b', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'b' } } },
+    ];
+    const e = [{ id: 'e0', source: '__start__', target: 'a' }, { id: 'e1', source: 'a', target: 'b' }];
+    const without = computeHierarchicalLayout(base() as never, e as never, DEFAULT_BLOCK_SIZING);
+    const withComment = computeHierarchicalLayout([
+      ...base(),
+      { id: 'c', type: 'comment', position: { x: 0, y: 0 }, data: { commentId: 'c', kind: 'comment', text: 'x', anchor: { type: 'leading', stepPath: 'steps/1' }, attachedToNodeId: 'b' } },
+    ] as never, e as never, DEFAULT_BLOCK_SIZING);
+    const bWithout = without.find((n) => n.id === 'b')!.position.y;
+    const bWith = withComment.find((n) => n.id === 'b')!.position.y;
+    expect(bWith).toBeGreaterThan(bWithout); // 'b' pushed down to make room for its comment pill
+  });
+
   it('still gutters a free-floating sticky (no anchor)', () => {
     const nodes = [
       ...baseNodes(),

@@ -137,9 +137,12 @@ export function initMessageBridge(): () => void {
         const hasUserLayout = (msg as { hasUserLayout?: boolean }).hasUserLayout === true;
         if (!hasUserLayout) {
           const s = store.getState();
-          store.getState().setNodes(placeAnchoredComments(computeHierarchicalLayout(s.nodes, s.edges,
-            { blockWidth: s.blockWidth, density: s.density, textScale: s.textScale })));
+          // computeHierarchicalLayout already places anchored comments (band-aware) + reserves
+          // their vertical space, so no separate placeAnchoredComments pass here.
+          store.getState().setNodes(computeHierarchicalLayout(s.nodes, s.edges,
+            { blockWidth: s.blockWidth, density: s.density, textScale: s.textScale }));
         } else {
+          // Saved user layout: keep block positions, only (re-)anchor comments above their block/band.
           store.getState().setNodes(placeAnchoredComments(store.getState().nodes));
         }
 

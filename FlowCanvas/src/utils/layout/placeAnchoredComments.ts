@@ -1,26 +1,41 @@
 import type { Node } from '@xyflow/react';
 import type { NoteAnchor } from '../../nodes/CommentNode';
+import { BAND_PAD, BAND_LABEL_HEADROOM } from '../nodeSize';
+import { branchKeyFromStepPath } from '../branchBands';
 
-const PILL_GAP = 34;
+// Vertical room per anchored comment pill (must match COMMENT_PILL_STEP in hierarchicalLayout).
+const PILL_STEP = 28;
 
-/** Positions anchored comment nodes just above their attached block. Pure; returns a new array. */
+/** Min-Y child of each branch group — a comment anchored to it sits ABOVE the branch band header. */
+function bandTopIds(nodes: Node[]): Set<string> {
+  const groupMinY = new Map<string, { id: string; y: number }>();
+  for (const n of nodes) {
+    if (n.type === 'comment') continue;
+    const props = (n.data as { props?: Record<string, unknown> } | undefined)?.props;
+    const parentId = props?.['_isChildOf'] as string | undefined;
+    if (!parentId) continue;
+    const branchKey = branchKeyFromStepPath(
+      props?.['_stepPath'] as string | undefined,
+      props?.['_branchLabel'] as string | undefined,
+    );
+    const key = `${parentId}::${branchKey}`;
+    const cur = groupMinY.get(key);
+    if (!cur || n.position.y < cur.y) groupMinY.set(key, { id: n.id, y: n.position.y });
+  }
+  return new Set([...groupMinY.values()].map((v) => v.id));
+}
+
+/**
+ * Positions anchored comment nodes above their attached block (used on the saved-user-layout load
+ * path, which keeps block positions and only re-anchors comments). A comment on a branch's top
+ * child sits above the branch BAND header; others sit above their block. Pure; returns a new array.
+ */
 export function placeAnchoredComments(nodes: Node[]): Node[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
+  const tops = bandTopIds(nodes);
 
-  // Count siblings (leading/header comments) per target so we can stack them upward.
-  const siblingIndex = new Map<string, number>();
-  const getSiblingIndex = (commentId: string, attachedTo: string): number => {
-    const key = attachedTo;
-    const idx = siblingIndex.get(key) ?? 0;
-    siblingIndex.set(key, idx + 1);
-    return idx;
-  };
-
-  // Two-pass: first pass computes sibling order (in array order), second pass positions.
-  // We collect metadata first so we can assign stable indices.
   type CommentMeta = { nodeIndex: number; attachedTo: string; sibIdx: number };
   const metas: CommentMeta[] = [];
-
   const sibCount = new Map<string, number>();
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
@@ -43,12 +58,12 @@ export function placeAnchoredComments(nodes: Node[]): Node[] {
     const meta = metaByNodeIndex.get(i);
     if (!meta) return n;
     const target = byId.get(meta.attachedTo)!;
+    const baseY = tops.has(meta.attachedTo)
+      ? target.position.y - BAND_PAD - BAND_LABEL_HEADROOM // above the branch band header
+      : target.position.y;                                 // above the block
     return {
       ...n,
-      position: {
-        x: target.position.x,
-        y: target.position.y - PILL_GAP * (meta.sibIdx + 1),
-      },
+      position: { x: target.position.x, y: baseY - PILL_STEP * (meta.sibIdx + 1) },
     };
   });
 }
