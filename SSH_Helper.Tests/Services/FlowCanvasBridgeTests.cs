@@ -2577,6 +2577,64 @@ public class FlowCanvasBridgeTests
             Assert.Contains(label, result.Yaml);
     }
 
+    private const string NestedCommentYaml =
+        "steps:\n" +
+        "- foreach: x in items\n" +
+        "  do:\n" +
+        "    - if:\n" +
+        "        condition: a == \"b\"\n" +
+        "        then:\n" +
+        "          - print:\n" +
+        "              message: \"did it\"\n" +
+        "      # nothing to do\n" +
+        "      else:\n" +
+        "        - print:\n" +
+        "            message: \"nope\"\n";
+
+    [Fact]
+    public void TextToGraph_NestedLeadingComment_EmitsCommentNodeAnchoredToBranchChild()
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, _) = bridge.TextToGraph(NestedCommentYaml);
+
+        var elseChild = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["props"]?["_branchLabel"]?.ToString() == "else");
+        Assert.NotNull(elseChild);
+
+        var nested = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["blockType"]?.ToString() == "comment" &&
+            n["data"]?["text"]?.ToString() == "nothing to do");
+        Assert.NotNull(nested);
+        Assert.Equal("leading", nested!["data"]?["anchor"]?["type"]?.ToString());
+        Assert.Equal(elseChild!["id"]!.ToString(), nested["data"]?["attachedToNodeId"]?.ToString());
+    }
+
+    [Fact]
+    public void RoundTrip_NestedLeadingComment_PreservedExactlyOnce()
+    {
+        var result = RoundTripThroughBridge(NestedCommentYaml);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# nothing to do"));
+    }
+
+    [Fact]
+    public void Export_NestedLeadingComment_SurvivesContainerRegenerationExactlyOnce()
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, edges) = bridge.TextToGraph(NestedCommentYaml);
+        // Force the foreach container to regenerate from the graph (stored snippet bypassed),
+        // which previously dropped branch-internal comments (the deferred Task 5b case).
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var props = n["data"]?["props"] as JObject;
+            if (n["data"]?["blockType"]?.ToString() == "foreach" && props != null)
+                props["_forceGraphExport"] = true;
+        }
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# nothing to do"));
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         int count = 0, idx = 0;

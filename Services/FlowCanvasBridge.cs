@@ -379,6 +379,7 @@ namespace SSH_Helper.Services
             var edges = new JArray();
             _idCounter = 0;
             _commentCounter = 0;
+            _yamlLines = yamlText.Split('\n');
 
             // Parse to get step types/labels, but use raw text for data
             var parser = new ScriptParser();
@@ -627,6 +628,38 @@ namespace SSH_Helper.Services
         /// Multi-branch layout: branches spread horizontally side-by-side.
         /// All branches start at the same Y. The next sibling starts after the tallest branch.
         /// </summary>
+        // Raw YAML lines for the script currently being converted; used to recover
+        // branch-internal leading comments by ScriptStep.LineNumber (Task 5b).
+        private string[]? _yamlLines;
+
+        private static bool IsBranchKeyword(string trimmed) =>
+            trimmed is "then:" or "else:" or "do:" or "catch:" or "finally:" or "default:";
+
+        /// <summary>
+        /// Collects the "#" comment lines immediately preceding a nested step (located by its
+        /// 1-indexed LineNumber) in the original YAML. For the first step in a branch, a single
+        /// branch-keyword line (then:/else:/do:/...) is skipped so a comment written above the
+        /// keyword attaches to that branch. These comments ALSO remain verbatim in the container
+        /// snippet (round-trip export emits them from there); the container-regeneration export
+        /// path re-injects them from the emitted comment node — never both, so no duplication.
+        /// </summary>
+        private List<string> CollectNestedLeadingComments(int lineNumber1, bool isFirstInBranch)
+        {
+            var result = new List<string>();
+            if (_yamlLines == null || lineNumber1 <= 1) return result;
+            int i = lineNumber1 - 2; // line directly above the step (0-indexed)
+            bool skippedKeyword = false;
+            while (i >= 0)
+            {
+                var t = _yamlLines[i].TrimEnd('\r').TrimStart();
+                if (t.Length == 0) { i--; continue; }
+                if (t.StartsWith("#")) { result.Insert(0, StripHash(t)); i--; continue; }
+                if (isFirstInBranch && !skippedKeyword && IsBranchKeyword(t)) { skippedKeyword = true; i--; continue; }
+                break;
+            }
+            return result;
+        }
+
         private List<string> ExpandMultiBranch(
             List<BranchInfo> branches,
             string parentNodeId,
@@ -710,6 +743,15 @@ namespace SSH_Helper.Services
                     },
                 };
                 nodes.Add(childNode);
+
+                // Surface branch-internal leading comments as anchored pills (Task 5b). The text
+                // is NOT stripped from the container snippet, so round-trip export keeps it in place;
+                // regeneration re-injects it from this node (see CollectNestedLeadingComments).
+                if (childStep.LineNumber > 0)
+                {
+                    foreach (var nc in CollectNestedLeadingComments(childStep.LineNumber, childIndex == 0))
+                        nodes.Add(BuildCommentNode(nc, "leading", childStepPath, childNodeId));
+                }
 
                 // Create edge from previous node to this child
                 var edge = new JObject
@@ -4516,10 +4558,11 @@ namespace SSH_Helper.Services
         /// optional inline trailing comment stripped from the step's OWN (non-nested-body)
         /// lines only.
         ///
-        /// NOTE: branch-internal inline comments (inside do:/then:/else:/... list bodies)
-        /// survive only via the snippet round-trip, NOT through the InlineComment field.
-        /// Container regeneration from graph does not re-emit them (Task 5b intentionally
-        /// deferred; see docs/superpowers/plans/2026-06-04-flow-canvas-comment-flow.md).
+        /// NOTE: branch-internal LEADING comments are captured separately as anchored comment
+        /// nodes in PlaceBranchSteps (Task 5b) and survive both round-trip (from the snippet) and
+        /// container regeneration (re-injected from the node). Branch-internal INLINE comments,
+        /// however, still survive only via the snippet round-trip — they are left in the snippet
+        /// and are NOT re-emitted on container regeneration.
         /// </summary>
         internal static List<StepSnippetInfo> SplitYamlSteps(string yamlText)
         {
