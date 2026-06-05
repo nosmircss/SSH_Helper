@@ -2494,6 +2494,8 @@ namespace SSH_Helper
                     {
                         X = prop.Value["x"]?.Value<double>() ?? 0,
                         Y = prop.Value["y"]?.Value<double>() ?? 0,
+                        StepPath = prop.Value["stepPath"]?.ToString(),
+                        BlockType = prop.Value["blockType"]?.ToString(),
                     };
                 }
             }

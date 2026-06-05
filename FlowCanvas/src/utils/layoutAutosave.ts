@@ -19,7 +19,7 @@ export function sendLayoutAutosave(): void {
 function doSend(): void {
   debounceTimer = null;
   const state = useFlowStore.getState();
-  const positions: Record<string, { x: number; y: number }> = {};
+  const positions: Record<string, { x: number; y: number; stepPath?: string; blockType?: string }> = {};
   const comments: CommentData[] = [];
 
   for (const node of state.nodes) {
@@ -40,9 +40,13 @@ function doSend(): void {
           : undefined,
       });
     } else {
+      const data = node.data as Record<string, unknown> | undefined;
+      const props = data?.props as Record<string, unknown> | undefined;
       positions[node.id] = {
         x: node.position?.x ?? 0,
         y: node.position?.y ?? 0,
+        stepPath: typeof props?._stepPath === 'string' ? props._stepPath : undefined,
+        blockType: typeof data?.blockType === 'string' ? data.blockType : undefined,
       };
     }
   }

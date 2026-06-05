@@ -44,7 +44,7 @@ namespace SSH_Helper.Models
                 StructureHash = StructureHash,
                 Positions = Positions.ToDictionary(
                     kvp => kvp.Key,
-                    kvp => new NodePosition { X = kvp.Value.X, Y = kvp.Value.Y }),
+                    kvp => new NodePosition { X = kvp.Value.X, Y = kvp.Value.Y, StepPath = kvp.Value.StepPath, BlockType = kvp.Value.BlockType }),
                 Comments = Comments.Select(c => new CanvasComment
                 {
                     Id = c.Id,
@@ -73,6 +73,12 @@ namespace SSH_Helper.Models
     {
         public double X { get; set; }
         public double Y { get; set; }
+
+        /// <summary>Stable structural key (e.g. "steps/2/then/0"); null for pre-migration layouts.</summary>
+        public string? StepPath { get; set; }
+
+        /// <summary>Block type at save time; pairs with StepPath to form the match tuple.</summary>
+        public string? BlockType { get; set; }
     }
 
     public class CanvasComment
