@@ -2,6 +2,7 @@ import { messageBus } from '../MessageBus';
 import { useFlowStore } from '../stores/useFlowStore';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import type { CommentData } from './exportGraph';
+import type { NoteAnchor } from '../nodes/CommentNode';
 import { DEFAULT_COMMENT_COLOR } from './tokens';
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -35,7 +36,7 @@ function doSend(): void {
         attachedToNodeId: data?.attachedToNodeId ? String(data.attachedToNodeId) : undefined,
         kind: typeof data?.kind === 'string' ? data.kind : undefined,
         anchor: (data?.anchor && typeof data.anchor === 'object')
-          ? (data.anchor as { type: string; stepPath?: string; lineOffset?: number })
+          ? (data.anchor as NoteAnchor)
           : undefined,
       });
     } else {

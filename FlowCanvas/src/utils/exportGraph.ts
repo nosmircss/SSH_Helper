@@ -2,6 +2,7 @@ import type { Edge, Node } from '@xyflow/react';
 import { blockDefMap } from '../blockDefs/registry';
 import { useFlowStore } from '../stores/useFlowStore';
 import { DEFAULT_COMMENT_COLOR } from './tokens';
+import type { NoteAnchor } from '../nodes/CommentNode';
 
 export interface CommentData {
   id: string;
@@ -13,7 +14,7 @@ export interface CommentData {
   height: number;
   attachedToNodeId?: string;
   kind?: string;
-  anchor?: { type: string; stepPath?: string; lineOffset?: number };
+  anchor?: NoteAnchor;
 }
 
 export interface ExecutableGraphPayload {
@@ -131,7 +132,7 @@ export function buildExecutableGraphPayload(
         attachedToNodeId: data?.attachedToNodeId ? String(data.attachedToNodeId) : undefined,
         kind: typeof data?.kind === 'string' ? data.kind : undefined,
         anchor: (data?.anchor && typeof data.anchor === 'object')
-          ? (data.anchor as { type: string; stepPath?: string; lineOffset?: number })
+          ? (data.anchor as NoteAnchor)
           : undefined,
       });
     } else {

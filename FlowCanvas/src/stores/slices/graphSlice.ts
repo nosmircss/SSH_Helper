@@ -234,9 +234,31 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       (c) => c.type !== 'remove' || c.id !== START_NODE_ID,
     );
     set((state) => {
-      const nextNodes = applyNodeChanges(filtered, state.nodes);
-      const hasSelectionChange = filtered.some((c) => c.type === 'select');
-      const hasGraphMutation = filtered.some((c) => c.type !== 'select');
+      // For remove events, cascade to comment nodes attached to the removed blocks.
+      const removedIds = new Set(
+        filtered.filter((c) => c.type === 'remove').map((c) => c.id),
+      );
+      let allChanges = filtered;
+      if (removedIds.size > 0) {
+        const attachedCommentIds: string[] = [];
+        for (const n of state.nodes) {
+          if (n.type === 'comment') {
+            const attachedTo = (n.data as Record<string, unknown>)?.attachedToNodeId;
+            if (typeof attachedTo === 'string' && removedIds.has(attachedTo)) {
+              attachedCommentIds.push(n.id);
+            }
+          }
+        }
+        if (attachedCommentIds.length > 0) {
+          allChanges = [
+            ...filtered,
+            ...attachedCommentIds.map((id) => ({ type: 'remove' as const, id })),
+          ];
+        }
+      }
+      const nextNodes = applyNodeChanges(allChanges, state.nodes);
+      const hasSelectionChange = allChanges.some((c) => c.type === 'select');
+      const hasGraphMutation = allChanges.some((c) => c.type !== 'select');
       return {
         nodes: nextNodes,
         selectedNodeIds: hasSelectionChange
@@ -338,13 +360,25 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
     if (filtered.length === 0) return;
     get().pushSnapshot('Delete blocks');
     const idSet = new Set(filtered);
-    set((state) => ({
-      nodes: state.nodes.filter((n) => !idSet.has(n.id)),
-      edges: state.edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)),
-      selectedNodeIds: new Set([...state.selectedNodeIds].filter((id) => !idSet.has(id))),
-      isDirty: true,
-      ...clearedExportStatusState(),
-    }));
+    set((state) => {
+      // Cascade: also remove comment nodes whose attachedToNodeId is in the deleted set.
+      const toRemove = new Set(idSet);
+      for (const n of state.nodes) {
+        if (n.type === 'comment') {
+          const attachedTo = (n.data as Record<string, unknown>)?.attachedToNodeId;
+          if (typeof attachedTo === 'string' && toRemove.has(attachedTo)) {
+            toRemove.add(n.id);
+          }
+        }
+      }
+      return {
+        nodes: state.nodes.filter((n) => !toRemove.has(n.id)),
+        edges: state.edges.filter((e) => !toRemove.has(e.source) && !toRemove.has(e.target)),
+        selectedNodeIds: new Set([...state.selectedNodeIds].filter((id) => !toRemove.has(id))),
+        isDirty: true,
+        ...clearedExportStatusState(),
+      };
+    });
   },
 
   removeEdges: (ids) => {

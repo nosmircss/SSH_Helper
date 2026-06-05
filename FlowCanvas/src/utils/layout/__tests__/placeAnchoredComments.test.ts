@@ -77,4 +77,28 @@ describe('placeAnchoredComments', () => {
     const out = placeAnchoredComments(nodes);
     expect(out).not.toBe(nodes);
   });
+
+  it('stacks multiple leading comments above the same block at distinct y coordinates', () => {
+    // Two comments both attached to b1 — they must not end up at identical y.
+    const nodes = [
+      { id: 'b1', type: 'block', position: { x: 100, y: 300 }, data: {} },
+      { id: 'c1', type: 'comment', position: { x: 0, y: 0 },
+        data: { attachedToNodeId: 'b1', anchor: { type: 'leading' } } },
+      { id: 'c2', type: 'comment', position: { x: 0, y: 0 },
+        data: { attachedToNodeId: 'b1', anchor: { type: 'leading' } } },
+    ] as never[];
+    const out = placeAnchoredComments(nodes);
+    const c1y = out.find((n) => n.id === 'c1')!.position.y;
+    const c2y = out.find((n) => n.id === 'c2')!.position.y;
+    // Both must be above the block
+    expect(c1y).toBeLessThan(300);
+    expect(c2y).toBeLessThan(300);
+    // They must be at distinct y values (stacked, not overlapping)
+    expect(c1y).not.toBe(c2y);
+    // x coordinates must align with the block
+    expect(out.find((n) => n.id === 'c1')!.position.x).toBe(100);
+    expect(out.find((n) => n.id === 'c2')!.position.x).toBe(100);
+    // Second sibling is above the first (higher index → further up)
+    expect(c2y).toBeLessThan(c1y);
+  });
 });
