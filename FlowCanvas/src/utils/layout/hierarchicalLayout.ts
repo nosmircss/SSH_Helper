@@ -231,6 +231,9 @@ export function placeTree(tree: LayoutTree): Map<string, Point> {
 function placeComments(nodes: Node[], pos: Map<string, Point>): void {
   const comments = nodes.filter((n) => n.type === 'comment');
   if (comments.length === 0 || pos.size === 0) return;
+  // A comment may be anchored to a kept-orphan block (keepOrphans leaves it out of `pos`). Fall
+  // back to the block's current position so the comment still lands above it, not in the gutter.
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const gutterX = Math.max(...[...pos.values()].map((p) => p.x)) + activeSizing.columnWidth;
   let gutterY = LAYOUT.NODE_START_Y;
 
@@ -254,7 +257,7 @@ function placeComments(nodes: Node[], pos: Map<string, Point>): void {
     const data = c.data as Record<string, unknown> | undefined;
     const anchor = (data?.anchor as { type?: string } | undefined)?.type;
     const attachedTo = data?.attachedToNodeId as string | undefined;
-    const targetPos = attachedTo ? pos.get(attachedTo) : undefined;
+    const targetPos = attachedTo ? (pos.get(attachedTo) ?? byId.get(attachedTo)?.position) : undefined;
     const step = estimateCommentStep(String(data?.text ?? ''), compact);
 
     if (targetPos && (anchor === 'leading' || anchor === 'header')) {

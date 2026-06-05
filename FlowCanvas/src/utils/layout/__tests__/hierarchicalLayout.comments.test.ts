@@ -135,6 +135,21 @@ describe('computeHierarchicalLayout anchored comments', () => {
     expect(organized.find((n) => n.id === 'dropped')!.position).not.toEqual({ x: 999, y: 777 }); // organized onto spine
   });
 
+  it('places a comment above its block even when the block is a kept orphan', () => {
+    const nodes = [
+      { id: '__start__', type: 'start', position: { x: 0, y: 0 }, data: { blockType: '_start', props: {} } },
+      { id: 'a', type: 'block', position: { x: 0, y: 0 }, data: { blockType: 'print', props: { message: 'a' } } },
+      { id: 'orphan', type: 'block', position: { x: 500, y: 600 }, data: { blockType: 'print', props: { message: 'o' } } },
+      { id: 'c', type: 'comment', position: { x: 0, y: 0 }, data: { commentId: 'c', kind: 'comment', text: 'note', anchor: { type: 'leading' }, attachedToNodeId: 'orphan' } },
+    ];
+    const e = [{ id: 'e0', source: '__start__', target: 'a' }];
+    const out = computeHierarchicalLayout(nodes as never, e as never, DEFAULT_BLOCK_SIZING, { keepOrphans: true });
+    expect(out.find((n) => n.id === 'orphan')!.position).toEqual({ x: 500, y: 600 }); // orphan kept where it is
+    const c = out.find((n) => n.id === 'c')!;
+    expect(c.position.x).toBe(500);          // anchored above the orphan, not sent to the gutter
+    expect(c.position.y).toBeLessThan(600);
+  });
+
   it('still gutters a free-floating sticky (no anchor)', () => {
     const nodes = [
       ...baseNodes(),
