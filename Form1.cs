@@ -10095,7 +10095,12 @@ namespace SSH_Helper
                 Commands = commands,
                 Timeout = timeout,
                 IsFavorite = existingPreset?.IsFavorite ?? false,
-                Folder = existingPreset?.Folder
+                Folder = existingPreset?.Folder,
+                // Preserve the saved canvas arrangement + layout mode across a content save —
+                // Save() replaces the stored PresetInfo wholesale, so without this a save would
+                // wipe the preset's manual layout and revert it to the default Auto-flow mode.
+                CanvasLayout = existingPreset?.CanvasLayout?.Clone(),
+                LayoutMode = existingPreset?.LayoutMode
             };
 
             bool isNew = !_presetManager.Presets.ContainsKey(presetName);
@@ -10161,6 +10166,12 @@ namespace SSH_Helper
             UpdatePresetHeaderIndicator();
             UpdateStatusBar($"Preset '{presetName}' saved");
             ClearPresetDeleteUndoHistory();
+
+            // Push the saved script to the open Flow Canvas (no-op if it's closed — self-guards).
+            // Re-import is mode-aware: an Auto-flow preset re-lays-out; a Manual preset keeps its
+            // arrangement and near-neighbor-places any blocks the edit added.
+            LoadCurrentScriptIntoCanvas();
+
             return true;
         }
 
