@@ -1,5 +1,117 @@
 # Changelog
 
+## Changes Since `4797065` (0.51.22)
+
+This release is a focused, multi-wave expansion of the Flow Canvas editor — bigger and self-describing blocks, labeled branch lanes, in-place block expansion, a Display Settings popover, draggable bands, full comment round-tripping between YAML and the canvas, and a per-preset Auto-flow/Manual layout mode that finally makes hand-arranged layouts stick. Every visual and layout change keeps the canvas-as-preset-builder invariant: **nothing new is serialized into the exported YAML script**. A single scripting change rounds it out. All layout/view state travels with the preset's `CanvasLayoutData` or the app's `WindowState`, never the script body.
+
+### Scripting: Standalone Interpolation in Collection Expressions
+
+`foreach` and other collection-resolving expressions now accept a **whole-value interpolation token** as the collection source, so `item in {{selections}}` and `item in ${selections}` iterate the referenced list directly — previously only the bare identifier form (`item in selections`) resolved to the underlying collection, and an interpolated token was coerced to a single string.
+
+`ValueResolver` gains `TryResolveStandaloneInterpolationValue`, which detects an expression that is *entirely* one balanced `{{ … }}` or `${ … }` token (depth-tracked so nested braces and function calls don't false-match) and resolves the inner expression to its real value before `ResolveCollectionItems` runs. `vault:` tokens are routed through the existing `SubstituteVariables` path so secret resolution is unchanged.
+
+```yaml
+# All three forms now iterate the same list
+- foreach: item in selections
+  do: [ { set: "collected = push(collected, item)" } ]
+
+- foreach: item in {{selections}}
+  do: [ { set: "collected = push(collected, item)" } ]
+
+- foreach: item in ${selections}
+  do: [ { set: "collected = push(collected, item)" } ]
+```
+
+### Flow Canvas: Bigger Blocks, Labeled Lane Bands, and In-Place Expansion
+
+The canvas was re-tuned to read clearly at a glance (design spec `docs/superpowers/specs/2026-06-02-flow-canvas-blocks-bands-expansion-design.md`). All three changes are presentation-only.
+
+**Bigger, consistent blocks** — A new `utils/nodeSize.ts` module centralizes block geometry: spine blocks widen to **330px** and nested children to **300px** (previously 280 / 160–260), so nested children read at nearly spine width and labels stop truncating early. `StartNode` matches the spine width, and the C# layout mirror in `FlowCanvasBridge.cs` is updated in lockstep so import and live layout agree.
+
+**Labeled branch lanes** — `BranchBandsLayer` and `computeBranchBands` were rebuilt from hardcoded `NODE_W/NODE_H` estimates to **real per-node dimensions** (`branchBands.ts`). Each lane now carries a corner **pill label** derived from its branch key (THEN / ELSE / LOOP / CASE n / ELIF n / CATCH / FINALLY / DEFAULT / PARALLEL), a soft full border, a 3px left accent stripe, and a tint that brightens with nesting depth so nested branches read instantly. Lanes hug their contents (bounding box + 18px padding) at any block size, and longhand border properties are used to avoid React's shorthand/longhand conflict.
+
+**In-place expansion to a read-only summary** — A header chevron grows a block downward into a read-only settings summary instead of opening the Properties panel. A new `utils/blockSummary.ts` helper computes the shown rows from the registry `PropertyDef` metadata: every required field plus any field whose value differs from its default; required-but-empty fields show *"— not set"*, and defaulted fields collapse into a *"N fields at default"* footer with an **Edit in Properties** affordance. Children expand too. The hierarchical layout became **height-aware** (`estimateNodeHeight` + per-node spacing) so an expanded or taller block pushes its successors down instead of overlapping them, and branch bands grow to wrap expanded children. Expanded state persists across reload via `CanvasLayoutData.ExpandedNodeIds` and never appears in exported YAML.
+
+### Flow Canvas: Expand / Collapse All Blocks
+
+A single batched `setAllExpanded(expanded)` store action drives a smart-toggle toolbar button and two block context-menu entries (design spec `2026-06-03-expand-collapse-all-design.md`). The toolbar button is **expand-first**: it reads `⊞ Expand All` whenever any block is collapsed and flips to `⊟ Collapse All` only when every block is already expanded. The bulk change updates all `type: 'block'` nodes in one pass and runs the layout reflow exactly once (not once per block); `start`/`comment` nodes are left untouched. No undo snapshot — expansion is view state, persisted through the existing layout-autosave channel.
+
+### Flow Canvas: Configurable Block Sizing and the Display Settings Popover
+
+Block sizing became a runtime, persisted preference instead of fixed constants (design spec `2026-06-03-block-sizing-canvas-settings-design.md`). A new toolbar gear opens a floating **Display Settings** popover (`panels/SettingsPopover.tsx`) housing:
+
+| Setting | Options | Default |
+|---------|---------|---------|
+| **Block width** | Compact 300 / Normal 330 / Wide 440 / Extra 560 / Max 700 | Normal (330) |
+| **Text size** | S / M / L (0.9 / 1.0 / 1.15 scale) | M |
+| **Canvas density** | Tight / Normal / Roomy (vertical-spacing multiplier) | Normal |
+| **New blocks default** | Collapsed / Expanded | Collapsed |
+| **View toggles** | Snap to grid, Branch bands, Heatmap, Reduced motion | — |
+
+The two independent width definitions were collapsed into a single source: a new `settingsSlice.ts` produces a `BlockSizing` descriptor (`canvasSizing.ts`) — `spineWidth`, `childWidth = spineWidth − COLUMN_GAP`, `vGap`, `textScale` — that is now a **required** threaded parameter to `computeHierarchicalLayout` and `computeBranchBands`. `estimateNodeHeight` multiplies by `textScale` so layout heights track rendered text, and the hardcoded font sizes in `BaseBlock` were replaced with `calc()`-based `--fc-fs-scale` tokens. Branch indentation scales with `childWidth` so branch children never overlap the spine at Wide/Extra/Max. Density is vertical-only.
+
+The previously toolbar-mounted view toggles (snap, branch bands, heatmap, reduced motion) moved **into** the popover; snap-to-grid and branch-bands now persist (they were transient before). All settings persist over the existing layout-save channel into new `WindowState` fields — `FlowCanvasBlockWidth`, `FlowCanvasTextScale`, `FlowCanvasDensity`, `FlowCanvasDefaultExpanded`, `FlowCanvasSnapToGrid`, `FlowCanvasBranchBands` — and are applied **before** the initial layout so a freshly opened canvas lays out at the saved width/density with no flash. A **Reset to defaults** link restores every field and reflows once.
+
+### Flow Canvas: Drag a Branch Band by Its Label
+
+A branch band's corner label pill is now a drag handle that moves the **entire branch subtree** — every block inside the lane, including nested-branch bodies — as one unit (design spec `2026-06-03-drag-band-to-move-design.md`). The container block, the sibling band (e.g. ELSE), and post-branch blocks stay put. Because bands are derived geometry, "moving a band" is implemented as translating every member node by the same delta via a new batched `graphSlice.translateNodesBy(ids, dx, dy)` action; the band and any nested bands redraw themselves. `BranchBand` now exposes `memberIds`, `BranchBandsLayer` splits into a non-interactive rectangle layer and a pointer-capturing pill layer, and a hover-only `⠿` grip with `grab`/`grabbing` cursors signals the affordance. The drag uses `screenToFlowPosition` for zoom-correct deltas, pushes one "Move band" undo snapshot at grab, and calls `sendLayoutAutosave()` on release — identical to a normal node drag. A small top-only `BAND_LABEL_HEADROOM` (12px) lifts the pill clear of the first block without disturbing the layout engine's shared padding constant. No YAML or membership change.
+
+### Flow Canvas: Comment Round-Trip (YAML ↔ Canvas)
+
+Comments written in a YAML preset now survive the trip to the canvas and back — closing a real data-loss bug where section labels above steps were silently dropped on import and inline/standalone comments were destroyed the moment a block was edited visually (design spec `2026-06-04-flow-canvas-comment-flow-design.md`).
+
+- **Capture on import** — `SplitYamlSteps` in `FlowCanvasBridge` accumulates consecutive `#` lines into a pending buffer and flushes them onto the **next** step as `leading` comment notes, splits a trailing `# …` off a step line as an `inline` note, and rides file-header comments onto the Start node. `StepSnippetInfo` gains `LeadingComments`/`InlineComment`.
+- **Two explicit note kinds** — `kind: 'comment'` exports as a real `#` line; `kind: 'sticky'` is visual-only (today's behavior). Two creation actions — **Add comment (#)** and **Add sticky** — make the choice explicit at creation, so "visual changes never touch YAML" holds by construction. The `CommentNode` data model adds `kind` and `anchor` (`{ type: 'header' | 'leading' | 'inline', stepPath?, lineOffset? }`).
+- **Anchored by `_stepPath`** — A note's YAML position is keyed to its block's structural `_stepPath`, not x/y or a fragile edge, so it survives the export regeneration that already rebuilds nesting from `_stepPath`/`_isChildOf`. Comments are re-injected on **both** the snippet round-trip and the regeneration paths (`TryGenerateStepYaml`/`TryGenerateContainerFromGraph`), so they survive a block edit; inline notes degrade gracefully to a leading comment if their original line can't be relocated after regeneration.
+- **Render + edit** — Imported comments auto-place above their anchor block and render as slim `#` pills (a new **Compact comments** Display Settings toggle, default on, persisted to `WindowState.FlowCanvasCompactComments`) or as full notes when toggled off. Comments are editable in place and via a new `panels/CommentProperties.tsx` Properties editor; the context menu reads "Delete Comment" for comment nodes, and the X delete button was removed in favor of right-click / Delete. Dragging a block carries its anchored comments with it; deleting a block cascade-deletes its attached comments; multiline comments export per-line and re-import as one block.
+
+The C# persistence model gained `CanvasComment.Kind` and a `CanvasCommentAnchor` (`Type`/`StepPath`/`LineOffset`) so comment kind and anchor round-trip through `CanvasLayoutData`. A byte-stable round-trip test over the `system_info` sample guards against diff drift.
+
+### Flow Canvas: Per-Preset Layout Mode (Auto-flow / Manual)
+
+Hand-arranged canvas layouts now persist correctly. Previously a saved arrangement was lost two ways — discarded wholesale on reopen if the script structure changed at all, and re-tidied on the next edit — and the old global "Auto-layout on edits" toggle only partly addressed the second. A new **per-preset Layout Mode**, surfaced as a segmented `Auto-flow | Manual` toggle in the toolbar, becomes the single source of truth for layout behavior (design spec `2026-06-05-flow-canvas-layout-mode-design.md`).
+
+| When you… | Auto-flow | Manual |
+|---|---|---|
+| Hand-drag a block | Kept until the next reflow re-tidies it | Position is saved and kept |
+| Edit script / trigger reflow | Re-lays-out hierarchically | Blocks don't move |
+| Reopen the canvas | Re-lays-out from scratch | Restores the exact arrangement |
+| Add a step in the editor | Appears in its hierarchical slot | Drops near its neighbor, nudged off overlaps, briefly highlighted |
+
+- **Data model** — `PresetInfo.LayoutMode` (nullable `LayoutMode` enum `AutoFlow | Manual`) is a sibling of `CanvasLayout`; `null` inherits the global `WindowState.FlowCanvasDefaultLayoutMode` (default `AutoFlow`). Switching *into* Manual freezes the current on-screen positions as the saved layout. `NodePosition` now stores `StepPath` and `BlockType` per node, forming a structural match tuple.
+- **Partial merge** — `FlowCanvasBridge` adds id/tuple-keyed merges (`MergeLayoutByNodeId` / `TryMergeLayoutByTuple`) so in Manual mode saved positions are applied to every node that still matches **even when the overall `StructureHash` differs**, leaving genuinely-new nodes for React to place. The new `placeNewBlocksNearNeighbors` pass drops a new block beside its preceding sibling (or indented under its parent container), nudges it off overlaps, and tags it for a brief entrance highlight (`justPlaced.css`).
+- **Migration** — On config load, the legacy `WindowState.FlowCanvasAutoReflow` maps to `DefaultLayoutMode` (`true → AutoFlow`, `false → Manual`) and the old field is retired (write-back). `PresetManager.UpdateLayoutMode` persists the mode atomically on toggle.
+- **Live push** — Saving commands while the canvas is open now pushes the updated script to the open canvas mode-aware, preserving the layout and mode rather than reorganizing the user's arrangement.
+
+### Flow Canvas: Layout, Band, and Membership Fixes
+
+- **Connect confers membership** — Wiring a fresh palette block into a container (via the continue handle, a leaf's bottom handle, or a branch handle) now writes `_isChildOf`/`_stepPath` through a new `utils/childMembership.ts` in `onConnect`, so layout, bands, and export nest the block instead of orphaning it; the marker is cleared when the wire is deleted.
+- **Unified branch indentation** — Container branch indentation was unified (`BRANCH_CHILD_OFFSET`) so single- and multi-branch containers indent consistently; sibling branch lanes reserve their full subtree width (including nested-branch bodies) and the inter-lane `LANE_GAP` was widened so lanes never overlap.
+- **Band overlap and elif lane** — Auto-layout and expand now honor the Display Settings sizing, fixing band overlap at the widest presets and a misplaced elif lane.
+- **Zoom** — `minZoom` was lowered to **0.2** so large graphs can be zoomed out further, and the settings popover's width presets no longer clip.
+- **Comment placement under layout** — Comments re-anchor on every layout pass (`placeAnchoredComments`), stay above kept-orphan blocks rather than dropping to the gutter, and no longer hijack block/band drags; a Compact-comments toggle reflows live so spacing updates immediately.
+
+### Configuration and Persistence
+
+- **`Models/LayoutMode.cs`** *(new)* — the `AutoFlow | Manual` enum.
+- **`Models/PresetInfo.cs`** — adds nullable `LayoutMode` (cloned with the preset).
+- **`Models/CanvasLayoutData.cs`** — adds `ExpandedNodeIds`, `NodePosition.StepPath`/`BlockType`, and `CanvasComment.Kind` + `CanvasCommentAnchor`; all cloned for round-trip.
+- **`Models/AppConfiguration.cs`** — `WindowState` gains `FlowCanvasBlockWidth`, `FlowCanvasTextScale`, `FlowCanvasDensity`, `FlowCanvasDefaultExpanded`, `FlowCanvasSnapToGrid`, `FlowCanvasBranchBands`, `FlowCanvasCompactComments`, and `FlowCanvasDefaultLayoutMode`; `FlowCanvasAutoReflow` is retired by migration.
+- **`Services/ConfigurationService.cs`** — one-time migration of `FlowCanvasAutoReflow → FlowCanvasDefaultLayoutMode`.
+- **`Services/PresetManager.cs`** — `UpdateLayoutMode` atomic persistence.
+
+### Test Coverage
+
+- **React (vitest)** — new specs for the settings slice (`settingsSlice.test.ts`), comment slice creation/kind/reflow, expanded-node state (`debugSlice.expanded.test.ts`), connect-membership and drag-follow and cascade-delete and `translateNodesBy` on the graph slice, layout mode (`layoutMode.test.ts`, `Toolbar.layoutMode.test.tsx`), compact-comments and uiSlice persistence, and the geometry/helper utilities (`nodeSize`, `branchBands` + sizing, `childMembership`, `displayNodes`, `blockSummary`, `exportGraph.comments`, hierarchical-layout sizing/comments, `placeAnchoredComments`, `placeNewBlocksNearNeighbors`, `useAutoLayout`, `CommentNode`, `CommentProperties`).
+- **C# (xUnit)** — `NodePositionTests`, `PresetInfoLayoutModeTests`, `ConfigurationServiceLayoutModeTests`, `PresetManagerLayoutModeTests`, and four `FlowCanvasBridge` suites covering connect-membership export, layout persistence, nested edge wiring, nested export, and tuple merge.
+- **e2e (Playwright)** — new specs for band drag, bands, comments, connect-membership, expansion, and the settings popover.
+
+### Documentation and Tooling
+
+Design specs and implementation plans for each wave were added under `docs/superpowers/specs/` and `docs/superpowers/plans/`, alongside a night-run status report. The obsolete `.planning/` job-scheduling research tree was removed, the project `CLAUDE.md` was trimmed and corrected, the superpowers plugin was enabled at project scope, and `.vscode/launch.json` + `tasks.json` were added for build/run/debug.
+
+---
+
 ## Changes Since `f8d02fa` (0.51.21)
 
 This release pairs a ground-up visual and execution overhaul of the Flow Canvas with a substantial expansion of the YAML scripting language: universal step guards, a do-while loop, corrected loop scoping, stricter parse-time validation, and new networking/date/regex helper functions.
