@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { createImportedChildEditingFixture } from './fixtures/graphs';
 import {
-  clearOutgoingMessages, installHostMessageCapture, loadGraphFixture, waitForOutgoingMessage,
+  clearOutgoingMessages, installHostMessageCapture, loadGraphFixture, openDisplaySettings, waitForOutgoingMessage,
 } from './support/harness';
 
 // Resolve an arbitrary color expression (e.g. a var(--fc-*) or color-mix(...)) to its
@@ -43,7 +43,8 @@ test.describe('Flow Canvas Branch Bands', () => {
 
   test('toggling branchBandsEnabled hides the layer', async ({ page }) => {
     await expect(page.locator('[data-testid="branch-band"]')).toHaveCount(1);
-    await page.getByRole('button', { name: '▭ Bands' }).click();
+    await openDisplaySettings(page);
+    await page.getByRole('switch', { name: 'Branch bands' }).click();
     await expect(page.locator('[data-testid="branch-band"]')).toHaveCount(0);
   });
 });

@@ -37,7 +37,7 @@ function Toggle(props: { label: string; on: boolean; onClick: () => void }) {
   return (
     <div style={rowStyle}>
       <span style={labStyle}>{props.label}</span>
-      <button onClick={props.onClick} role="switch" aria-checked={props.on} style={{
+      <button onClick={props.onClick} role="switch" aria-checked={props.on} aria-label={props.label} style={{
         width: 30, height: 16, borderRadius: 9, border: 'none', cursor: 'pointer', position: 'relative',
         background: props.on ? 'var(--fc-accent-surface)' : 'var(--fc-surface-2)',
       }}>

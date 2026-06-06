@@ -5,16 +5,10 @@ import {
   getOutgoingMessages,
   installHostMessageCapture,
   loadGraphFixture,
+  openDisplaySettings,
   postHostMessage,
   waitForOutgoingMessage,
 } from './support/harness';
-
-// The reduced-motion toggle button cycles its title between these two strings.
-const MOTION_BUTTON_TITLE = /motion/i;
-
-function motionButton(page: Page) {
-  return page.locator('button[title*="motion" i]').first();
-}
 
 async function hasReducedMotionClass(page: Page): Promise<boolean> {
   return page.evaluate(() => document.body.classList.contains('fc-reduced-motion'));
@@ -31,8 +25,8 @@ test.describe('Flow Canvas Reduced Motion Kill Switch', () => {
   test('clicking the toggle adds the body class and emits pref-save', async ({ page }) => {
     expect(await hasReducedMotionClass(page)).toBe(false);
 
-    await expect(motionButton(page)).toHaveAttribute('title', MOTION_BUTTON_TITLE);
-    await motionButton(page).click();
+    await openDisplaySettings(page);
+    await page.getByRole('switch', { name: 'Reduced motion' }).click();
 
     await expect.poll(() => hasReducedMotionClass(page)).toBe(true);
 
@@ -51,7 +45,7 @@ test.describe('Flow Canvas Reduced Motion Kill Switch', () => {
   });
 
   test('running node animation collapses to ~0 with reduced motion on', async ({ page }) => {
-    await motionButton(page).click();
+    await postHostMessage(page, { type: 'pref-restore', reducedMotion: true });
     await expect.poll(() => hasReducedMotionClass(page)).toBe(true);
 
     await loadGraphFixture(page, createInteractionFixture());

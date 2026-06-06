@@ -69,7 +69,7 @@ test.describe('Flow Canvas Live Wires', () => {
     await expect(packet).toHaveCount(1);
     expect(await packet.evaluate((el) => getComputedStyle(el as Element).animationName)).toContain('fc-packet-travel');
 
-    await page.getByRole('button', { name: '▶ Motion' }).click(); // enable reduced motion
+    await postHostMessage(page, { type: 'pref-restore', reducedMotion: true }); // enable reduced motion
     await expect(packet).toHaveCount(0);
   });
 });
