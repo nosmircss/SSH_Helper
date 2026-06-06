@@ -504,3 +504,26 @@ export function createBranchPathFixture(): GraphFixture {
     ],
   };
 }
+
+// A THEN band with TWO members (then-a, then-b) plus an ELSE sibling and a spine successor
+// (after-1) below the IF. Drives the "drag a band by its label" e2e: dragging the THEN pill must
+// move then-a + then-b by the same delta while if-1, else-1, after-1 and __start__ stay put.
+export function createBandDragFixture(): GraphFixture {
+  return {
+    nodes: [
+      { id: '__start__', type: 'start', position: { x: 80, y: 20 }, data: { blockType: '_start', label: 'Start', props: {} } },
+      { id: 'if-1', type: 'block', position: { x: 80, y: 160 }, data: { blockType: 'if', label: 'If', props: { condition: '${enabled}', _stepPath: 'steps/0' } } },
+      { id: 'then-a', type: 'block', position: { x: 60, y: 320 }, data: { blockType: 'print', label: 'Then A', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/0', _branchLabel: 'then', message: 'then-a' } } },
+      { id: 'then-b', type: 'block', position: { x: 60, y: 460 }, data: { blockType: 'print', label: 'Then B', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/then/1', _branchLabel: 'then', message: 'then-b' } } },
+      { id: 'else-1', type: 'block', position: { x: 420, y: 320 }, data: { blockType: 'print', label: 'Else', props: { _isChildOf: 'if-1', _stepPath: 'steps/0/else/0', _branchLabel: 'else', message: 'else' } } },
+      { id: 'after-1', type: 'block', position: { x: 80, y: 640 }, data: { blockType: 'print', label: 'After', props: { message: 'after' } } },
+    ],
+    edges: [
+      { id: 'edge-start-if', source: '__start__', target: 'if-1', style: { stroke: '#666' } },
+      { id: 'edge-if-then', source: 'if-1', target: 'then-a', label: 'then', style: { stroke: 'var(--fc-branch-then)' } },
+      { id: 'edge-then-a-b', source: 'then-a', target: 'then-b' },
+      { id: 'edge-if-else', source: 'if-1', target: 'else-1', sourceHandle: 'false', label: 'else', style: { stroke: 'var(--fc-branch-else)' } },
+      { id: 'edge-if-after', source: 'if-1', target: 'after-1', sourceHandle: 'continue' },
+    ],
+  };
+}

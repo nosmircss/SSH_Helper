@@ -230,6 +230,19 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Updates the per-preset layout mode without triggering PresetsChanged.
+        /// Pass null to clear (inherit the global default).
+        /// </summary>
+        public void UpdateLayoutMode(string name, LayoutMode? mode)
+        {
+            if (_presets.TryGetValue(name, out var preset))
+            {
+                preset.LayoutMode = mode;
+                PersistToConfig();
+            }
+        }
+
+        /// <summary>
         /// Duplicates a preset with a new name.
         /// </summary>
         public string Duplicate(string sourceName, string? suggestedName = null)

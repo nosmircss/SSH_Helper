@@ -1,18 +1,20 @@
 import { expect, test, type Page } from '@playwright/test';
 import { createImportedChildEditingFixture } from './fixtures/graphs';
 import {
-  clearOutgoingMessages, installHostMessageCapture, loadGraphFixture, waitForOutgoingMessage,
+  clearOutgoingMessages, installHostMessageCapture, loadGraphFixture, openDisplaySettings, waitForOutgoingMessage,
 } from './support/harness';
 
-async function resolveVar(page: Page, name: string): Promise<string> {
-  return page.evaluate((n) => {
+// Resolve an arbitrary color expression (e.g. a var(--fc-*) or color-mix(...)) to its
+// computed value via a throwaway probe element.
+async function resolveColor(page: Page, expr: string): Promise<string> {
+  return page.evaluate((e) => {
     const probe = document.createElement('div');
-    probe.style.color = `var(${n})`;
+    probe.style.color = e;
     document.body.appendChild(probe);
     const v = getComputedStyle(probe).color;
     probe.remove();
     return v;
-  }, name);
+  }, expr);
 }
 
 test.describe('Flow Canvas Branch Bands', () => {
@@ -29,7 +31,8 @@ test.describe('Flow Canvas Branch Bands', () => {
     const band = page.locator('[data-testid="branch-band"][data-branch="then"]');
     await expect(band).toBeVisible();
     const borderColor = await band.evaluate((el) => getComputedStyle(el as HTMLElement).borderLeftColor);
-    expect(borderColor).toBe(await resolveVar(page, '--fc-branch-then'));
+    // The left accent is now mix(branch, 70%) (labeled-lane redesign), not the pure branch color.
+    expect(borderColor).toBe(await resolveColor(page, 'color-mix(in oklch, var(--fc-branch-then) 70%, transparent)'));
   });
 
   test('band is pointer-events:none (does not capture node drag)', async ({ page }) => {
@@ -40,7 +43,8 @@ test.describe('Flow Canvas Branch Bands', () => {
 
   test('toggling branchBandsEnabled hides the layer', async ({ page }) => {
     await expect(page.locator('[data-testid="branch-band"]')).toHaveCount(1);
-    await page.getByRole('button', { name: '▭ Bands' }).click();
+    await openDisplaySettings(page);
+    await page.getByRole('switch', { name: 'Branch bands' }).click();
     await expect(page.locator('[data-testid="branch-band"]')).toHaveCount(0);
   });
 });

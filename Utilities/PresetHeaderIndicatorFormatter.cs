@@ -29,25 +29,11 @@ namespace SSH_Helper.Utilities
                 : $"Preset: {effectivePresetName}";
         }
 
-        public static string FormatCommandSectionTitle(bool isDirty, CanvasLayoutState canvasState = CanvasLayoutState.None)
+        public static string FormatCommandSectionTitle(bool isDirty)
         {
-            var title = isDirty
+            return isDirty
                 ? $"{CommandSectionLabel} (unsaved)"
                 : CommandSectionLabel;
-
-            return canvasState switch
-            {
-                CanvasLayoutState.Saved => $"{title}  \u2022  Layout saved",
-                CanvasLayoutState.WillReset => $"{title}  \u2022  \u26A0 Layout will reset",
-                _ => title,
-            };
-        }
-
-        public enum CanvasLayoutState
-        {
-            None,
-            Saved,
-            WillReset,
         }
 
         public static string FormatSaveButtonLabel(bool isDirty)

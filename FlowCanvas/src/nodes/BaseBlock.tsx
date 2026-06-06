@@ -4,6 +4,8 @@ import { blockDefMap, categoryColors, type BlockCategory } from '../blockDefs/re
 import { useFlowStore } from '../stores/useFlowStore';
 import { mix } from '../utils/tokens';
 import { nodeBorderColor, resolveNodeShadow } from '../utils/nodeStyle';
+import { summarizeBlock } from '../utils/blockSummary';
+import { BLOCK_WIDTH_INSET } from '../utils/nodeSize';
 import { BlockIcon } from './BlockIcon';
 import './baseblock.css';
 import './execution-cinematics.css';
@@ -18,6 +20,16 @@ export interface BlockNodeData {
   /** Whether a breakpoint is set on this block */
   breakpoint?: boolean;
   [key: string]: unknown;
+}
+
+// Keyframe name of the one-shot entrance pulse (styles/justPlaced.css). Kept here so the
+// animationEnd guard and the CSS share one literal.
+export const JUST_PLACED_ANIMATION = 'fc-just-placed-pulse';
+
+// True only when an animationEnd belongs to the entrance pulse AND the flag is still set — i.e. the
+// moment to clear _justPlaced so the highlight can't replay on a later DOM remount.
+export function shouldClearJustPlaced(animationName: string, justPlacedFlag: unknown): boolean {
+  return animationName === JUST_PLACED_ANIMATION && justPlacedFlag === true;
 }
 
 // Token-driven heat ramp (Decision #4: no inline hex). cold→mid→hot interpolated
@@ -90,12 +102,28 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   });
   const loopIteration = useFlowStore((s) => s.loopIterations.get(id));
   const branchTakenKey = useFlowStore((s) => s.branchTaken.get(id));
+  const isExpanded = useFlowStore((s) => s.isExpanded(id));
+  const toggleExpanded = useFlowStore((s) => s.toggleExpanded);
+  const selectNode = useFlowStore((s) => s.selectNode);
+  const blockWidth = useFlowStore((s) => s.blockWidth);
+  const textScale = useFlowStore((s) => s.textScale);
+  const updateNodeData = useFlowStore((s) => s.updateNodeData);
 
   const handleBreakpointToggle = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     toggleBreakpoint(id);
   }, [id, toggleBreakpoint]);
+
+  // Clear the one-shot _justPlaced flag when the entrance pulse ends so it can't replay on a later
+  // DOM remount. updateNodeData is a non-dirty cosmetic update (no isDirty, no export-status reset),
+  // matching execState writes — clearing the flag re-renders without fc-just-placed, so the animation
+  // doesn't restart and there's no loop. Guarded by animationName so unrelated animations don't fire it.
+  const handleAnimationEnd = useCallback((e: React.AnimationEvent) => {
+    if (shouldClearJustPlaced(e.animationName, (data as Record<string, unknown>)._justPlaced)) {
+      updateNodeData(id, { _justPlaced: false });
+    }
+  }, [id, data, updateNodeData]);
 
   // Live ticker — a hook, so it MUST run before the early return below (rules of hooks). It reads
   // `start` directly off the timings Map; `timing` itself stays declared in the badge block below.
@@ -134,6 +162,10 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       ? String(blockData.props['_preview'])
       : null;
 
+  const summary = isExpanded
+    ? summarizeBlock(blockData.blockType, (blockData.props ?? {}) as Record<string, unknown>)
+    : null;
+
   // running + error are class-driven: the fc-exec-running / fc-exec-error animations own the
   // box-shadow via the cascade (CSS animations outrank inline styles), so no inline glow here.
   // success/skipped settle to a soft static glow on the INLINE path so the heat ring still stacks;
@@ -150,8 +182,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     background: isDisabled ? 'var(--fc-surface-disabled)' : 'var(--fc-node-surface)',
     border: `1px solid ${nodeBorderColor({ selected, isDisabled, border: colors.border })}`,
     borderRadius: 8,
-    minWidth: isChild ? 160 : 280,
-    maxWidth: isChild ? 260 : 280,
+    minWidth: isChild ? blockWidth - BLOCK_WIDTH_INSET : blockWidth,
+    maxWidth: isChild ? blockWidth - BLOCK_WIDTH_INSET : blockWidth,
     overflow: 'hidden',
     opacity: isDisabled ? 0.5 : isChild ? 0.95 : 1,
     boxShadow: heatTint ? `0 0 0 3px ${heatTint}, ${existingBoxShadow}` : existingBoxShadow,
@@ -165,14 +197,18 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     : execState === 'error' ? 'fc-exec-error'
       : undefined;
 
+  const justPlaced = (data as Record<string, unknown>)._justPlaced === true && !reducedMotion;
+  const blockClassName = [stateClass, justPlaced ? 'fc-just-placed' : undefined]
+    .filter(Boolean).join(' ') || undefined;
+
   // Category-tinted icon chip. color tints the stroke (currentColor); a faint category wash sits
   // behind it. mix() is the gate-safe color-mix helper — no new per-category token needed.
   const iconChipStyle: CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 18,
-    height: 18,
+    width: 20,
+    height: 20,
     flexShrink: 0,
     borderRadius: 4,
     color: isDisabled ? 'var(--fc-text-faint)' : colors.icon,
@@ -180,18 +216,18 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   };
 
   const headerStyle: CSSProperties = {
-    padding: '4px 8px',
+    padding: '6px 9px',
     borderBottom: `1px solid ${mix(colors.border, 20)}`,
     display: 'flex',
     alignItems: 'center',
     gap: 6,
-    fontSize: 'var(--fc-fs-header)',
+    fontSize: 13 * textScale,
   };
 
   const badgeStyle: CSSProperties = {
     background: 'transparent',
     color: isDisabled ? 'var(--fc-text-secondary)' : colors.text,
-    fontSize: 10,
+    fontSize: 10 * textScale,
     fontWeight: 700,
     padding: '2px 6px',
     borderRadius: 3,
@@ -269,7 +305,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   ) : null;
 
   return (
-    <div className={stateClass} style={containerStyle} data-testid="block-node">
+    <div className={blockClassName} style={containerStyle} data-testid="block-node" onAnimationEnd={handleAnimationEnd}>
       {/* Running comet halo: a sweeping conic ring on the card edge. Render-only and gated by
           reduced motion (no comet, no churn when motion is off). inset:0 keeps it inside the
           border-box so it never grows the node or gets clipped. */}
@@ -311,7 +347,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         <span style={badgeStyle}>{def.type}</span>
         <span style={{
           color: isDisabled ? 'var(--fc-text-faint)' : 'var(--fc-text)',
-          fontSize: 12,
+          fontSize: 13 * textScale,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -320,28 +356,62 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           {blockData.label || def.label}
         </span>
         {execIndicator}
+        <span
+          data-testid="expand-toggle"
+          onClick={(e) => { e.stopPropagation(); toggleExpanded(id); }}
+          style={{ marginLeft: 4, cursor: 'pointer', color: 'var(--fc-text-secondary)', display: 'flex' }}
+          title={isExpanded ? 'Collapse' : 'Expand settings'}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points={isExpanded ? '6 9 12 15 18 9' : '9 6 15 12 9 18'} />
+          </svg>
+        </span>
       </div>
 
-      {/* Preview content */}
-      {previewText && (
-        <div style={{
-          padding: '4px 8px',
-          fontFamily: 'monospace',
-          fontSize: 11,
+      {/* Preview content or expanded summary */}
+      {isExpanded && summary ? (
+        <div data-testid="block-summary" style={{ background: 'var(--fc-surface-0)', padding: '8px 9px 6px' }}>
+          {summary.rows.map((r) => (
+            <div key={r.key} style={{ display: 'flex', gap: 10, padding: '3px 0', alignItems: 'baseline' }}>
+              <span style={{ flex: 'none', width: 96, fontSize: 10.5 * textScale, fontWeight: 600, color: 'var(--fc-text-secondary)' }}>{r.label}</span>
+              <span style={{
+                flex: 1, fontSize: 11.5 * textScale, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                fontFamily: r.isCode ? 'var(--fc-font-mono)' : undefined,
+                color: r.notSet ? 'var(--fc-text-faint)' : (r.isCode ? colors.text : 'var(--fc-text)'),
+              }}>{r.value}</span>
+            </div>
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, paddingTop: 6,
+                        borderTop: '1px solid var(--fc-border)', fontSize: 10 * textScale }}>
+            <span style={{ color: 'var(--fc-text-faint)' }}>
+              {summary.hiddenCount} fields at default
+            </span>
+            <span
+              onClick={(e) => { e.stopPropagation(); selectNode(id); }}
+              style={{ color: 'var(--fc-accent)', cursor: 'pointer' }}
+            >Edit in Properties</span>
+          </div>
+        </div>
+      ) : previewText ? (
+        <div style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 12 * textScale,
           color: isDisabled ? 'var(--fc-text-disabled)' : colors.text,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}>
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {previewText}
         </div>
-      )}
+      ) : null}
 
-      {/* Output handle (bottom) */}
+      {/* Output handle (bottom). For a CONTAINER this is the THEN/body branch source and the
+          continuation diamond sits at bottom-center, so shift this handle right (toward the indented
+          body) to keep the two from stacking. A plain block's single successor stays centered so its
+          spine edge renders as a straight vertical line. */}
       <Handle
         type="source"
         position={Position.Bottom}
-        style={{ background: colors.border, width: 8, height: 8, border: 'none' }}
+        style={{
+          background: colors.border, width: 8, height: 8, border: 'none',
+          ...(def.isContainer ? { left: '75%' } : {}),
+        }}
       />
 
       {/* Second output for IF blocks */}
@@ -357,26 +427,18 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         />
       )}
 
-      {/* Continuation handle for container blocks (diamond, bottom-left).
-          Position.Left makes edges route leftward first, creating a clear
-          corridor that avoids cutting through child blocks. */}
+      {/* Continuation handle for container blocks (accent diamond). EVERY container now indents its
+          branches clear of the spine, so the continuation leaves the bottom-CENTER and runs straight
+          down the spine gutter. A centered, NON-rotated marker keeps React Flow's connection point
+          dead-center — a rotate(45deg) diamond inflates the bounding box and offsets the point ~2px,
+          enough to fail the isSpine test and bend the "straight" continuation (proven via the
+          edge-geometry e2e). */}
       {def.isContainer && (
         <Handle
           type="source"
-          position={Position.Left}
+          position={Position.Bottom}
           id="continue"
-          style={{
-            background: 'var(--fc-accent)',
-            width: 10,
-            height: 10,
-            border: 'none',
-            borderRadius: 2,
-            transform: 'rotate(45deg)',
-            left: -5,
-            top: 'auto',
-            bottom: -2,
-            boxShadow: '0 0 0 5px transparent',
-          }}
+          style={{ background: 'var(--fc-accent)', width: 10, height: 10, border: 'none', borderRadius: 3 }}
         />
       )}
     </div>

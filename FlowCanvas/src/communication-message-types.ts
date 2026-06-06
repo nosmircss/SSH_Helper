@@ -1,8 +1,10 @@
 /**
  * Note: the host also sends a `load-graph` message (handled directly in messageBridge.ts):
- *   { type: 'load-graph', nodes, edges, hasUserLayout?: boolean }
- * `hasUserLayout` true = positions are a saved user arrangement (keep them);
- * false/absent = the canvas runs computeHierarchicalLayout() on import.
+ *   { type: 'load-graph', nodes, edges, layoutMode?: 'auto'|'manual',
+ *     layoutAction?: 'reflow'|'keep', newNodeIds?: string[] }
+ * layoutMode  = the active preset's mode (drives the toolbar toggle + reflow gating).
+ * layoutAction= 'reflow' runs computeHierarchicalLayout; 'keep' preserves merged positions and
+ *               near-neighbor-places the ids in newNodeIds.
  */
 export const CANVAS_HOST_MESSAGES = {
   incoming: {
@@ -37,6 +39,7 @@ export const CANVAS_HOST_MESSAGES = {
     layoutAutosave: 'layout-autosave',
     browsePath: 'browse-path',
     prefSave: 'pref-save',
+    setLayoutMode: 'set-layout-mode',
   },
   deprecatedOutgoingAliases: {
     runRequest: 'run-request',

@@ -508,6 +508,27 @@ namespace SSH_Helper.Models
 
         // Flow Canvas run-heatmap toggle (persisted from React UI)
         public bool? FlowCanvasHeatmapEnabled { get; set; }
+
+        // Flow Canvas display settings (persisted from React UI; null = use the React default)
+        public int? FlowCanvasBlockWidth { get; set; }
+        public double? FlowCanvasTextScale { get; set; }
+        public double? FlowCanvasDensity { get; set; }
+        public bool? FlowCanvasDefaultExpanded { get; set; }
+        public bool? FlowCanvasSnapToGrid { get; set; }
+        public bool? FlowCanvasBranchBands { get; set; }
+        public bool? FlowCanvasCompactComments { get; set; }
+        /// <summary>
+        /// LEGACY: replaced by FlowCanvasDefaultLayoutMode. Still deserialized so the value can be
+        /// migrated on load (the migration nulls it). The canvas write-back to this field is removed
+        /// when the layout-mode UI lands (plan Phase 5); remove this property after one release cycle.
+        /// </summary>
+        public bool? FlowCanvasAutoReflow { get; set; }
+
+        /// <summary>
+        /// Global default Flow Canvas layout mode for presets that have not set their own.
+        /// Null = AutoFlow (the historical default).
+        /// </summary>
+        public LayoutMode? FlowCanvasDefaultLayoutMode { get; set; }
     }
 
     /// <summary>

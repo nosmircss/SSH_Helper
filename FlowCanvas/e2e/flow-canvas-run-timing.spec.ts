@@ -3,9 +3,9 @@ import { createInteractionFixture } from './fixtures/graphs';
 import {
   clearOutgoingMessages,
   getGraphSnapshot,
-  getOutgoingMessages,
   installHostMessageCapture,
   loadGraphFixture,
+  openDisplaySettings,
   postHostMessage,
   waitForOutgoingMessage,
 } from './support/harness';
@@ -40,7 +40,8 @@ test.describe('Flow Canvas Run Timing', () => {
     // Off by default — capture the no-heat baseline (success glow only). The
     // container has a 0.2s box-shadow transition, so reads must settle first.
     const baseline1 = await settledBoxShadow(page, 'node-1');
-    const heatmapButton = page.getByRole('button', { name: '🔥 Heatmap' });
+    await openDisplaySettings(page);
+    const heatmapButton = page.getByRole('switch', { name: 'Heatmap' });
 
     await heatmapButton.click();
     const shadow1 = await settledBoxShadow(page, 'node-1');
@@ -61,20 +62,17 @@ test.describe('Flow Canvas Run Timing', () => {
 
   test('toggling heatmap emits layout-save and host restore re-activates the toolbar', async ({ page }) => {
     await clearOutgoingMessages(page);
-    await page.getByRole('button', { name: '🔥 Heatmap' }).click();
+    await openDisplaySettings(page);
+    const heatmapSwitch = page.getByRole('switch', { name: 'Heatmap' });
+    await heatmapSwitch.click();
 
     const saved = await waitForOutgoingMessage(page, 'layout-save');
     expect(saved.heatmapEnabled).toBe(true);
 
-    // Turn it off, then prove an inbound restore re-activates the button (no echo needed).
-    await page.getByRole('button', { name: '🔥 Heatmap' }).click();
+    // Turn it off, then prove an inbound restore re-activates the control (no echo needed).
+    await heatmapSwitch.click();
     await postHostMessage(page, { type: 'layout-restore', heatmapEnabled: true });
-
-    const accent = await resolveVar(page, '--fc-accent');
-    const buttonColor = await page
-      .getByRole('button', { name: '🔥 Heatmap' })
-      .evaluate((el) => getComputedStyle(el as HTMLElement).color);
-    expect(buttonColor).toBe(accent);
+    await expect(heatmapSwitch).toHaveAttribute('aria-checked', 'true');
   });
 
   test('PARITY: enabling heatmap is render-only and does not mutate the graph snapshot', async ({ page }) => {
@@ -84,7 +82,8 @@ test.describe('Flow Canvas Run Timing', () => {
     await applyDurations(page);
     const before = await getGraphSnapshot(page);
 
-    await page.getByRole('button', { name: '🔥 Heatmap' }).click();
+    await openDisplaySettings(page);
+    await page.getByRole('switch', { name: 'Heatmap' }).click();
     await expect(nodeById(page, 'node-1').getByText('100ms', { exact: true })).toBeVisible();
 
     const after = await getGraphSnapshot(page);
@@ -121,17 +120,6 @@ async function settledBoxShadow(page: Page, nodeId: string): Promise<string> {
     })
     .toBe(true);
   return previous;
-}
-
-async function resolveVar(page: Page, name: string): Promise<string> {
-  return page.evaluate((varName) => {
-    const probe = document.createElement('div');
-    probe.style.color = `var(${varName})`;
-    document.body.appendChild(probe);
-    const value = getComputedStyle(probe).color;
-    probe.remove();
-    return value;
-  }, name);
 }
 
 function nodeById(page: Page, nodeId: string): Locator {

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using FluentAssertions;
 using Newtonsoft.Json.Linq;
+using SSH_Helper.Models;
 using SSH_Helper.Services;
 using SSH_Helper.UI;
 using Xunit;
@@ -75,6 +76,59 @@ public sealed class FlowCanvasFormLayoutTests
             JObject.FromObject(new { type = "layout-save", heatmapEnabled = true }));
 
         act.Should().NotThrow();
+    }
+
+    [WinFormsFact]
+    public void LoadGraph_includes_layoutMode_action_and_newNodeIds()
+    {
+        using var flowCanvas = new FlowCanvasForm(darkMode: false, configService: null);
+
+        var pendingMessages = GetField<ConcurrentQueue<string>>(flowCanvas, "_pendingMessages");
+        flowCanvas.LoadGraph(new JArray(), new JArray(), LayoutMode.Manual, "keep", new JArray { "node-2" });
+
+        var load = ReadMessageOfType(pendingMessages, "load-graph");
+        load.Should().NotBeNull();
+        load!["layoutMode"]?.Value<string>().Should().Be("manual");
+        load["layoutAction"]?.Value<string>().Should().Be("keep");
+        load["newNodeIds"]?.Values<string>().Should().Contain("node-2");
+    }
+
+    [WinFormsFact]
+    public void Inbound_layout_save_persists_default_layout_mode()
+    {
+        var testDir = Path.Combine(Path.GetTempPath(), $"FlowCanvasLayoutTests_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testDir);
+        try
+        {
+            var configService = new ConfigurationService(Path.Combine(testDir, "config.json"));
+
+            using var flowCanvas = new FlowCanvasForm(darkMode: false, configService: configService);
+
+            flowCanvas.HandleHostMessage(
+                JObject.Parse("{\"type\":\"layout-save\",\"defaultLayoutMode\":\"manual\"}"));
+
+            configService.GetCurrent().WindowState.FlowCanvasDefaultLayoutMode
+                .Should().Be(LayoutMode.Manual);
+        }
+        finally
+        {
+            try { Directory.Delete(testDir, true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    [WinFormsFact]
+    public void Inbound_set_layout_mode_raises_OnSetLayoutMode()
+    {
+        using var flowCanvas = new FlowCanvasForm(darkMode: false, configService: null);
+
+        JObject? received = null;
+        flowCanvas.OnSetLayoutMode += m => received = m;
+
+        flowCanvas.HandleHostMessage(
+            JObject.Parse("{\"type\":\"set-layout-mode\",\"mode\":\"manual\"}"));
+
+        received.Should().NotBeNull();
+        received!["mode"]!.ToString().Should().Be("manual");
     }
 
     private static JObject? ReadMessageOfType(ConcurrentQueue<string> queue, string expectedType)

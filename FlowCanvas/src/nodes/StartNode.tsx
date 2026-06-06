@@ -1,5 +1,6 @@
 import { memo, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { useFlowStore } from '../stores/useFlowStore';
 
 export interface StartNodeData {
   blockType: '_start';
@@ -30,6 +31,8 @@ const FLAG_KEYS: { key: string; label: string }[] = [
 ];
 
 function StartNode({ data, selected }: NodeProps) {
+  const blockWidth = useFlowStore((s) => s.blockWidth);
+  const textScale = useFlowStore((s) => s.textScale);
   const startData = data as StartNodeData;
   const props = startData.props ?? {};
   const scriptName = props.name || startData.label || 'Untitled Script';
@@ -50,8 +53,8 @@ function StartNode({ data, selected }: NodeProps) {
     background: 'linear-gradient(135deg, var(--fc-start-grad-from), var(--fc-start-grad-to))',
     border: `2px solid ${selected ? 'var(--fc-border-selected)' : 'var(--fc-start-accent)'}`,
     borderRadius: 8,
-    minWidth: 280,
-    maxWidth: 280,
+    minWidth: blockWidth,
+    maxWidth: blockWidth,
     overflow: 'hidden',
     boxShadow: selected
       ? '0 0 12px var(--fc-glow-selected)'
@@ -80,7 +83,7 @@ function StartNode({ data, selected }: NodeProps) {
         <span style={{
           background: 'var(--fc-start-accent)',
           color: 'var(--fc-start-badge-text)',
-          fontSize: 10,
+          fontSize: 10 * textScale,
           fontWeight: 700,
           padding: '2px 6px',
           borderRadius: 3,
@@ -92,7 +95,7 @@ function StartNode({ data, selected }: NodeProps) {
         </span>
         <span style={{
           color: 'var(--fc-text)',
-          fontSize: 12,
+          fontSize: 12 * textScale,
           fontWeight: 600,
           overflow: 'hidden',
           textOverflow: 'ellipsis',

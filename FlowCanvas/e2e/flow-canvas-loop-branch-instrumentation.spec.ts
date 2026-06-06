@@ -9,7 +9,6 @@ import {
 } from './support/harness';
 
 const nodeById = (page: Page, id: string): Locator => page.locator(`.react-flow__node[data-id="${id}"]`);
-const motionButton = (page: Page): Locator => page.locator('button[title*="motion" i]').first();
 const hasReducedMotion = (page: Page) =>
   page.evaluate(() => document.body.classList.contains('fc-reduced-motion'));
 
@@ -63,7 +62,7 @@ test.describe('Flow Canvas Loop & Branch Instrumentation', () => {
   });
 
   test('badge renders identically under reduced motion (no motion added)', async ({ page }) => {
-    await motionButton(page).click();
+    await postHostMessage(page, { type: 'pref-restore', reducedMotion: true });
     await expect.poll(() => hasReducedMotion(page)).toBe(true);
     await postHostMessage(page, { type: 'execution-update', stepId: 'node-1', state: 'success', duration: 5, iterationCount: 4 });
     await expect(nodeById(page, 'node-1').getByTestId('exec-loop-badge')).toHaveText('×4');

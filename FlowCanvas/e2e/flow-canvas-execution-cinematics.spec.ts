@@ -10,7 +10,6 @@ import {
 
 const nodeById = (page: Page, id: string): Locator => page.locator(`.react-flow__node[data-id="${id}"]`);
 const cardOf = (page: Page, id: string): Locator => nodeById(page, id).locator('> div').first();
-const motionButton = (page: Page): Locator => page.locator('button[title*="motion" i]').first();
 
 // fc-exec-error sets two comma-separated tracks (shake 0.5s, ripple 0.6s), so animationDuration is
 // e.g. "0.5s, 0.6s"; Number.parseFloat intentionally reads only the first track — enough to prove
@@ -42,7 +41,7 @@ test.describe('Flow Canvas Execution Cinematics', () => {
   });
 
   test('running under reduced motion: no comet child, breathing collapses', async ({ page }) => {
-    await motionButton(page).click();
+    await postHostMessage(page, { type: 'pref-restore', reducedMotion: true });
     await expect.poll(() => hasReducedMotion(page)).toBe(true);
 
     await postHostMessage(page, { type: 'execution-update', stepId: 'node-1', state: 'running' });
@@ -74,7 +73,7 @@ test.describe('Flow Canvas Execution Cinematics', () => {
     await expect.poll(() => card.evaluate((el) => el.classList.contains('fc-exec-error'))).toBe(true);
     expect(await animationDurationSec(card)).toBeGreaterThan(0.01);
 
-    await motionButton(page).click();
+    await postHostMessage(page, { type: 'pref-restore', reducedMotion: true });
     await expect.poll(() => hasReducedMotion(page)).toBe(true);
     await expect.poll(() => animationDurationSec(card)).toBeLessThan(0.01);
   });
@@ -105,7 +104,7 @@ test.describe('Flow Canvas Execution Cinematics', () => {
   });
 
   test('count-up under reduced motion: no live value while running', async ({ page }) => {
-    await motionButton(page).click();
+    await postHostMessage(page, { type: 'pref-restore', reducedMotion: true });
     await expect.poll(() => hasReducedMotion(page)).toBe(true);
 
     await postHostMessage(page, { type: 'execution-update', stepId: 'node-1', state: 'running' });

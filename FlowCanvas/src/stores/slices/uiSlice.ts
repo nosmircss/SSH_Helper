@@ -3,6 +3,8 @@ import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
 import { messageBus } from '../../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
+import { reflowLayout } from '../reflow';
+import { flushLayoutAutosave } from '../../utils/layoutAutosave';
 
 export interface PanelSizes {
   rightPanelWidth: number;
@@ -25,6 +27,9 @@ export interface UISlice {
   reducedMotion: boolean;
   heatmapEnabled: boolean;
   branchBandsEnabled: boolean;
+  compactCommentsEnabled: boolean;
+  layoutMode: 'auto' | 'manual';          // active preset's mode (drives reflow gating + toolbar)
+  defaultLayoutMode: 'auto' | 'manual';   // global default for new/unset presets (settings popover)
   snapToGrid: boolean;
   gridSize: number;
   searchQuery: string;
@@ -57,7 +62,15 @@ export interface UISlice {
   toggleHeatmap: () => void;
   restoreHeatmapEnabled: (enabled: boolean) => void;
   toggleBranchBands: () => void;
+  restoreBranchBands: (value: boolean) => void;
+  toggleCompactComments: () => void;
+  restoreCompactComments: (value: boolean) => void;
+  setLayoutMode: (mode: 'auto' | 'manual') => void;       // user toggle: echoes + side effects
+  restoreLayoutMode: (mode: 'auto' | 'manual') => void;   // host-driven (load-graph), no echo
+  setDefaultLayoutMode: (mode: 'auto' | 'manual') => void;
+  restoreDefaultLayoutMode: (mode: 'auto' | 'manual') => void;
   toggleSnapToGrid: () => void;
+  restoreSnapToGrid: (value: boolean) => void;
   setSearchQuery: (query: string) => void;
   nextSearchResult: () => void;
   prevSearchResult: () => void;
@@ -82,6 +95,9 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   reducedMotion: false,
   heatmapEnabled: false,
   branchBandsEnabled: true,
+  compactCommentsEnabled: true,
+  layoutMode: 'auto',
+  defaultLayoutMode: 'auto',
   snapToGrid: false,
   gridSize: 20,
   searchQuery: '',
@@ -125,11 +141,54 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   }),
   restoreHeatmapEnabled: (enabled) => set({ heatmapEnabled: enabled }),
 
-  // Transient view preference (default-on, v1). Unlike heatmap it does not persist through
-  // WindowState — keeps the C# surface untouched for Wave 2a (trivial follow-on if requested).
-  toggleBranchBands: () => set((s) => ({ branchBandsEnabled: !s.branchBandsEnabled })),
+  toggleBranchBands: () => set((s) => {
+    const next = !s.branchBandsEnabled;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, branchBandsEnabled: next });
+    return { branchBandsEnabled: next };
+  }),
+  restoreBranchBands: (value) => set({ branchBandsEnabled: value }),
 
-  toggleSnapToGrid: () => set((s) => ({ snapToGrid: !s.snapToGrid })),
+  toggleCompactComments: () => {
+    const next = !get().compactCommentsEnabled;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, compactCommentsEnabled: next });
+    set({ compactCommentsEnabled: next });
+    // Comment height changes (pill <-> card), so reflow to re-reserve their vertical space.
+    reflowLayout(get);
+  },
+  restoreCompactComments: (value) => {
+    set({ compactCommentsEnabled: value });
+    // Reflow so comment spacing matches the restored setting (cards reserve more than pills).
+    // Without this, an import reflow that ran under the default setting leaves cards overlapping
+    // until the user presses Auto-Layout. Safe whether this fires before or after load-graph.
+    reflowLayout(get);
+  },
+
+  setLayoutMode: (mode) => {
+    if (get().layoutMode === mode) return;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.setLayoutMode, mode });
+    set({ layoutMode: mode });
+    if (mode === 'auto') {
+      // Auto-flow tidies immediately; the arrangement stays in host storage for a later flip back.
+      if (get().nodes.length > 0) reflowLayout(get);
+    } else {
+      // Switching INTO Manual freezes the current on-screen positions as the saved layout.
+      flushLayoutAutosave();
+    }
+  },
+  restoreLayoutMode: (mode) => set({ layoutMode: mode }), // host-driven, no echo/reflow
+
+  setDefaultLayoutMode: (mode) => {
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, defaultLayoutMode: mode });
+    set({ defaultLayoutMode: mode });
+  },
+  restoreDefaultLayoutMode: (mode) => set({ defaultLayoutMode: mode }),
+
+  toggleSnapToGrid: () => set((s) => {
+    const next = !s.snapToGrid;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, snapToGrid: next });
+    return { snapToGrid: next };
+  }),
+  restoreSnapToGrid: (value) => set({ snapToGrid: value }),
 
   setSearchQuery: (query) => {
     const nodes = get().nodes;

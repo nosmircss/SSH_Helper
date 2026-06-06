@@ -1,0 +1,12 @@
+/* One-shot entrance highlight for blocks placed in Manual-layout mode.
+ * Self-terminating (animation-fill-mode: none) so no persistent style remains after the pulse.
+ * Gated by the component: fc-just-placed is never applied when reducedMotion is true. */
+@keyframes fc-just-placed-pulse {
+  0%   { box-shadow: 0 0 0 3px var(--fc-state-success), 0 0 14px 2px var(--fc-state-success); }
+  100% { box-shadow: 0 0 0 0 transparent, 0 0 0 0 transparent; }
+}
+
+.fc-just-placed {
+  animation: fc-just-placed-pulse 1.2s ease-out 1;
+  border-radius: inherit;
+}

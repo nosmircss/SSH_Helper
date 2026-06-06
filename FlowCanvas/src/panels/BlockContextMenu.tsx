@@ -22,6 +22,7 @@ export default function BlockContextMenu() {
 
   const addComment = useFlowStore((s) => s.addComment);
   const removeNodes = useFlowStore((s) => s.removeNodes);
+  const setAllExpanded = useFlowStore((s) => s.setAllExpanded);
 
   const nodes = useFlowStore((s) => s.nodes);
 
@@ -63,6 +64,7 @@ export default function BlockContextMenu() {
 
   // Find node position for comment placement
   const node = nodes.find((n) => n.id === nodeId);
+  const isComment = node?.type === 'comment';
   const commentPos = node
     ? { x: node.position.x + 200, y: node.position.y - 20 }
     : { x, y };
@@ -79,17 +81,36 @@ export default function BlockContextMenu() {
       } as MenuItem,
     ] : []),
     {
-      label: 'Add Comment',
-      icon: '\uD83D\uDCDD',
+      label: 'Add Comment (#)',
+      icon: '\uD83D\uDCAC',
+      action: () => { addComment(commentPos, nodeId, 'comment'); hideContextMenu(); },
+    },
+    {
+      label: 'Add Sticky',
+      icon: '\uD83D\uDCCC',
+      action: () => { addComment(commentPos, nodeId, 'sticky'); hideContextMenu(); },
+    },
+    { separator: true } as Separator,
+    {
+      label: 'Expand All Blocks',
+      icon: '\u229E',
       action: () => {
-        addComment(commentPos, nodeId);
+        setAllExpanded(true);
+        hideContextMenu();
+      },
+    },
+    {
+      label: 'Collapse All Blocks',
+      icon: '\u229F',
+      action: () => {
+        setAllExpanded(false);
         hideContextMenu();
       },
     },
     ...(!isStartNode ? [
       { separator: true } as Separator,
       {
-        label: 'Delete Block',
+        label: isComment ? 'Delete Comment' : 'Delete Block',
         icon: '\uD83D\uDDD1',
         action: () => {
           removeNodes([nodeId]);

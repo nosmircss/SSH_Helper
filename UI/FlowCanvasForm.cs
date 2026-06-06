@@ -7,6 +7,7 @@ using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using SSH_Helper.Models;
 using SSH_Helper.Services;
 using SSH_Helper.Utilities;
 
@@ -202,6 +203,18 @@ namespace SSH_Helper.UI
             {
                 var json = e.WebMessageAsJson;
                 var msg = JObject.Parse(json);
+                HandleHostMessage(msg);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Message error: {ex.Message}");
+            }
+        }
+
+        internal void HandleHostMessage(JObject msg)
+        {
+            try
+            {
                 var type = msg["type"]?.ToString();
 
                 switch (type)
@@ -262,6 +275,10 @@ namespace SSH_Helper.UI
 
                     case "layout-autosave":
                         OnLayoutAutosave?.Invoke(msg);
+                        break;
+
+                    case "set-layout-mode":
+                        OnSetLayoutMode?.Invoke(msg);
                         break;
 
                     case "browse-path":
@@ -325,14 +342,27 @@ namespace SSH_Helper.UI
 
         /// <summary>
         /// Sends a load-graph message to display nodes and edges.
-        /// <paramref name="hasUserLayout"/> tells the canvas whether the positions are a
-        /// saved user arrangement (true → keep) or algorithmic defaults (false → the canvas
-        /// will run its hierarchical auto-layout).
+        /// <paramref name="layoutMode"/> is the active preset's effective mode (drives the toolbar
+        /// toggle + future reflow gating). <paramref name="layoutAction"/> is what to do on THIS load:
+        /// "reflow" (auto presets, or manual presets whose saved layout can't be safely reused) or
+        /// "keep" (positions already merged; near-neighbor the ids in <paramref name="newNodeIds"/>).
         /// </summary>
-        public void LoadGraph(object nodes, object edges, bool hasUserLayout = false)
+        public void LoadGraph(object nodes, object edges, LayoutMode layoutMode, string layoutAction, object newNodeIds)
         {
-            SendMessage(new { type = "load-graph", nodes, edges, hasUserLayout });
+            SendMessage(new
+            {
+                type = "load-graph",
+                nodes,
+                edges,
+                layoutMode = layoutMode == LayoutMode.Manual ? "manual" : "auto",
+                layoutAction,
+                newNodeIds,
+            });
         }
+
+        /// <summary>Back-compat overload: auto-flow, clean reflow, no new ids.</summary>
+        public void LoadGraph(object nodes, object edges)
+            => LoadGraph(nodes, edges, LayoutMode.AutoFlow, "reflow", new JArray());
 
         // Events for messages from the React app
         public event Action<JObject>? OnApplyYaml;
@@ -344,6 +374,7 @@ namespace SSH_Helper.UI
         public event Action<JObject>? OnDisableBlock;
         public event Action<JObject>? OnTestDataBlock;
         public event Action<JObject>? OnLayoutAutosave;
+        public event Action<JObject>? OnSetLayoutMode;
         public event Action<JObject>? OnBrowsePath;
 
         private void ApplyTheme()
@@ -364,8 +395,22 @@ namespace SSH_Helper.UI
             if (ws.FlowCanvasOutputHeight > 0)
                 panelSizes["outputHeight"] = ws.FlowCanvasOutputHeight;
 
-            if (panelSizes.Count > 0 || ws.FlowCanvasHeatmapEnabled.HasValue)
-                SendMessage(new { type = "layout-restore", panelSizes, heatmapEnabled = ws.FlowCanvasHeatmapEnabled ?? false });
+            // React guards each field by type, so sending nulls is harmless. Always send so any
+            // persisted display setting is restored, not just panel sizes.
+            SendMessage(new
+            {
+                type = "layout-restore",
+                panelSizes,
+                heatmapEnabled = ws.FlowCanvasHeatmapEnabled ?? false,
+                blockWidth = ws.FlowCanvasBlockWidth,
+                textScale = ws.FlowCanvasTextScale,
+                density = ws.FlowCanvasDensity,
+                defaultBlockExpanded = ws.FlowCanvasDefaultExpanded,
+                snapToGrid = ws.FlowCanvasSnapToGrid,
+                branchBandsEnabled = ws.FlowCanvasBranchBands,
+                compactCommentsEnabled = ws.FlowCanvasCompactComments,
+                defaultLayoutMode = (ws.FlowCanvasDefaultLayoutMode ?? Models.LayoutMode.AutoFlow) == Models.LayoutMode.Manual ? "manual" : "auto",
+            });
 
             var rm = ws.FlowCanvasReducedMotion;
             if (rm.HasValue) SendMessage(new { type = "pref-restore", reducedMotion = rm.Value });
@@ -378,9 +423,21 @@ namespace SSH_Helper.UI
             var panelSizes = msg["panelSizes"] as JObject;
             var rightWidth = panelSizes?["rightPanelWidth"]?.Value<int>();
             var outputHeight = panelSizes?["outputHeight"]?.Value<int>();
-            // The heatmap toggle reuses the layout-save channel but carries no panelSizes object.
+            // These all reuse the layout-save channel and arrive without a panelSizes object.
             var heatmap = msg["heatmapEnabled"]?.Value<bool>();
-            if (rightWidth == null && outputHeight == null && heatmap == null) return;
+            var blockWidth = msg["blockWidth"]?.Value<int>();
+            var textScale = msg["textScale"]?.Value<double>();
+            var density = msg["density"]?.Value<double>();
+            var defaultExpanded = msg["defaultBlockExpanded"]?.Value<bool>();
+            var snap = msg["snapToGrid"]?.Value<bool>();
+            var bands = msg["branchBandsEnabled"]?.Value<bool>();
+            var compact = msg["compactCommentsEnabled"]?.Value<bool>();
+            var defaultLayoutMode = msg["defaultLayoutMode"]?.ToString();
+
+            if (rightWidth == null && outputHeight == null && heatmap == null && blockWidth == null
+                && textScale == null && density == null && defaultExpanded == null && snap == null && bands == null
+                && compact == null && defaultLayoutMode == null)
+                return;
 
             _configService.Update(c =>
             {
@@ -388,6 +445,16 @@ namespace SSH_Helper.UI
                 if (rightWidth > 0) c.WindowState.FlowCanvasRightPanelWidth = rightWidth;
                 if (outputHeight > 0) c.WindowState.FlowCanvasOutputHeight = outputHeight;
                 if (heatmap.HasValue) c.WindowState.FlowCanvasHeatmapEnabled = heatmap.Value;
+                if (blockWidth > 0) c.WindowState.FlowCanvasBlockWidth = blockWidth;
+                if (textScale.HasValue) c.WindowState.FlowCanvasTextScale = textScale.Value;
+                if (density.HasValue) c.WindowState.FlowCanvasDensity = density.Value;
+                if (defaultExpanded.HasValue) c.WindowState.FlowCanvasDefaultExpanded = defaultExpanded.Value;
+                if (snap.HasValue) c.WindowState.FlowCanvasSnapToGrid = snap.Value;
+                if (bands.HasValue) c.WindowState.FlowCanvasBranchBands = bands.Value;
+                if (compact.HasValue) c.WindowState.FlowCanvasCompactComments = compact.Value;
+                if (defaultLayoutMode == "auto" || defaultLayoutMode == "manual")
+                    c.WindowState.FlowCanvasDefaultLayoutMode =
+                        defaultLayoutMode == "manual" ? Models.LayoutMode.Manual : Models.LayoutMode.AutoFlow;
             });
         }
 

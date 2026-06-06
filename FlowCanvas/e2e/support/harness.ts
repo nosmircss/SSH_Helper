@@ -128,6 +128,11 @@ export async function connectViaActions(
   }, connection);
 }
 
+export async function openDisplaySettings(page: Page): Promise<void> {
+  await page.locator('button[title="Display settings"]').click();
+  await expect(page.locator('div[role="dialog"][aria-label="Display settings"]')).toBeVisible();
+}
+
 export async function getGraphSnapshot(page: Page): Promise<GraphFixture> {
   return page.evaluate(() => {
     const globalWindow = window as Window & { __FLOWCANVAS_TEST_HOOKS__?: FlowCanvasTestHooks };

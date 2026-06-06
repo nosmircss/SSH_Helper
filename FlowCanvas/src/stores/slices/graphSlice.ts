@@ -1,12 +1,24 @@
 import type { StateCreator } from 'zustand';
-import type { Node, Edge, OnNodesChange, OnEdgesChange, Connection } from '@xyflow/react';
+import type { Node, Edge, OnNodesChange, OnEdgesChange, Connection, NodeChange } from '@xyflow/react';
 import { applyNodeChanges, applyEdgeChanges, addEdge } from '@xyflow/react';
 import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
 import { isConnectionAllowed } from '../../utils/connectionRules';
 import { branchColorVar } from '../../utils/branchBands';
+import { deriveChildMembership, applyChildMembership, clearConnectAuthoredMembership } from '../../utils/childMembership';
+import { reflowLayout } from '../reflow';
+import { anchorReservesLayoutSpace } from '../../utils/layout/hierarchicalLayout';
 
 export const START_NODE_ID = '__start__';
+
+/** A comment is attached to a block when it carries attachedToNodeId (any anchor type, incl. inline).
+ *  Used for orphan cascade-delete — NOT for the reflow trigger, which must match the layout's reserve
+ *  rule (anchorReservesLayoutSpace) so deleting a non-reserving comment never reflows. */
+function commentAttachedTo(node: Node): string | undefined {
+  if (node.type !== 'comment') return undefined;
+  const attachedTo = (node.data as Record<string, unknown> | undefined)?.attachedToNodeId;
+  return typeof attachedTo === 'string' ? attachedTo : undefined;
+}
 
 function clearedExportStatusState(): Pick<FlowStore, 'exportStatus' | 'diagnostics'> {
   return {
@@ -201,6 +213,8 @@ export interface GraphSlice {
   updateNodeProp: (id: string, key: string, value: unknown) => void;
   updateEdgeBranchMetadata: (id: string, metadata: BranchMetadata) => void;
   updateNodePosition: (id: string, position: { x: number; y: number }) => void;
+  /** Shift several nodes by the same delta in one batched update (drag a band by its label). */
+  translateNodesBy: (ids: string[], dx: number, dy: number) => void;
   selectNode: (id: string | null) => void;
   toggleNodeSelection: (id: string) => void;
   selectNodes: (ids: string[]) => void;
@@ -230,10 +244,72 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
     const filtered = changes.filter(
       (c) => c.type !== 'remove' || c.id !== START_NODE_ID,
     );
+    // For remove events, cascade to comment nodes attached to the removed blocks.
+    const removedIds = new Set(
+      filtered.filter((c) => c.type === 'remove').map((c) => c.id),
+    );
+    // Reflow only when a remove takes a SPACE-RESERVING comment with it (directly or via its host
+    // block). Computed before the mutation; strictly gated to removes so drag/select changes never
+    // reflow, and to reserving anchors so removing an inline comment never disturbs the layout.
+    let removedReservingComment = false;
+    if (removedIds.size > 0) {
+      for (const n of get().nodes) {
+        if (!anchorReservesLayoutSpace(n)) continue;
+        const attachedTo = (n.data as Record<string, unknown>).attachedToNodeId as string;
+        if (removedIds.has(n.id) || removedIds.has(attachedTo)) {
+          removedReservingComment = true;
+          break;
+        }
+      }
+    }
     set((state) => {
-      const nextNodes = applyNodeChanges(filtered, state.nodes);
-      const hasSelectionChange = filtered.some((c) => c.type === 'select');
-      const hasGraphMutation = filtered.some((c) => c.type !== 'select');
+      let allChanges = filtered;
+      if (removedIds.size > 0) {
+        const attachedCommentIds: string[] = [];
+        for (const n of state.nodes) {
+          if (n.type === 'comment') {
+            const attachedTo = (n.data as Record<string, unknown>)?.attachedToNodeId;
+            if (typeof attachedTo === 'string' && removedIds.has(attachedTo)) {
+              attachedCommentIds.push(n.id);
+            }
+          }
+        }
+        if (attachedCommentIds.length > 0) {
+          allChanges = [
+            ...filtered,
+            ...attachedCommentIds.map((id) => ({ type: 'remove' as const, id })),
+          ];
+        }
+      }
+
+      // Drag-follow: when a block is moved, move its anchored comments by the same delta so they
+      // stay attached. Skip comments that already have their own change (directly dragged / removed)
+      // and blocks that aren't actually moving (zero delta).
+      const deltaByBlock = new Map<string, { dx: number; dy: number; dragging?: boolean }>();
+      for (const c of filtered) {
+        if (c.type !== 'position' || !c.position) continue;
+        const cur = state.nodes.find((n) => n.id === c.id);
+        if (!cur) continue;
+        const dx = c.position.x - cur.position.x;
+        const dy = c.position.y - cur.position.y;
+        if (dx !== 0 || dy !== 0) deltaByBlock.set(c.id, { dx, dy, dragging: c.dragging });
+      }
+      if (deltaByBlock.size > 0) {
+        const changedIds = new Set(allChanges.map((c) => ('id' in c ? c.id : undefined)));
+        const follow: NodeChange[] = [];
+        for (const n of state.nodes) {
+          if (n.type !== 'comment' || changedIds.has(n.id)) continue;
+          const att = (n.data as Record<string, unknown>)?.attachedToNodeId;
+          const d = typeof att === 'string' ? deltaByBlock.get(att) : undefined;
+          if (!d) continue;
+          follow.push({ type: 'position', id: n.id, position: { x: n.position.x + d.dx, y: n.position.y + d.dy }, dragging: d.dragging });
+        }
+        if (follow.length > 0) allChanges = [...allChanges, ...follow];
+      }
+
+      const nextNodes = applyNodeChanges(allChanges, state.nodes);
+      const hasSelectionChange = allChanges.some((c) => c.type === 'select');
+      const hasGraphMutation = allChanges.some((c) => c.type !== 'select');
       return {
         nodes: nextNodes,
         selectedNodeIds: hasSelectionChange
@@ -242,15 +318,23 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
         ...(hasGraphMutation ? clearedExportStatusState() : {}),
       };
     });
+    if (removedReservingComment) reflowLayout(get);
   },
 
   onEdgesChange: (changes) => {
     const hasStructuralChange = changes.some((c) => c.type === 'remove' || c.type === 'add');
-    set((state) => ({
-      edges: applyEdgeChanges(changes, state.edges),
-      ...(hasStructuralChange ? { isDirty: true } : {}),
-      ...(changes.length > 0 ? clearedExportStatusState() : {}),
-    }));
+    set((state) => {
+      // Deleting a wire that conferred band membership releases the block back to the spine.
+      const removedIds = new Set(changes.filter((c) => c.type === 'remove').map((c) => c.id));
+      const removed = removedIds.size > 0 ? state.edges.filter((e) => removedIds.has(e.id)) : [];
+      const nextNodes = removed.length > 0 ? clearConnectAuthoredMembership(state.nodes, removed) : state.nodes;
+      return {
+        ...(nextNodes !== state.nodes ? { nodes: nextNodes } : {}),
+        edges: applyEdgeChanges(changes, state.edges),
+        ...(hasStructuralChange ? { isDirty: true } : {}),
+        ...(changes.length > 0 ? clearedExportStatusState() : {}),
+      };
+    });
   },
 
   onConnect: (connection) => {
@@ -284,6 +368,15 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
         ...connection,
       };
 
+      // Wiring a fresh block into a container (a continue handle, a leaf's bottom handle, or a
+      // branch handle) confers band membership: write the _isChildOf/_stepPath metadata import would
+      // have produced so layout, bands and the YAML exporter treat it as a real member instead of
+      // orphaning it at the spine. Returns null (and leaves nodes untouched) for gestures that don't
+      // nest — top-level successors, canvas-authored containers, already-nested targets.
+      let nextNodes = state.nodes;
+      const membership = deriveChildMembership(state.nodes, connection, { sourceIsContainer: isContainer, branchMetadata });
+      if (membership) nextNodes = applyChildMembership(state.nodes, membership);
+
       if (isContinuation) {
         // Continuation edges get explicit styling — bypass getBranchVisual
         edgeProps.style = { stroke: 'var(--fc-accent)' };
@@ -301,6 +394,7 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       }
 
       return {
+        ...(nextNodes !== state.nodes ? { nodes: nextNodes } : {}),
         edges: addEdge(edgeProps as Edge, state.edges),
         isDirty: true,
         ...clearedExportStatusState(),
@@ -318,24 +412,45 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
     if (filtered.length === 0) return;
     get().pushSnapshot('Delete blocks');
     const idSet = new Set(filtered);
+    // Resolve the full removal set (including comments cascaded by their host block) up front, and
+    // separately track whether a SPACE-RESERVING comment is leaving. Cascade removes ANY attached
+    // comment (incl. inline) so none is orphaned; the reflow fires only when a comment that actually
+    // reserved vertical space is removed, so deleting an inline comment never disturbs the layout.
+    const toRemove = new Set(idSet);
+    let removedReservingComment = false;
+    for (const n of get().nodes) {
+      const attachedTo = commentAttachedTo(n);
+      if (attachedTo === undefined) continue;
+      const hostDeleted = idSet.has(attachedTo);
+      const selfDeleted = idSet.has(n.id);
+      if (!hostDeleted && !selfDeleted) continue;
+      toRemove.add(n.id);
+      if (anchorReservesLayoutSpace(n)) removedReservingComment = true;
+    }
     set((state) => ({
-      nodes: state.nodes.filter((n) => !idSet.has(n.id)),
-      edges: state.edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)),
-      selectedNodeIds: new Set([...state.selectedNodeIds].filter((id) => !idSet.has(id))),
+      nodes: state.nodes.filter((n) => !toRemove.has(n.id)),
+      edges: state.edges.filter((e) => !toRemove.has(e.source) && !toRemove.has(e.target)),
+      selectedNodeIds: new Set([...state.selectedNodeIds].filter((id) => !toRemove.has(id))),
       isDirty: true,
       ...clearedExportStatusState(),
     }));
+    if (removedReservingComment) reflowLayout(get);
   },
 
   removeEdges: (ids) => {
     get().pushSnapshot('Delete connections');
     const idSet = new Set(ids);
-    set((state) => ({
-      edges: state.edges.filter((e) => !idSet.has(e.id)),
-      selectedEdgeIds: new Set<string>(),
-      isDirty: true,
-      ...clearedExportStatusState(),
-    }));
+    set((state) => {
+      const removed = state.edges.filter((e) => idSet.has(e.id));
+      const nextNodes = clearConnectAuthoredMembership(state.nodes, removed);
+      return {
+        ...(nextNodes !== state.nodes ? { nodes: nextNodes } : {}),
+        edges: state.edges.filter((e) => !idSet.has(e.id)),
+        selectedEdgeIds: new Set<string>(),
+        isDirty: true,
+        ...clearedExportStatusState(),
+      };
+    });
   },
 
   selectEdge: (id) => {
@@ -462,6 +577,16 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   updateNodePosition: (id, position) => {
     set((state) => ({
       nodes: state.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
+      ...clearedExportStatusState(),
+    }));
+  },
+
+  translateNodesBy: (ids, dx, dy) => {
+    const idSet = new Set(ids);
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        idSet.has(n.id) ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } } : n,
+      ),
       ...clearedExportStatusState(),
     }));
   },

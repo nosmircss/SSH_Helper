@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch SSH_Helper",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build SSH_Helper",
+      "program": "${workspaceFolder}/bin/Debug/net8.0-windows10.0.17763.0/SSH_Helper.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    }
+  ]
+}

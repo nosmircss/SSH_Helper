@@ -113,7 +113,11 @@ namespace SSH_Helper.Services.Scripting
             if (IsSimpleIdentifier(expr) && !context.HasVariable(expr))
                 return new List<string>();
 
-            return ResolveCollectionItems(ResolveExpressionValue(expr, context));
+            var value = TryResolveStandaloneInterpolationValue(expr, context, out var interpolatedValue)
+                ? interpolatedValue
+                : ResolveExpressionValue(expr, context);
+
+            return ResolveCollectionItems(value);
         }
 
         /// <summary>
@@ -168,6 +172,78 @@ namespace SSH_Helper.Services.Scripting
                 return new List<string>(text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None));
 
             return new List<string> { text };
+        }
+
+        private static bool TryResolveStandaloneInterpolationValue(string expr, ScriptContext context, out object? value)
+        {
+            value = null;
+
+            if (!TryUnwrapStandaloneInterpolation(expr, out var innerExpr))
+                return false;
+
+            value = innerExpr.StartsWith("vault:", StringComparison.OrdinalIgnoreCase)
+                ? context.SubstituteVariables(expr)
+                : ResolveExpressionValue(innerExpr, context);
+
+            return true;
+        }
+
+        private static bool TryUnwrapStandaloneInterpolation(string expr, out string innerExpr)
+        {
+            return TryUnwrapStandaloneInterpolation(expr, "${", "}", out innerExpr) ||
+                   TryUnwrapStandaloneInterpolation(expr, "{{", "}}", out innerExpr);
+        }
+
+        private static bool TryUnwrapStandaloneInterpolation(string expr, string open, string close, out string innerExpr)
+        {
+            innerExpr = string.Empty;
+
+            if (!expr.StartsWith(open, StringComparison.Ordinal) ||
+                !expr.EndsWith(close, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var contentStart = open.Length;
+            var depth = 1;
+            var index = contentStart;
+
+            while (index < expr.Length)
+            {
+                if (MatchesAt(expr, index, open))
+                {
+                    depth++;
+                    index += open.Length;
+                    continue;
+                }
+
+                if (MatchesAt(expr, index, close))
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        if (index + close.Length != expr.Length)
+                            return false;
+
+                        innerExpr = expr.Substring(contentStart, index - contentStart);
+                        return true;
+                    }
+
+                    index += close.Length;
+                    continue;
+                }
+
+                index++;
+            }
+
+            return false;
+        }
+
+        private static bool MatchesAt(string value, int index, string token)
+        {
+            return index >= 0 &&
+                   index + token.Length <= value.Length &&
+                   string.Compare(value, index, token, 0, token.Length, StringComparison.Ordinal) == 0;
         }
 
         /// <summary>

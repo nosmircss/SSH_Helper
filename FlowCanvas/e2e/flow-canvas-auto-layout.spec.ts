@@ -37,7 +37,7 @@ test.describe('Flow Canvas Auto-Organize (hierarchical)', () => {
   });
 
   test('fresh import lays branches into clean, non-overlapping columns', async ({ page }) => {
-    // hasUserLayout omitted/false → engine runs on import.
+    // no layoutAction:'keep' → engine runs on import (auto-flow).
     await postHostMessage(page, { type: 'load-graph', ...messyIfElse });
     await expect(page.locator('.react-flow__node[data-id="if-1"]')).toBeVisible();
 
@@ -47,14 +47,15 @@ test.describe('Flow Canvas Auto-Organize (hierarchical)', () => {
 
     expect(then.y).toBe(els.y);                       // sibling columns start level
     expect(then.x).toBeLessThan(els.x);               // then left of else
-    expect(Math.abs(then.x - els.x)).toBeGreaterThanOrEqual(260); // no overlap
-    expect((then.x + els.x) / 2).toBeCloseTo(ifp.x, 0); // columns centered on the container
+    expect(Math.abs(then.x - els.x)).toBeGreaterThanOrEqual(300); // no overlap
+    expect(then.x).toBeGreaterThan(ifp.x);            // primary branch indented right (spine gutter)
+    expect(els.x).toBeGreaterThan(then.x);            // additional branches spread further right
     expect(then.y).toBeGreaterThan(ifp.y);            // children below the container
   });
 
   test('Auto-organize button overrides a saved arrangement', async ({ page }) => {
-    // hasUserLayout true → import keeps the messy positions...
-    await postHostMessage(page, { type: 'load-graph', ...messyIfElse, hasUserLayout: true });
+    // layoutMode:'manual',layoutAction:'keep' → import keeps the messy positions...
+    await postHostMessage(page, { type: 'load-graph', ...messyIfElse, layoutMode: 'manual', layoutAction: 'keep' });
     await expect(page.locator('.react-flow__node[data-id="if-1"]')).toBeVisible();
     expect((await posById(page, 'if-1')).x).toBe(500); // kept as-is
 

@@ -61,7 +61,12 @@ namespace SSH_Helper.Services
         }
 
         private const double NodeSpacingY = 106;  // ~25% looser than the original 85 for more breathing room
-        private const double SingleBranchChildOffset = 70;
+        // Single-branch container bodies indent far enough that their branch band clears the
+        // spine, so the continuation can run straight down the bottom-center (must exceed
+        // SpineWidth/2 + BandPad ≈ 183). Mirrors LAYOUT.SINGLE_BRANCH_CHILD_OFFSET in
+        // hierarchicalLayout.ts. NOTE: the canvas recomputes layout on import, so these
+        // positions are the host-only (no-canvas) fallback — keep the value in sync with TS.
+        private const double SingleBranchChildOffset = 220;
         private const double NodeStartX = 250;
         private const double NodeStartY = 40;
         private const double ChildIndentX = 60;
@@ -70,9 +75,9 @@ namespace SSH_Helper.Services
 
         // Multi-branch horizontal layout constants
         // MinColumnWidth must be >= max child node width + gap to prevent overlap
-        private const double ChildNodeMaxWidth = 260;
+        private const double ChildNodeMaxWidth = 300;
         private const double ColumnGap = 30;
-        private const double MinColumnWidth = ChildNodeMaxWidth + ColumnGap;   // 290 — never narrower than a node
+        private const double MinColumnWidth = ChildNodeMaxWidth + ColumnGap;   // 330 — never narrower than a node
 
         // Branch edge colors
         private const string ColorThen = "#2ecc71";
@@ -325,6 +330,46 @@ namespace SSH_Helper.Services
         private int _idCounter;
         private string NextId() => $"node-{_idCounter++}";
 
+        private int _commentCounter;
+
+        private JObject BuildCommentNode(string text, string anchorType, string stepPath, string attachedToNodeId)
+        {
+            var id = $"comment-c{_commentCounter++}";
+            return new JObject
+            {
+                ["id"] = id,
+                ["type"] = "comment",
+                ["position"] = new JObject { ["x"] = 0, ["y"] = 0 },
+                ["data"] = new JObject
+                {
+                    ["commentId"] = id,
+                    ["blockType"] = "comment",
+                    ["kind"] = "comment",
+                    ["text"] = text,
+                    ["anchor"] = new JObject
+                    {
+                        ["type"] = anchorType,
+                        ["stepPath"] = stepPath,
+                    },
+                    ["attachedToNodeId"] = attachedToNodeId,
+                },
+            };
+        }
+
+        private static IEnumerable<string> ExtractPreambleComments(string preamble)
+        {
+            // Group CONSECUTIVE comment lines into one multiline entry (one comment node). A blank or
+            // non-comment line breaks the run, so distinct comment blocks stay distinct.
+            var run = new List<string>();
+            foreach (var raw in preamble.Split('\n'))
+            {
+                var t = raw.TrimEnd('\r').TrimStart();
+                if (t.StartsWith("#")) { run.Add(StripHash(t)); continue; }
+                if (run.Count > 0) { yield return string.Join("\n", run); run.Clear(); }
+            }
+            if (run.Count > 0) yield return string.Join("\n", run);
+        }
+
         #region YAML → Graph (using raw text splitting)
 
         /// <summary>
@@ -338,6 +383,8 @@ namespace SSH_Helper.Services
             var nodes = new JArray();
             var edges = new JArray();
             _idCounter = 0;
+            _commentCounter = 0;
+            _yamlLines = yamlText.Split('\n');
 
             // Parse to get step types/labels, but use raw text for data
             var parser = new ScriptParser();
@@ -377,6 +424,23 @@ namespace SSH_Helper.Services
                     stepProps["_preview"] = previewText;
                 ExtractStepProperties(step, stepType, stepProps);
 
+                // When a trailing inline comment was stripped from the snippet, the YAML parser
+                // (via PreprocessYaml quoting) may have embedded it in a string prop value.
+                // Strip it so the prop holds the clean value and the comment round-trips separately.
+                if (!string.IsNullOrEmpty(snippetInfo.InlineComment))
+                {
+                    var suffix = $"  # {snippetInfo.InlineComment}";
+                    foreach (var prop in stepProps.Properties().ToList())
+                    {
+                        if (prop.Value.Type == JTokenType.String)
+                        {
+                            var raw = prop.Value.ToString();
+                            if (raw.EndsWith(suffix, StringComparison.Ordinal))
+                                prop.Value = raw.Substring(0, raw.Length - suffix.Length);
+                        }
+                    }
+                }
+
                 var node = new JObject
                 {
                     ["id"] = nodeId,
@@ -391,6 +455,12 @@ namespace SSH_Helper.Services
                 };
 
                 nodes.Add(node);
+
+                // Emit anchored comment nodes for leading and inline comments on this step
+                foreach (var c in snippetInfo.LeadingComments)
+                    nodes.Add(BuildCommentNode(c, "leading", stepPath, nodeId));
+                if (!string.IsNullOrEmpty(snippetInfo.InlineComment))
+                    nodes.Add(BuildCommentNode(snippetInfo.InlineComment!, "inline", stepPath, nodeId));
 
                 // Connect from all pending nodes to this one
                 foreach (var pe in pendingConnections)
@@ -453,7 +523,11 @@ namespace SSH_Helper.Services
             var startProps = new JObject();
             if (!string.IsNullOrWhiteSpace(preamble))
             {
-                ParsePreambleIntoProps(preamble, script, startProps);
+                // Strip comment-only lines before storing the snippet so header comments
+                // are not double-emitted on a round-trip import.
+                var preambleForSnippet = string.Join("\n", preamble.Split('\n')
+                    .Where(l => { var t = l.TrimEnd('\r').TrimStart(); return !t.StartsWith("#"); })) + "\n";
+                ParsePreambleIntoProps(preambleForSnippet, script, startProps);
             }
 
             var startNode = new JObject
@@ -470,12 +544,20 @@ namespace SSH_Helper.Services
             };
             nodes.Add(startNode);
 
-            // Connect Start to the first step node (if any steps exist)
+            // Emit header comment nodes from the preamble (anchored to the start node)
+            if (!string.IsNullOrWhiteSpace(preamble))
+            {
+                foreach (var line in ExtractPreambleComments(preamble))
+                    nodes.Add(BuildCommentNode(line, "header", "preamble", "__start__"));
+            }
+
+            // Connect Start to the first step node (if any steps exist).
+            // Skip the start node itself and any comment nodes — only a real step qualifies.
             string? firstStepId = null;
             for (int n = 0; n < nodes.Count; n++)
             {
                 var nid = nodes[n]["id"]?.ToString();
-                if (nid != null && nid != "__start__")
+                if (nid != null && nid != "__start__" && nodes[n]["type"]?.ToString() != "comment")
                 {
                     firstStepId = nid;
                     break;
@@ -551,6 +633,53 @@ namespace SSH_Helper.Services
         /// Multi-branch layout: branches spread horizontally side-by-side.
         /// All branches start at the same Y. The next sibling starts after the tallest branch.
         /// </summary>
+        // Raw YAML lines for the script currently being converted; used to recover
+        // branch-internal leading comments by ScriptStep.LineNumber (Task 5b).
+        private string[]? _yamlLines;
+
+        private static bool IsBranchKeyword(string trimmed) =>
+            trimmed is "then:" or "else:" or "do:" or "catch:" or "finally:" or "default:";
+
+        /// <summary>
+        /// Collects the "#" comment lines preceding a nested step (located by its 1-indexed
+        /// LineNumber), SPLIT by the branch keyword: comments BELOW the keyword (inside the branch
+        /// body, directly above this step) are "leading" (render inside the band, above the block);
+        /// comments ABOVE the keyword (e.g. before "else:") are "branch" (annotate the branch,
+        /// render above the band). Only the branch's first step crosses the keyword. These comments
+        /// also remain verbatim in the container snippet (round-trip export emits them from there);
+        /// the container-regeneration path re-injects them from the emitted nodes — never both.
+        /// Trims both ends so a trailing space after a keyword (e.g. "else: ") still matches.
+        /// </summary>
+        private (List<string> leading, List<string> branch) CollectNestedComments(int lineNumber1, bool isFirstInBranch)
+        {
+            var leading = new List<string>();
+            var branch = new List<string>();
+            if (_yamlLines == null || lineNumber1 <= 1) return (leading, branch);
+            int i = lineNumber1 - 2; // line directly above the step (0-indexed)
+            bool crossedKeyword = false;
+            // Walk upward, accumulating a run of CONSECUTIVE comment lines (collected bottom-up). A
+            // blank line or the branch keyword flushes the run into a single multiline entry (one
+            // comment node), so consecutive '#' lines re-merge into one block on round-trip.
+            var run = new List<string>();
+            void FlushRun()
+            {
+                if (run.Count == 0) return;
+                run.Reverse(); // collected bottom-up -> restore top-down order
+                (crossedKeyword ? branch : leading).Insert(0, string.Join("\n", run));
+                run.Clear();
+            }
+            while (i >= 0)
+            {
+                var t = _yamlLines[i].Trim();
+                if (t.StartsWith("#")) { run.Add(StripHash(t)); i--; continue; }
+                if (t.Length == 0) { FlushRun(); i--; continue; }
+                if (isFirstInBranch && !crossedKeyword && IsBranchKeyword(t)) { FlushRun(); crossedKeyword = true; i--; continue; }
+                break;
+            }
+            FlushRun();
+            return (leading, branch);
+        }
+
         private List<string> ExpandMultiBranch(
             List<BranchInfo> branches,
             string parentNodeId,
@@ -596,7 +725,9 @@ namespace SSH_Helper.Services
         {
             string prevNodeId = parentNodeId;
             string? sourceHandle = branch.SourceHandle;
+            string edgeColor = branch.Color;
             bool isFirstInBranch = true;
+            bool isContinuation = false;
 
             for (int childIndex = 0; childIndex < branch.Steps.Count; childIndex++)
             {
@@ -633,14 +764,27 @@ namespace SSH_Helper.Services
                 };
                 nodes.Add(childNode);
 
+                // Surface branch-internal comments as anchored pills (Task 5b). Comments inside the
+                // branch body render INSIDE the band ("leading"); comments above the branch keyword
+                // render ABOVE the band ("branch"). Text is NOT stripped from the container snippet,
+                // so round-trip export keeps it; regeneration re-injects from these nodes.
+                if (childStep.LineNumber > 0)
+                {
+                    var (ncLeading, ncBranch) = CollectNestedComments(childStep.LineNumber, childIndex == 0);
+                    foreach (var nc in ncLeading)
+                        nodes.Add(BuildCommentNode(nc, "leading", childStepPath, childNodeId));
+                    foreach (var nc in ncBranch)
+                        nodes.Add(BuildCommentNode(nc, "branch", childStepPath, childNodeId));
+                }
+
                 // Create edge from previous node to this child
                 var edge = new JObject
                 {
-                    ["id"] = $"e-{prevNodeId}-{childNodeId}",
+                    ["id"] = $"e-{prevNodeId}-{childNodeId}" + (sourceHandle != null ? "-" + sourceHandle : ""),
                     ["source"] = prevNodeId,
                     ["target"] = childNodeId,
                     ["type"] = "smoothstep",
-                    ["style"] = new JObject { ["stroke"] = branch.Color },
+                    ["style"] = new JObject { ["stroke"] = edgeColor },
                 };
 
                 if (sourceHandle != null)
@@ -652,17 +796,30 @@ namespace SSH_Helper.Services
                     edge["label"] = branch.Label;
                     edge["labelStyle"] = new JObject
                     {
-                        ["fill"] = branch.Color,
+                        ["fill"] = edgeColor,
                         ["fontSize"] = 11,
                         ["fontWeight"] = 600,
                     };
                     edge["style"]!["strokeDasharray"] = "5,5";
                 }
+                else if (isContinuation)
+                {
+                    // Continuation edge out of a nested container's 'continue' handle.
+                    edge["label"] = "next";
+                    edge["labelStyle"] = new JObject
+                    {
+                        ["fill"] = edgeColor,
+                        ["fontSize"] = 11,
+                        ["fontWeight"] = 600,
+                    };
+                }
 
                 edges.Add(edge);
                 prevNodeId = childNodeId;
                 sourceHandle = null;
+                edgeColor = branch.Color;
                 isFirstInBranch = false;
+                isContinuation = false;
                 currentY += NodeSpacingY;
 
                 // Recursively expand if this child is also a container
@@ -673,7 +830,15 @@ namespace SSH_Helper.Services
 
                     if (nestedBranchEnds.Count > 0)
                     {
-                        prevNodeId = nestedBranchEnds[nestedBranchEnds.Count - 1];
+                        // The continuation after a nested container flows from the container's own
+                        // 'continue' handle — exactly like a top-level container — NOT from its branch
+                        // end. This keeps the nested body terminal (e.g. an inner if's `then` ends at
+                        // its last step instead of flowing into the next sibling) and routes the spine
+                        // straight from the container down to the following step. (issue #45)
+                        // prevNodeId intentionally stays = childNodeId (the container node).
+                        sourceHandle = "continue";
+                        edgeColor = ColorContinue;
+                        isContinuation = true;
                     }
                 }
             }
@@ -986,8 +1151,82 @@ namespace SSH_Helper.Services
                 }
             }
 
+            // Index comment-kind notes by their anchor for re-injection. Sticky-kind notes are visual-only.
+            // Primary key: attachedToNodeId (for authored canvas comments from the flat comments[] array).
+            // Fallback key: anchor.stepPath (for imported comments that carry a stepPath but no attachedToNodeId).
+            var leadingByNode = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var inlineByNode = new Dictionary<string, string>(StringComparer.Ordinal);
+            var leadingByPath = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var inlineByPath = new Dictionary<string, string>(StringComparer.Ordinal);
+            // 'branch'-anchored comments annotate the BRANCH (they sat above a branch keyword like
+            // 'else:'), so they must re-emit ABOVE the keyword, not as a leading comment inside the
+            // body. Kept in their own bucket; emitted by EmitBranch during graph regeneration.
+            var branchByNode = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var branchByPath = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var headerComments = new List<string>();
+            // Target node ids of comments authored on the canvas (attachedToNodeId, no anchor.stepPath).
+            // Imported comments carry a stepPath and already round-trip inside their container's verbatim
+            // snippet, so only authored comments require forcing a container to regenerate (see
+            // ContainerHasDescendantComment). This keeps untouched imported scripts byte-stable.
+            var authoredCommentTargets = new HashSet<string>(StringComparer.Ordinal);
+
+            static void AddListEntry(Dictionary<string, List<string>> map, string key, string text)
+            {
+                if (!map.TryGetValue(key, out var list)) map[key] = list = new List<string>();
+                list.Add(text);
+            }
+
+            void IndexComment(string text, string? atype, string? attachedToNodeId, string? spath)
+            {
+                if (atype == "header") { headerComments.Add(text); return; }
+                // Use attachedToNodeId as primary key when present; stepPath as fallback.
+                if (!string.IsNullOrEmpty(attachedToNodeId))
+                {
+                    if (string.IsNullOrEmpty(spath)) authoredCommentTargets.Add(attachedToNodeId!);
+                    if (atype == "inline") inlineByNode[attachedToNodeId!] = text;
+                    else if (atype == "branch") AddListEntry(branchByNode, attachedToNodeId!, text);
+                    else AddListEntry(leadingByNode, attachedToNodeId!, text); // leading (or unspecified non-header)
+                }
+                else if (!string.IsNullOrEmpty(spath))
+                {
+                    if (atype == "inline") inlineByPath[spath!] = text;
+                    else if (atype == "branch") AddListEntry(branchByPath, spath!, text);
+                    else AddListEntry(leadingByPath, spath!, text);
+                }
+            }
+
+            // (a) Comment-type nodes in nodeMap (imported from YAML via TextToGraph).
+            foreach (var n in nodeMap.Values)
+            {
+                var d = n["data"];
+                if (!string.Equals(d?["blockType"]?.ToString(), "comment", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(d?["kind"]?.ToString(), "comment", StringComparison.OrdinalIgnoreCase)) continue;
+                var text = d?["text"]?.ToString() ?? string.Empty;
+                var anchor = d?["anchor"];
+                var atype = anchor?["type"]?.ToString();
+                var spath = anchor?["stepPath"]?.ToString();
+                var attachedToNodeId = d?["attachedToNodeId"]?.ToString();
+                IndexComment(text, atype, attachedToNodeId, spath);
+            }
+
+            // (b) Flat entries in graphData["comments"] (authored in React canvas, sent as comments[] array).
+            if (graphData["comments"] is JArray flatComments)
+            {
+                foreach (var c in flatComments)
+                {
+                    if (!string.Equals(c["kind"]?.ToString(), "comment", StringComparison.OrdinalIgnoreCase)) continue;
+                    var text = c["text"]?.ToString() ?? string.Empty;
+                    var anchor = c["anchor"];
+                    var atype = anchor?["type"]?.ToString();
+                    var spath = anchor?["stepPath"]?.ToString();
+                    var attachedToNodeId = c["attachedToNodeId"]?.ToString();
+                    IndexComment(text, atype, attachedToNodeId, spath);
+                }
+            }
+
             // Build preamble from Start node props
             var sb = new StringBuilder();
+            AppendLeadingComments(sb, headerComments, 0);
             if (nodeMap.TryGetValue("__start__", out var startNode))
             {
                 var startProps = startNode["data"]?["props"] as JObject;
@@ -1001,6 +1240,9 @@ namespace SSH_Helper.Services
             var preambleText = sb.ToString();
             if (!HasTopLevelStepsHeader(preambleText))
                 sb.AppendLine("steps:");
+
+            // Bundle comment dictionaries so they can be threaded into container/branch helpers.
+            var commentCtx = new CommentContext(leadingByNode, inlineByNode, leadingByPath, inlineByPath, branchByNode, branchByPath, authoredCommentTargets);
 
             // Tracks nodes consumed as branch children by container blocks (if/foreach/while).
             // These are skipped in the main export loop since they're nested inside their parent's YAML.
@@ -1021,15 +1263,14 @@ namespace SSH_Helper.Services
                 var existingStepPath = props?["_stepPath"]?.ToString();
                 var isChildNode = props?["_isChildOf"] != null;
 
-                // Skip non-executable node kinds.
-                if (string.Equals(blockType, "comment", StringComparison.OrdinalIgnoreCase))
-                {
-                    result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
-                        ExportDiagnosticSeverity.Warning,
-                        "Comment nodes are ignored during YAML export.",
-                        nodeId));
+                // Comment nodes are consumed by the index built above; silently skip them here.
+                // Guard on BOTH type and blockType: if blockType is absent (data missing), the
+                // ?? "print" fallback above would produce blockType="print" and bypass a blockType-only
+                // check, causing the node to attempt YAML generation and produce a corrupt step.
+                var nodeType = node["type"]?.ToString();
+                if (string.Equals(nodeType, "comment", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(blockType, "comment", StringComparison.OrdinalIgnoreCase))
                     continue;
-                }
 
                 if (!string.IsNullOrWhiteSpace(existingStepPath))
                     result.NodeToStepPathMap[nodeId] = existingStepPath!;
@@ -1052,21 +1293,32 @@ namespace SSH_Helper.Services
                 var yamlSnippet = props?["_yamlSnippet"]?.ToString();
                 var forceGraphExport = HasForceGraphExport(props);
 
+                // Single source for this step's comment anchor across all emission branches.
+                var stepPathForComments = result.NodeToStepPathMap.TryGetValue(nodeId, out var sp) ? sp : existingStepPath ?? "";
+
                 // Container blocks authored visually (branch metadata -> non-child targets)
                 // should be regenerated from graph structure even when a stale snippet exists.
                 // Also regenerate when the user has modified an imported container's branches
                 // (e.g., deleted an else edge) — the stored snippet would be stale.
+                //
+                // NOTE: when a container is regenerated from graph, inline comments that lived
+                // inside its branch bodies (do:/then:/else:/...) are NOT re-emitted — they only
+                // survive via the snippet round-trip path below. Task 5b (propagating branch-body
+                // comments through graph regeneration) is intentionally deferred; see
+                // docs/superpowers/plans/2026-06-04-flow-canvas-comment-flow.md.
                 if (IsContainerBlockType(blockType) &&
                     (forceGraphExport ||
                      string.IsNullOrWhiteSpace(yamlSnippet) ||
                      HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap) ||
-                     HasImportedContainerBeenModified(nodeId, outgoing, nodeMap, yamlSnippet)))
+                     HasImportedContainerBeenModified(nodeId, outgoing, nodeMap, yamlSnippet) ||
+                     ContainerHasDescendantComment(nodeId, nodeMap, commentCtx)))
                 {
                     if (TryGenerateContainerFromGraph(
                             blockType, props, nodeId, outgoing, nodeMap, incomingCount,
-                            consumedByContainer, result, out var containerYaml))
+                            consumedByContainer, result, commentCtx, out var containerYaml))
                     {
-                        sb.AppendLine(containerYaml);
+                        AppendLeadingComments(sb, commentCtx.GetLeadingComments(nodeId, stepPathForComments), 0);
+                        sb.AppendLine(AppendInlineComment(containerYaml, commentCtx.GetInlineComment(nodeId, stepPathForComments)));
                         continue;
                     }
                 }
@@ -1080,15 +1332,18 @@ namespace SSH_Helper.Services
                         ExportDiagnosticSeverity.Warning,
                         $"Container block '{blockType}' is exported from its stored YAML snippet.",
                         nodeId));
-                    sb.Append(normalizedSnippet);
-                    if (!normalizedSnippet.EndsWith("\n"))
+                    AppendLeadingComments(sb, commentCtx.GetLeadingComments(nodeId, stepPathForComments), 0);
+                    var injected = AppendInlineComment(normalizedSnippet, commentCtx.GetInlineComment(nodeId, stepPathForComments));
+                    sb.Append(injected);
+                    if (!injected.EndsWith("\n"))
                         sb.AppendLine();
                     continue;
                 }
 
                 if (TryGenerateStepYaml(blockType, props, out var generatedYaml, out var error))
                 {
-                    sb.AppendLine(generatedYaml);
+                    AppendLeadingComments(sb, commentCtx.GetLeadingComments(nodeId, stepPathForComments), 0);
+                    sb.AppendLine(AppendInlineComment(generatedYaml, commentCtx.GetInlineComment(nodeId, stepPathForComments)));
                 }
                 else
                 {
@@ -1160,6 +1415,46 @@ namespace SSH_Helper.Services
         /// container's child nodes with the edges actually connecting them. If a branch's
         /// first child is no longer reachable from the container, the snippet is stale.
         /// </summary>
+        /// <summary>
+        /// True when any node nested under this container is the target of a canvas-authored comment.
+        /// Imported containers export verbatim from their stored snippet, which never consults per-child
+        /// comment lookups — so an authored comment on a descendant would be silently dropped. Detecting
+        /// it here forces graph regeneration (which DOES inject per-node comments via
+        /// TryGenerateSingleNodeYaml/BuildCommentedYaml), mirroring how a prop edit forces regeneration
+        /// through _forceGraphExport. Only AUTHORED comments count: imported comments already round-trip
+        /// inside the verbatim snippet, so triggering on them would needlessly canonicalize untouched
+        /// scripts. Descendants are matched by _stepPath prefix, covering any nesting depth.
+        /// </summary>
+        private static bool ContainerHasDescendantComment(
+            string nodeId,
+            Dictionary<string, JToken> nodeMap,
+            CommentContext commentCtx)
+        {
+            if (commentCtx.AuthoredCommentTargets.Count == 0)
+                return false;
+
+            var containerStepPath = nodeMap.TryGetValue(nodeId, out var containerNode)
+                ? (containerNode["data"]?["props"] as JObject)?["_stepPath"]?.ToString() ?? ""
+                : "";
+            if (string.IsNullOrEmpty(containerStepPath))
+                return false;
+
+            var prefix = containerStepPath + "/";
+            foreach (var kvp in nodeMap)
+            {
+                if (kvp.Key == nodeId) continue;
+                if (!commentCtx.IsAuthoredCommentTarget(kvp.Key)) continue;
+
+                var childStepPath = (kvp.Value["data"]?["props"] as JObject)?["_stepPath"]?.ToString();
+                if (!string.IsNullOrEmpty(childStepPath) &&
+                    childStepPath.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private static bool HasImportedContainerBeenModified(
             string nodeId,
             Dictionary<string, List<EdgeInfo>> outgoing,
@@ -1387,35 +1682,79 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Collects a linear chain of nodes belonging to a branch, starting from the given node.
-        /// Stops when the chain ends, a node is already visited, or a convergence point is reached
-        /// (a node with more than one incoming edge, indicating it's a continuation after the container).
+        /// Collects the ordered list of nodes that make up a single container branch.
+        ///
+        /// For imported / metadata-tagged graphs every branch child carries an "_isChildOf"
+        /// pointer to its owning container and a hierarchical "_stepPath"
+        /// (e.g. "steps/1/do/8/then/3"). That metadata is the authoritative, unambiguous branch
+        /// definition: the branch is exactly the set of nodes whose _isChildOf is the owning
+        /// container and whose _stepPath is an IMMEDIATE child of the branch's scope path,
+        /// ordered by step index. Descendants of nested containers (deeper _stepPath) are
+        /// excluded here and emitted by their own container's regeneration.
+        ///
+        /// This replaces reconstructing structure from the linear edge chain, which is ambiguous
+        /// across nested-branch boundaries: following plain edges either over-collected (swallowed
+        /// the parent branch's following siblings) or, for a nested MULTI-branch container,
+        /// dead-ended inside its first branch and silently dropped following siblings (issue #45).
+        ///
+        /// For purely canvas-authored containers whose children carry no "_isChildOf" metadata
+        /// (nesting lives only on the edges) the original edge-following behaviour is preserved:
+        /// follow the linear chain and stop at a convergence point (a node with more than one
+        /// incoming edge, marking the continuation after the container).
         /// </summary>
         private List<string> CollectBranchChain(
             string startNodeId,
             Dictionary<string, List<EdgeInfo>> outgoing,
             Dictionary<string, int> incomingCount,
-            HashSet<string> branchVisited)
+            HashSet<string> branchVisited,
+            Dictionary<string, JToken> nodeMap)
         {
-            var chain = new List<string>();
-            var currentId = startNodeId;
+            var ownerContainer = GetNodeParentId(startNodeId, nodeMap);
+            var startPath = GetNodeStepPath(startNodeId, nodeMap);
 
+            // Metadata-driven collection for imported / metadata-tagged branches.
+            if (ownerContainer != null && !string.IsNullOrEmpty(startPath))
+            {
+                var branchScope = GetParentScopePath(startPath!);
+                var members = new List<KeyValuePair<int, string>>();
+                foreach (var entry in nodeMap)
+                {
+                    var id = entry.Key;
+                    if (branchVisited.Contains(id))
+                        continue;
+                    if (!string.Equals(GetNodeParentId(id, nodeMap), ownerContainer, StringComparison.Ordinal))
+                        continue;
+                    if (!TryGetDirectChildIndex(GetNodeStepPath(id, nodeMap), branchScope, out var index))
+                        continue;
+                    members.Add(new KeyValuePair<int, string>(index, id));
+                }
+
+                members.Sort((a, b) => a.Key.CompareTo(b.Key));
+
+                var orderedChain = new List<string>(members.Count);
+                foreach (var member in members)
+                {
+                    branchVisited.Add(member.Value);
+                    orderedChain.Add(member.Value);
+                }
+                return orderedChain;
+            }
+
+            // Canvas-authored fallback: structure lives on the edges, not on node metadata.
+            // Follow the linear chain and stop at a convergence point (continuation after the
+            // container) or when another branch already claimed the node.
+            var chain = new List<string>();
+            string? currentId = startNodeId;
             while (currentId != null)
             {
-                // Stop if already visited (convergence with another branch)
                 if (branchVisited.Contains(currentId))
                     break;
-
-                // Stop if this node has multiple incoming edges (convergence point — continuation after container)
-                // Exception: the first node in the chain is always included even with multiple incoming edges,
-                // because it's directly connected from the container's branch handle.
                 if (chain.Count > 0 && incomingCount.TryGetValue(currentId, out var count) && count > 1)
                     break;
 
                 branchVisited.Add(currentId);
                 chain.Add(currentId);
 
-                // Follow the default (non-false-handle) outgoing edge to continue the chain
                 string? nextId = null;
                 if (outgoing.TryGetValue(currentId, out var edges))
                 {
@@ -1435,12 +1774,156 @@ namespace SSH_Helper.Services
             return chain;
         }
 
+        /// <summary>
+        /// Reads a node's "_isChildOf" parent-container id, or null for top-level / metadata-less nodes.
+        /// </summary>
+        private static string? GetNodeParentId(string nodeId, Dictionary<string, JToken> nodeMap)
+        {
+            if (!nodeMap.TryGetValue(nodeId, out var node))
+                return null;
+            var parentId = (node["data"]?["props"] as JObject)?["_isChildOf"]?.ToString();
+            return string.IsNullOrEmpty(parentId) ? null : parentId;
+        }
+
+        /// <summary>Reads a node's hierarchical "_stepPath" (e.g. "steps/1/do/8/then/3"), or null.</summary>
+        private static string? GetNodeStepPath(string nodeId, Dictionary<string, JToken> nodeMap)
+        {
+            if (!nodeMap.TryGetValue(nodeId, out var node))
+                return null;
+            return (node["data"]?["props"] as JObject)?["_stepPath"]?.ToString();
+        }
+
+        /// <summary>Returns a child step path with its final "/index" segment removed (its branch scope).</summary>
+        private static string GetParentScopePath(string stepPath)
+        {
+            var slash = stepPath.LastIndexOf('/');
+            return slash > 0 ? stepPath.Substring(0, slash) : stepPath;
+        }
+
+        /// <summary>
+        /// True when childStepPath is an IMMEDIATE child of branchScope (i.e. "branchScope/&lt;int&gt;"),
+        /// yielding that integer index. Deeper descendants ("branchScope/x/...") are rejected so a
+        /// nested container's own descendants are not pulled into the parent branch.
+        /// </summary>
+        private static bool TryGetDirectChildIndex(string? childStepPath, string branchScope, out int index)
+        {
+            index = -1;
+            if (string.IsNullOrEmpty(childStepPath))
+                return false;
+            var prefix = branchScope + "/";
+            if (!childStepPath!.StartsWith(prefix, StringComparison.Ordinal))
+                return false;
+            var remainder = childStepPath.Substring(prefix.Length);
+            if (remainder.Length == 0 || remainder.IndexOf('/') >= 0)
+                return false;
+            return int.TryParse(remainder, out index);
+        }
+
         private sealed class BranchExportInfo
         {
             public int Index { get; set; }
             public string TargetId { get; set; } = string.Empty;
             public string? Condition { get; set; }
             public string? CaseValue { get; set; }
+        }
+
+        /// <summary>
+        /// Comment dictionaries built once in ExportGraphToYaml and threaded into container/branch helpers
+        /// so comments on nodes inside branches are injected, not silently dropped.
+        /// </summary>
+        private readonly struct CommentContext
+        {
+            public readonly Dictionary<string, List<string>> LeadingByNode;
+            public readonly Dictionary<string, string> InlineByNode;
+            public readonly Dictionary<string, List<string>> LeadingByPath;
+            public readonly Dictionary<string, string> InlineByPath;
+            public readonly Dictionary<string, List<string>> BranchByNode;
+            public readonly Dictionary<string, List<string>> BranchByPath;
+            public readonly HashSet<string> AuthoredCommentTargets;
+
+            public CommentContext(
+                Dictionary<string, List<string>> leadingByNode,
+                Dictionary<string, string> inlineByNode,
+                Dictionary<string, List<string>> leadingByPath,
+                Dictionary<string, string> inlineByPath,
+                Dictionary<string, List<string>> branchByNode,
+                Dictionary<string, List<string>> branchByPath,
+                HashSet<string> authoredCommentTargets)
+            {
+                LeadingByNode = leadingByNode;
+                InlineByNode = inlineByNode;
+                LeadingByPath = leadingByPath;
+                InlineByPath = inlineByPath;
+                BranchByNode = branchByNode;
+                BranchByPath = branchByPath;
+                AuthoredCommentTargets = authoredCommentTargets;
+            }
+
+            public IEnumerable<string>? GetLeadingComments(string nodeId, string stepPath)
+            {
+                var byNode = LeadingByNode.GetValueOrDefault(nodeId);
+                var byPath = LeadingByPath.GetValueOrDefault(stepPath);
+                if (byNode == null) return byPath;
+                if (byPath == null) return byNode;
+                return byNode.Concat(byPath);
+            }
+
+            /// <summary>'branch'-anchored comments for the branch whose first child is nodeId — these
+            /// re-emit ABOVE the branch keyword (e.g. above 'else:').</summary>
+            public IEnumerable<string>? GetBranchComments(string nodeId, string stepPath)
+            {
+                var byNode = BranchByNode.GetValueOrDefault(nodeId);
+                var byPath = BranchByPath.GetValueOrDefault(stepPath);
+                if (byNode == null) return byPath;
+                if (byPath == null) return byNode;
+                return byNode.Concat(byPath);
+            }
+
+            public string? GetInlineComment(string nodeId, string stepPath) =>
+                InlineByNode.GetValueOrDefault(nodeId) ?? InlineByPath.GetValueOrDefault(stepPath);
+
+            /// <summary>True when a canvas-authored (non-imported) comment targets this node id.</summary>
+            public bool IsAuthoredCommentTarget(string nodeId) =>
+                AuthoredCommentTargets.Contains(nodeId);
+        }
+
+        /// <summary>
+        /// Emits one container branch during graph regeneration: any 'branch'-anchored comments first
+        /// (at the keyword's indent, so a comment that sat above e.g. 'else:' lands there again), then
+        /// the keyword line, then the branch body. An empty branch emits "&lt;keyword&gt;: []". The branch
+        /// comment is keyed to the branch's first child (chain[0]). Returns false if body generation fails.
+        /// </summary>
+        private bool EmitBranch(
+            StringBuilder sb,
+            string keyword,
+            List<string> chain,
+            int bodyIndent,
+            Dictionary<string, JToken> nodeMap,
+            Dictionary<string, List<EdgeInfo>> outgoing,
+            Dictionary<string, int> incomingCount,
+            HashSet<string> consumedByContainer,
+            FlowCanvasExportResult result,
+            CommentContext commentCtx)
+        {
+            var keywordIndent = Math.Max(0, bodyIndent - 2);
+            if (chain.Count > 0)
+            {
+                var firstId = chain[0];
+                var firstStepPath = nodeMap.TryGetValue(firstId, out var fn)
+                    ? (fn["data"]?["props"] as JObject)?["_stepPath"]?.ToString() ?? string.Empty
+                    : string.Empty;
+                AppendLeadingComments(sb, commentCtx.GetBranchComments(firstId, firstStepPath), keywordIndent);
+            }
+
+            var pad = new string(' ', keywordIndent);
+            if (chain.Count == 0)
+            {
+                sb.AppendLine($"{pad}{keyword}: []");
+                return true;
+            }
+
+            sb.AppendLine($"{pad}{keyword}:");
+            return TryGenerateBranchYaml(chain, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, sb, bodyIndent);
         }
 
         /// <summary>
@@ -1455,6 +1938,7 @@ namespace SSH_Helper.Services
             Dictionary<string, int> incomingCount,
             HashSet<string> consumedByContainer,
             FlowCanvasExportResult result,
+            CommentContext commentCtx,
             out string yaml)
         {
             yaml = string.Empty;
@@ -1535,19 +2019,10 @@ namespace SSH_Helper.Services
                     return false;
                 }
 
-                var thenChain = CollectBranchChain(thenTarget, outgoing, incomingCount, branchVisited);
-                if (thenChain.Count == 0)
+                var thenChain = CollectBranchChain(thenTarget, outgoing, incomingCount, branchVisited, nodeMap);
+                if (!EmitBranch(sb, "then", thenChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                 {
-                    sb.AppendLine("    then: []");
-                }
-                else
-                {
-                    sb.AppendLine("    then:");
-                    if (!TryGenerateBranchYaml(
-                            thenChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
 
                 if (elifBranches.Count > 0)
@@ -1557,38 +2032,20 @@ namespace SSH_Helper.Services
                     {
                         var elifCondition = string.IsNullOrWhiteSpace(elif.Condition) ? "false" : elif.Condition!;
                         sb.AppendLine($"      - condition: {EscapeYamlString(elifCondition)}");
-                        var elifChain = CollectBranchChain(elif.TargetId, outgoing, incomingCount, branchVisited);
-                        if (elifChain.Count == 0)
+                        var elifChain = CollectBranchChain(elif.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
+                        if (!EmitBranch(sb, "then", elifChain, 10, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                         {
-                            sb.AppendLine("        then: []");
-                        }
-                        else
-                        {
-                            sb.AppendLine("        then:");
-                            if (!TryGenerateBranchYaml(
-                                    elifChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 10))
-                            {
-                                return false;
-                            }
+                            return false;
                         }
                     }
                 }
 
                 if (elseTarget != null)
                 {
-                    var elseChain = CollectBranchChain(elseTarget, outgoing, incomingCount, branchVisited);
-                    if (elseChain.Count == 0)
+                    var elseChain = CollectBranchChain(elseTarget, outgoing, incomingCount, branchVisited, nodeMap);
+                    if (!EmitBranch(sb, "else", elseChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                     {
-                        sb.AppendLine("    else: []");
-                    }
-                    else
-                    {
-                        sb.AppendLine("    else:");
-                        if (!TryGenerateBranchYaml(
-                                elseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
             }
@@ -1609,19 +2066,10 @@ namespace SSH_Helper.Services
                     return false;
                 }
 
-                var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited);
-                if (doChain.Count == 0)
+                var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
+                if (!EmitBranch(sb, "do", doChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                 {
-                    sb.AppendLine("    do: []");
-                }
-                else
-                {
-                    sb.AppendLine("    do:");
-                    if (!TryGenerateBranchYaml(
-                            doChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
             }
             else if (string.Equals(blockType, "try", StringComparison.OrdinalIgnoreCase))
@@ -1665,54 +2113,27 @@ namespace SSH_Helper.Services
                     return false;
                 }
 
-                var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited);
-                if (doChain.Count == 0)
+                var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
+                if (!EmitBranch(sb, "do", doChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                 {
-                    sb.AppendLine("    do: []");
+                    return false;
                 }
-                else
+
+                if (catchEdge != null)
                 {
-                    sb.AppendLine("    do:");
-                    if (!TryGenerateBranchYaml(
-                            doChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                    var catchChain = CollectBranchChain(catchEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
+                    if (!EmitBranch(sb, "catch", catchChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                     {
                         return false;
                     }
                 }
 
-                if (catchEdge != null)
-                {
-                    var catchChain = CollectBranchChain(catchEdge.TargetId, outgoing, incomingCount, branchVisited);
-                    if (catchChain.Count == 0)
-                    {
-                        sb.AppendLine("    catch: []");
-                    }
-                    else
-                    {
-                        sb.AppendLine("    catch:");
-                        if (!TryGenerateBranchYaml(
-                                catchChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
-                        {
-                            return false;
-                        }
-                    }
-                }
-
                 if (finallyEdge != null)
                 {
-                    var finallyChain = CollectBranchChain(finallyEdge.TargetId, outgoing, incomingCount, branchVisited);
-                    if (finallyChain.Count == 0)
+                    var finallyChain = CollectBranchChain(finallyEdge.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
+                    if (!EmitBranch(sb, "finally", finallyChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                     {
-                        sb.AppendLine("    finally: []");
-                    }
-                    else
-                    {
-                        sb.AppendLine("    finally:");
-                        if (!TryGenerateBranchYaml(
-                                finallyChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
             }
@@ -1724,8 +2145,13 @@ namespace SSH_Helper.Services
 
                 foreach (var edge in nodeEdges)
                 {
+                    // Imported switch edges carry the branch as a label ("default") with no
+                    // branchPath; canvas-authored edges carry data.branchPath. Recognize both so
+                    // the default branch is not mistaken for an anonymous fallback case.
                     if (string.Equals(edge.BranchPath, "default", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(edge.BranchPath, "else", StringComparison.OrdinalIgnoreCase))
+                        string.Equals(edge.BranchPath, "else", StringComparison.OrdinalIgnoreCase) ||
+                        (string.IsNullOrEmpty(edge.BranchPath) &&
+                         string.Equals(edge.Label?.Trim(), "default", StringComparison.OrdinalIgnoreCase)))
                     {
                         defaultTarget ??= edge.TargetId;
                         continue;
@@ -1762,38 +2188,20 @@ namespace SSH_Helper.Services
                 sb.AppendLine("    cases:");
                 foreach (var branch in caseBranches.OrderBy(b => b.Index))
                 {
-                    var caseChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited);
+                    var caseChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
                     sb.AppendLine($"      - value: {EscapeYamlString(branch.CaseValue ?? $"case_{branch.Index + 1}")}");
-                    if (caseChain.Count == 0)
+                    if (!EmitBranch(sb, "do", caseChain, 10, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                     {
-                        sb.AppendLine("        do: []");
-                    }
-                    else
-                    {
-                        sb.AppendLine("        do:");
-                        if (!TryGenerateBranchYaml(
-                                caseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 10))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
 
                 if (defaultTarget != null)
                 {
-                    var defaultChain = CollectBranchChain(defaultTarget, outgoing, incomingCount, branchVisited);
-                    if (defaultChain.Count == 0)
+                    var defaultChain = CollectBranchChain(defaultTarget, outgoing, incomingCount, branchVisited, nodeMap);
+                    if (!EmitBranch(sb, "default", defaultChain, 6, nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx))
                     {
-                        sb.AppendLine("    default: []");
-                    }
-                    else
-                    {
-                        sb.AppendLine("    default:");
-                        if (!TryGenerateBranchYaml(
-                                defaultChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
             }
@@ -1826,7 +2234,7 @@ namespace SSH_Helper.Services
                 sb.AppendLine("    steps:");
                 foreach (var branch in branches.OrderBy(b => b.Index))
                 {
-                    var branchChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited);
+                    var branchChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited, nodeMap);
                     if (branchChain.Count == 0)
                     {
                         continue;
@@ -1841,7 +2249,7 @@ namespace SSH_Helper.Services
                     }
 
                     if (!TryGenerateSingleNodeYaml(
-                            branchChain[0], nodeMap, outgoing, incomingCount, consumedByContainer, result, out var branchYaml))
+                            branchChain[0], nodeMap, outgoing, incomingCount, consumedByContainer, result, commentCtx, out var branchYaml))
                     {
                         return false;
                     }
@@ -1897,6 +2305,15 @@ namespace SSH_Helper.Services
             return null;
         }
 
+        /// <summary>
+        /// Generates YAML for a single non-container node (or a container node that is being
+        /// regenerated from the graph).  The returned <paramref name="nodeYaml"/> string is
+        /// ALWAYS at zero indentation — callers inside branch bodies MUST wrap it with
+        /// <see cref="IndentYaml"/> before appending to the branch output.
+        /// <c>TryGenerateBranchYaml</c> does this correctly via <c>IndentYaml(childYaml.TrimEnd(), indent)</c>.
+        /// Any future caller that omits that step will emit comment lines at column 0 inside
+        /// an indented branch body, producing invalid YAML.
+        /// </summary>
         private bool TryGenerateSingleNodeYaml(
             string nodeId,
             Dictionary<string, JToken> nodeMap,
@@ -1904,6 +2321,7 @@ namespace SSH_Helper.Services
             Dictionary<string, int> incomingCount,
             HashSet<string> consumedByContainer,
             FlowCanvasExportResult result,
+            CommentContext commentCtx,
             out string nodeYaml)
         {
             nodeYaml = string.Empty;
@@ -1916,11 +2334,14 @@ namespace SSH_Helper.Services
             var nodeBlockType = nodeData?["blockType"]?.ToString() ?? "print";
             var snippet = nodeProps?["_yamlSnippet"]?.ToString();
             var forceGraphExport = HasForceGraphExport(nodeProps);
+            // Step path for path-keyed comment lookup (imported nodes carry _stepPath; canvas-authored ones don't).
+            var stepPath = nodeProps?["_stepPath"]?.ToString() ?? string.Empty;
 
             if (IsContainerBlockType(nodeBlockType) &&
                 (forceGraphExport ||
                  string.IsNullOrWhiteSpace(snippet) ||
-                  HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap)))
+                  HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap) ||
+                  ContainerHasDescendantComment(nodeId, nodeMap, commentCtx)))
             {
                 if (!TryGenerateContainerFromGraph(
                         nodeBlockType,
@@ -1931,17 +2352,20 @@ namespace SSH_Helper.Services
                         incomingCount,
                         consumedByContainer,
                         result,
+                        commentCtx,
                         out nodeYaml))
                 {
                     return false;
                 }
 
+                nodeYaml = BuildCommentedYaml(nodeYaml, nodeId, stepPath, commentCtx);
                 return true;
             }
 
             if (IsContainerBlockType(nodeBlockType) && !forceGraphExport && !string.IsNullOrWhiteSpace(snippet))
             {
-                nodeYaml = NormalizeTopLevelSnippetIndent(snippet).TrimEnd();
+                nodeYaml = BuildCommentedYaml(
+                    NormalizeTopLevelSnippetIndent(snippet).TrimEnd(), nodeId, stepPath, commentCtx);
                 return true;
             }
 
@@ -1956,7 +2380,27 @@ namespace SSH_Helper.Services
                 return false;
             }
 
+            nodeYaml = BuildCommentedYaml(nodeYaml, nodeId, stepPath, commentCtx);
             return true;
+        }
+
+        /// <summary>
+        /// Prepends any leading comment lines and appends an inline comment to a YAML step string.
+        /// Used when emitting nodes inside container branches, where comments would otherwise be dropped.
+        /// </summary>
+        private static string BuildCommentedYaml(string stepYaml, string nodeId, string stepPath, CommentContext commentCtx)
+        {
+            var leading = commentCtx.GetLeadingComments(nodeId, stepPath);
+            var inline = commentCtx.GetInlineComment(nodeId, stepPath);
+
+            if (leading == null && inline == null)
+                return stepYaml;
+
+            var sb = new StringBuilder();
+            if (leading != null)
+                foreach (var c in leading) sb.AppendLine($"# {c}");
+            sb.Append(AppendInlineComment(stepYaml, inline));
+            return sb.ToString();
         }
 
         /// <summary>
@@ -1969,6 +2413,7 @@ namespace SSH_Helper.Services
             Dictionary<string, int> incomingCount,
             HashSet<string> consumedByContainer,
             FlowCanvasExportResult result,
+            CommentContext commentCtx,
             StringBuilder sb,
             int indent)
         {
@@ -1981,6 +2426,7 @@ namespace SSH_Helper.Services
                         incomingCount,
                         consumedByContainer,
                         result,
+                        commentCtx,
                         out var childYaml))
                 {
                     return false;
@@ -2082,9 +2528,30 @@ namespace SSH_Helper.Services
             return TrySerializeStepYaml(commandKey, commandValue, out yaml, out error);
         }
 
-        /// <summary>
-        /// Indents every line of a YAML string by the specified number of spaces.
-        /// </summary>
+        /// <summary>Appends leading comment lines (# ...) to the builder, one per entry, at the given indent.</summary>
+        private static void AppendLeadingComments(StringBuilder sb, IEnumerable<string>? comments, int indent)
+        {
+            if (comments == null) return;
+            var prefix = new string(' ', indent);
+            foreach (var c in comments)
+            {
+                // A comment's text may be multiline (an authored multiline note). EVERY line must
+                // start with '#', or the trailing lines export as bare text -> invalid YAML.
+                foreach (var line in (c ?? string.Empty).Replace("\r\n", "\n").Split('\n'))
+                    sb.AppendLine(line.Length == 0 ? $"{prefix}#" : $"{prefix}# {line}");
+            }
+        }
+
+        /// <summary>Injects an inline comment onto the first line of a YAML step string.</summary>
+        private static string AppendInlineComment(string stepYaml, string? inline)
+        {
+            if (string.IsNullOrEmpty(inline)) return stepYaml;
+            var nl = stepYaml.IndexOf('\n');
+            if (nl < 0) return stepYaml.TrimEnd() + $"  # {inline}";
+            return stepYaml.Substring(0, nl).TrimEnd() + $"  # {inline}" + stepYaml.Substring(nl);
+        }
+
+        /// <summary>Indents every line of a YAML string by the specified number of spaces.</summary>
         private static string IndentYaml(string yaml, int spaces)
         {
             var prefix = new string(' ', spaces);
@@ -4094,53 +4561,126 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// A step snippet together with the number of blank lines that preceded it.
+        /// A step snippet together with the number of blank lines that preceded it,
+        /// plus any leading standalone comment lines and an optional inline trailing comment
+        /// stripped from the step's first content line.
         /// </summary>
-        private readonly record struct StepSnippetInfo(string Snippet, int BlankLinesBefore);
+        internal readonly record struct StepSnippetInfo(
+            string Snippet,
+            int BlankLinesBefore,
+            IReadOnlyList<string> LeadingComments,
+            string? InlineComment);
+
+        /// <summary>
+        /// Splits a trailing YAML comment off a line. Returns false when there is no
+        /// safe unquoted trailing comment (e.g. the only '#' is inside a quoted string).
+        /// </summary>
+        internal static bool TrySplitTrailingComment(string line, out string code, out string comment)
+        {
+            code = line;
+            comment = string.Empty;
+            bool inSingle = false, inDouble = false;
+            for (int i = 0; i < line.Length; i++)
+            {
+                char c = line[i];
+                if (c == '\'' && !inDouble)
+                {
+                    if (inSingle && i + 1 < line.Length && line[i + 1] == '\'')
+                        i++; // '' is an escaped single-quote inside a single-quoted string — skip both chars
+                    else
+                        inSingle = !inSingle;
+                }
+                else if (c == '"' && !inSingle)
+                {
+                    // Skip toggling when the double-quote is backslash-escaped (YAML \" escape).
+                    if (i == 0 || line[i - 1] != '\\')
+                        inDouble = !inDouble;
+                }
+                else if (c == '#' && !inSingle && !inDouble && i > 0 && char.IsWhiteSpace(line[i - 1]))
+                {
+                    comment = StripHash(line.Substring(i));
+                    if (comment.Length == 0) return false; // bare '#' with no text — not a real comment
+                    code = line.Substring(0, i).TrimEnd();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>Removes the leading '#' and a single following space from a comment line.</summary>
+        internal static string StripHash(string hashLine)
+        {
+            var t = hashLine.TrimStart();
+            if (t.StartsWith("#")) t = t.Substring(1);
+            if (t.StartsWith(" ")) t = t.Substring(1);
+            return t.TrimEnd();
+        }
 
         /// <summary>
         /// Splits YAML text into individual top-level step snippets.
         /// Each snippet is the complete YAML text for one step (including nested blocks).
-        /// Also records the number of blank lines between steps so the exporter can
-        /// reproduce the user's original spacing.
+        /// Also records blank lines between steps, leading standalone comments, and an
+        /// optional inline trailing comment stripped from the step's OWN (non-nested-body)
+        /// lines only.
+        ///
+        /// NOTE: branch-internal LEADING comments are captured separately as anchored comment
+        /// nodes in PlaceBranchSteps (Task 5b) and survive both round-trip (from the snippet) and
+        /// container regeneration (re-injected from the node). Branch-internal INLINE comments,
+        /// however, still survive only via the snippet round-trip — they are left in the snippet
+        /// and are NOT re-emitted on container regeneration.
         /// </summary>
-        private static List<StepSnippetInfo> SplitYamlSteps(string yamlText)
+        internal static List<StepSnippetInfo> SplitYamlSteps(string yamlText)
         {
             var steps = new List<StepSnippetInfo>();
             var lines = yamlText.Split('\n');
 
-            // Find where "steps:" starts
             int stepsLineIndex = -1;
             for (int i = 0; i < lines.Length; i++)
             {
-                var trimmed = lines[i].TrimEnd('\r');
-                if (trimmed == "steps:" || trimmed == "steps: ")
-                {
-                    stepsLineIndex = i;
-                    break;
-                }
+                var t = lines[i].TrimEnd('\r');
+                if (t == "steps:" || t == "steps: ") { stepsLineIndex = i; break; }
             }
-
             if (stepsLineIndex < 0) return steps;
 
-            // Determine the indent level of step items (first "- " after "steps:")
             int stepIndent = -1;
             var currentStep = new StringBuilder();
             bool inStep = false;
-            int blankLinesBefore = 0;   // blank lines accumulated before next step
-            int currentBlankLines = 0;  // blank lines for the step being built
+            // Set to true once we see the first nested list item (trimmed "- " at indent > stepIndent).
+            // After that point we no longer strip inline comments — they belong in the snippet verbatim
+            // so container body comments survive the round-trip (see NOTE in summary above).
+            bool enteredNestedBody = false;
+            int blankLinesBefore = 0, currentBlankLines = 0;
+            var pendingComments = new List<string>();   // current consecutive comment run
+            var pendingGroups = new List<string>();      // closed runs, one multiline entry each
+            var currentLeading = new List<string>();
+            string? currentInline = null;
+
+            // A run of consecutive comment lines becomes ONE comment node (multiline). A blank line
+            // breaks the run so distinct comment blocks stay distinct.
+            void FlushCommentRun()
+            {
+                if (pendingComments.Count == 0) return;
+                pendingGroups.Add(string.Join("\n", pendingComments));
+                pendingComments.Clear();
+            }
+
+            void FinalizeStep()
+            {
+                steps.Add(new StepSnippetInfo(
+                    currentStep.ToString().TrimEnd('\r', '\n') + "\n",
+                    currentBlankLines,
+                    currentLeading.ToArray(),
+                    currentInline));
+            }
 
             for (int i = stepsLineIndex + 1; i < lines.Length; i++)
             {
                 var line = lines[i].TrimEnd('\r');
+
                 if (string.IsNullOrWhiteSpace(line))
                 {
-                    if (inStep)
-                    {
-                        // Blank line while inside a step — tentatively include it.
-                        // We'll track separately in case it turns out to be inter-step spacing.
-                        currentStep.AppendLine(line);
-                    }
+                    if (inStep) currentStep.AppendLine(line);
+                    FlushCommentRun(); // a blank line ends a consecutive comment run
                     blankLinesBefore++;
                     continue;
                 }
@@ -4148,52 +4688,76 @@ namespace SSH_Helper.Services
                 var indent = line.Length - line.TrimStart().Length;
                 var trimmed = line.TrimStart();
 
+                // Comment-only line: only buffer it as a leading comment when we are NOT
+                // already inside a step body (i.e. at or above step indent). Once we're
+                // inside a step, nested comments deeper than stepIndent must stay in the
+                // snippet verbatim so the container round-trip is preserved.
+                if (trimmed.StartsWith("#") && (!inStep || indent <= stepIndent))
+                {
+                    pendingComments.Add(StripHash(trimmed));
+                    blankLinesBefore = 0;
+                    continue;
+                }
+
                 if (trimmed.StartsWith("- ") || trimmed == "-")
                 {
                     if (stepIndent < 0) stepIndent = indent;
 
                     if (indent == stepIndent)
                     {
-                        // New top-level step — finalize the previous one
-                        if (inStep && currentStep.Length > 0)
-                        {
-                            steps.Add(new StepSnippetInfo(
-                                currentStep.ToString().TrimEnd('\r', '\n') + "\n",
-                                currentBlankLines));
-                        }
+                        if (inStep && currentStep.Length > 0) FinalizeStep();
+
                         currentStep.Clear();
-                        currentStep.AppendLine(line);
+                        FlushCommentRun();
+                        currentLeading = new List<string>(pendingGroups);
+                        pendingGroups.Clear();
+                        currentInline = null;
+                        enteredNestedBody = false;
+
+                        AppendStepLine(currentStep, line, ref currentInline, captureInline: true);
                         currentBlankLines = inStep ? blankLinesBefore : 0;
                         blankLinesBefore = 0;
                         inStep = true;
                         continue;
                     }
+
+                    // A nested list item (indent > stepIndent) marks the start of a container
+                    // body. From here on, inline comments belong in the snippet, not hoisted up.
+                    if (inStep && indent > stepIndent)
+                        enteredNestedBody = true;
                 }
 
-                // Non-blank line that is part of the current step — reset blank counter.
                 blankLinesBefore = 0;
 
-                // Continuation of current step (deeper indent or non-list line)
-                if (inStep && (indent > stepIndent || string.IsNullOrWhiteSpace(line)))
+                if (inStep && (indent > stepIndent ||
+                    (indent <= stepIndent && !trimmed.StartsWith("- "))))
                 {
-                    currentStep.AppendLine(line);
-                }
-                else if (inStep && indent <= stepIndent && !trimmed.StartsWith("- "))
-                {
-                    // Back to step indent but not a new step — belongs to previous step
-                    currentStep.AppendLine(line);
+                    AppendStepLine(currentStep, line, ref currentInline, captureInline: !enteredNestedBody);
                 }
             }
 
-            // Last step
-            if (inStep && currentStep.Length > 0)
-            {
-                steps.Add(new StepSnippetInfo(
-                    currentStep.ToString().TrimEnd('\r', '\n') + "\n",
-                    currentBlankLines));
-            }
-
+            if (inStep && currentStep.Length > 0) FinalizeStep();
             return steps;
+        }
+
+        private static void AppendStepLine(StringBuilder sb, string line, ref string? inlineComment, bool captureInline = true)
+        {
+            // Only strip a trailing inline comment when captureInline is true (i.e. we are still
+            // on the step's own header lines, before any nested body list item was seen) AND the line
+            // has actual code before the '#'. A standalone comment-only line (empty code) is NOT an
+            // inline comment — it's a leading/branch comment for a following nested step. Capturing it
+            // here would strip it from the snippet AND duplicate it on export (a stray '# x' on the
+            // container header line, plus the correct copy above the branch keyword). Leave it verbatim
+            // so CollectNestedComments anchors it as the single source.
+            if (captureInline && inlineComment == null &&
+                TrySplitTrailingComment(line, out var code, out var comment) &&
+                code.Trim().Length > 0)
+            {
+                inlineComment = comment;
+                sb.AppendLine(code);
+                return;
+            }
+            sb.AppendLine(line);
         }
 
         /// <summary>
@@ -4764,14 +5328,70 @@ namespace SSH_Helper.Services
         /// </summary>
         public static void MergeLayout(JArray nodes, CanvasLayoutData layout)
         {
-            // Override positions for existing nodes
+            // Override positions for existing nodes (id-keyed; valid because the caller only uses
+            // this path when the structure hash matches exactly).
             foreach (var node in nodes)
             {
                 var id = node["id"]?.ToString();
                 if (id != null && layout.Positions.TryGetValue(id, out var pos))
-                {
                     node["position"] = new JObject { ["x"] = pos.X, ["y"] = pos.Y };
-                }
+            }
+            MergeAuxiliaryLayout(nodes, layout);
+        }
+
+        /// <summary>
+        /// Prefix-safe partial merge for Manual mode when the structure has changed.
+        /// Matches saved positions to nodes by (stepPath:blockType) tuple. Returns Safe=true only
+        /// when every saved tuple still exists (pure move / end-append); applies the saved positions
+        /// and returns the ids of genuinely-new blocks for the caller to near-neighbor place. Returns
+        /// Safe=false (mid-body edit / removal / pre-migration data) so the caller clean-reflows.
+        /// </summary>
+        public static (bool Safe, List<string> NewNodeIds) TryMergeLayoutByTuple(
+            JArray nodes, CanvasLayoutData layout)
+        {
+            var savedByTuple = new Dictionary<string, NodePosition>(StringComparer.Ordinal);
+            foreach (var p in layout.Positions.Values)
+            {
+                if (string.IsNullOrEmpty(p.StepPath)) continue; // pre-migration entry: no stable key
+                savedByTuple[$"{p.StepPath}:{p.BlockType}"] = p;
+            }
+            if (savedByTuple.Count == 0) return (false, new List<string>());
+
+            var currentTuples = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var n in nodes)
+            {
+                if (n["id"]?.ToString() == "__start__" || n["type"]?.ToString() == "comment") continue;
+                var bt = n["data"]?["blockType"]?.ToString() ?? "";
+                var sp = n["data"]?["props"]?["_stepPath"]?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(sp)) currentTuples.Add($"{sp}:{bt}");
+            }
+
+            // Safe only if every saved tuple survives (move/append). A vanished tuple = mid-edit/removal.
+            foreach (var t in savedByTuple.Keys)
+                if (!currentTuples.Contains(t)) return (false, new List<string>());
+
+            var newIds = new List<string>();
+            foreach (var n in nodes)
+            {
+                var id = n["id"]?.ToString();
+                if (id == null || id == "__start__" || n["type"]?.ToString() == "comment") continue;
+                var bt = n["data"]?["blockType"]?.ToString() ?? "";
+                var sp = n["data"]?["props"]?["_stepPath"]?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(sp) && savedByTuple.TryGetValue($"{sp}:{bt}", out var pos))
+                    n["position"] = new JObject { ["x"] = pos.X, ["y"] = pos.Y };
+                else
+                    newIds.Add(id);
+            }
+
+            MergeAuxiliaryLayout(nodes, layout);
+            return (true, newIds);
+        }
+
+        private static void MergeAuxiliaryLayout(JArray nodes, CanvasLayoutData layout)
+        {
+            foreach (var node in nodes)
+            {
+                var id = node["id"]?.ToString();
 
                 // Mark disabled blocks
                 if (id != null && layout.DisabledBlockIds.Contains(id))
@@ -4780,28 +5400,71 @@ namespace SSH_Helper.Services
                     if (data != null)
                         data["disabled"] = true;
                 }
+
+                // Mark expanded blocks (presentation only — never read by YAML export)
+                if (id != null && layout.ExpandedNodeIds.Contains(id))
+                {
+                    var dataExp = node["data"] as JObject;
+                    if (dataExp != null) dataExp["expanded"] = true;
+                }
             }
 
-            // Append comment nodes
+            // Build a set of existing comment node IDs to avoid duplicating TextToGraph-emitted nodes.
+            var existingCommentIds = new HashSet<string>(
+                nodes.Select(n => n["id"]?.ToString()).Where(id => id != null)!,
+                StringComparer.Ordinal);
+
+            // Merge comment nodes: reconcile position/data onto existing nodes, append new ones.
             foreach (var comment in layout.Comments)
             {
-                var commentNode = new JObject
+                // Build the data object (shared for both reconcile and new-node paths)
+                var data = new JObject
                 {
-                    ["id"] = comment.Id,
-                    ["type"] = "comment",
-                    ["position"] = new JObject { ["x"] = comment.X, ["y"] = comment.Y },
-                    ["style"] = new JObject { ["width"] = comment.Width, ["height"] = comment.Height },
-                    ["data"] = new JObject
-                    {
-                        ["commentId"] = comment.Id,
-                        ["text"] = comment.Text,
-                        ["color"] = comment.Color,
-                    },
+                    ["commentId"] = comment.Id,
+                    ["text"] = comment.Text,
+                    ["color"] = comment.Color,
                 };
                 if (comment.AttachedToNodeId != null)
-                    ((JObject)commentNode["data"]!)["attachedToNodeId"] = comment.AttachedToNodeId;
+                    data["attachedToNodeId"] = comment.AttachedToNodeId;
+                if (comment.Kind != null)
+                    data["kind"] = comment.Kind;
+                if (comment.Anchor != null)
+                {
+                    var anchorObj = new JObject();
+                    if (comment.Anchor.Type != null) anchorObj["type"] = comment.Anchor.Type;
+                    if (comment.Anchor.StepPath != null) anchorObj["stepPath"] = comment.Anchor.StepPath;
+                    if (comment.Anchor.LineOffset.HasValue) anchorObj["lineOffset"] = comment.Anchor.LineOffset.Value;
+                    data["anchor"] = anchorObj;
+                }
 
-                nodes.Add(commentNode);
+                if (existingCommentIds.Contains(comment.Id))
+                {
+                    // Reconcile: update position on the TextToGraph-emitted node and merge data.
+                    var existing = nodes.FirstOrDefault(n => n["id"]?.ToString() == comment.Id);
+                    if (existing != null)
+                    {
+                        existing["position"] = new JObject { ["x"] = comment.X, ["y"] = comment.Y };
+                        existing["style"] = new JObject { ["width"] = comment.Width, ["height"] = comment.Height };
+                        // Merge saved data fields into the existing data object (preserve fields the bridge set)
+                        var existingData = existing["data"] as JObject ?? new JObject();
+                        foreach (var prop in data.Properties())
+                            existingData[prop.Name] = prop.Value;
+                        existing["data"] = existingData;
+                    }
+                }
+                else
+                {
+                    var commentNode = new JObject
+                    {
+                        ["id"] = comment.Id,
+                        ["type"] = "comment",
+                        ["position"] = new JObject { ["x"] = comment.X, ["y"] = comment.Y },
+                        ["style"] = new JObject { ["width"] = comment.Width, ["height"] = comment.Height },
+                        ["data"] = data,
+                    };
+                    nodes.Add(commentNode);
+                    existingCommentIds.Add(comment.Id);
+                }
             }
         }
 
@@ -4809,7 +5472,7 @@ namespace SSH_Helper.Services
         /// Extracts layout data (positions, comments, disabled blocks) from a graph payload.
         /// Used when capturing layout on "Apply YAML".
         /// </summary>
-        public static CanvasLayoutData ExtractLayout(JArray nodes, JArray? commentNodes, IEnumerable<string>? disabledBlockIds)
+        public static CanvasLayoutData ExtractLayout(JArray nodes, JArray? commentNodes, IEnumerable<string>? disabledBlockIds, IEnumerable<string>? expandedNodeIds = null)
         {
             var layout = new CanvasLayoutData
             {
@@ -4839,6 +5502,7 @@ namespace SSH_Helper.Services
             {
                 foreach (var c in commentNodes)
                 {
+                    var anchorToken = c["anchor"] as JObject;
                     var comment = new CanvasComment
                     {
                         Id = c["id"]?.ToString() ?? "",
@@ -4849,6 +5513,13 @@ namespace SSH_Helper.Services
                         Width = c["width"]?.Value<double>() ?? 200,
                         Height = c["height"]?.Value<double>() ?? 100,
                         AttachedToNodeId = c["attachedToNodeId"]?.ToString(),
+                        Kind = c["kind"]?.ToString(),
+                        Anchor = anchorToken == null ? null : new CanvasCommentAnchor
+                        {
+                            Type = anchorToken["type"]?.ToString(),
+                            StepPath = anchorToken["stepPath"]?.ToString(),
+                            LineOffset = anchorToken["lineOffset"]?.Value<int>(),
+                        },
                     };
                     layout.Comments.Add(comment);
                 }
@@ -4858,6 +5529,12 @@ namespace SSH_Helper.Services
             if (disabledBlockIds != null)
             {
                 layout.DisabledBlockIds.AddRange(disabledBlockIds);
+            }
+
+            // Expanded nodes (presentation only)
+            if (expandedNodeIds != null)
+            {
+                layout.ExpandedNodeIds.AddRange(expandedNodeIds);
             }
 
             return layout;

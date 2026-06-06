@@ -112,7 +112,7 @@ namespace SSH_Helper
 
         #region Constants
 
-        private const string ApplicationVersion = "0.51.21";
+        private const string ApplicationVersion = "0.51.22";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -218,10 +218,6 @@ namespace SSH_Helper
         private TextBox? _txtPresetSearch;
         private Label? _btnPresetSearchClear;
         private System.Windows.Forms.Timer? _presetSearchDebounceTimer;
-
-        // Canvas layout structure check
-        private System.Windows.Forms.Timer? _canvasLayoutCheckTimer;
-        private PresetHeaderIndicatorFormatter.CanvasLayoutState _canvasLayoutState;
 
         // Find dialog state
         private FindDialog? _findDialog;
@@ -2414,62 +2410,8 @@ namespace SSH_Helper
                 currentPresetName,
                 isDirty);
 
-            // Immediately determine if canvas layout exists (cheap null check).
-            // If dirty, schedule a debounced structure hash check.
-            var hasLayout = !string.IsNullOrEmpty(_activePresetName)
-                && _presetManager.Get(_activePresetName)?.CanvasLayout != null;
-
-            if (!hasLayout)
-            {
-                _canvasLayoutState = PresetHeaderIndicatorFormatter.CanvasLayoutState.None;
-                _canvasLayoutCheckTimer?.Stop();
-            }
-            else if (!isDirty)
-            {
-                _canvasLayoutState = PresetHeaderIndicatorFormatter.CanvasLayoutState.Saved;
-                _canvasLayoutCheckTimer?.Stop();
-            }
-            else
-            {
-                // Dirty + has layout → debounce the structure hash check
-                ScheduleCanvasLayoutCheck();
-            }
-
-            lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty, _canvasLayoutState);
+            lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty);
             btnSavePreset.Text = PresetHeaderIndicatorFormatter.FormatSaveButtonLabel(isDirty);
-            ReflowScriptHeader();
-        }
-
-        private void ScheduleCanvasLayoutCheck()
-        {
-            if (_canvasLayoutCheckTimer == null)
-            {
-                _canvasLayoutCheckTimer = new System.Windows.Forms.Timer { Interval = 500 };
-                _canvasLayoutCheckTimer.Tick += (_, _) =>
-                {
-                    _canvasLayoutCheckTimer.Stop();
-                    CheckCanvasLayoutStructure();
-                };
-            }
-            _canvasLayoutCheckTimer.Stop();
-            _canvasLayoutCheckTimer.Start();
-        }
-
-        private void CheckCanvasLayoutStructure()
-        {
-            if (string.IsNullOrEmpty(_activePresetName)) return;
-
-            var preset = _presetManager.Get(_activePresetName);
-            var storedHash = preset?.CanvasLayout?.StructureHash;
-            if (string.IsNullOrEmpty(storedHash)) return;
-
-            var currentHash = FlowCanvasBridge.ComputeStructureHashFromYaml(txtCommand.Text);
-            _canvasLayoutState = currentHash != null && string.Equals(currentHash, storedHash, StringComparison.Ordinal)
-                ? PresetHeaderIndicatorFormatter.CanvasLayoutState.Saved
-                : PresetHeaderIndicatorFormatter.CanvasLayoutState.WillReset;
-
-            var isDirty = IsPresetDirty();
-            lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty, _canvasLayoutState);
             ReflowScriptHeader();
         }
 
@@ -2494,6 +2436,8 @@ namespace SSH_Helper
                     {
                         X = prop.Value["x"]?.Value<double>() ?? 0,
                         Y = prop.Value["y"]?.Value<double>() ?? 0,
+                        StepPath = prop.Value["stepPath"]?.ToString(),
+                        BlockType = prop.Value["blockType"]?.ToString(),
                     };
                 }
             }
@@ -2505,6 +2449,7 @@ namespace SSH_Helper
                 layout.Comments.Clear();
                 foreach (var c in comments)
                 {
+                    var anchorToken = c["anchor"] as JObject;
                     layout.Comments.Add(new Models.CanvasComment
                     {
                         Id = c["id"]?.ToString() ?? "",
@@ -2515,6 +2460,13 @@ namespace SSH_Helper
                         Width = c["width"]?.Value<double>() ?? 200,
                         Height = c["height"]?.Value<double>() ?? 100,
                         AttachedToNodeId = c["attachedToNodeId"]?.ToString(),
+                        Kind = c["kind"]?.ToString(),
+                        Anchor = anchorToken == null ? null : new Models.CanvasCommentAnchor
+                        {
+                            Type = anchorToken["type"]?.ToString(),
+                            StepPath = anchorToken["stepPath"]?.ToString(),
+                            LineOffset = anchorToken["lineOffset"]?.Value<int>(),
+                        },
                     });
                 }
             }
@@ -2528,6 +2480,15 @@ namespace SSH_Helper
                     disabled.Select(t => t.ToString()).Where(id => !string.IsNullOrEmpty(id)));
             }
 
+            // Update expanded nodes
+            var expanded = msg["expandedNodes"] as JArray;
+            if (expanded != null)
+            {
+                layout.ExpandedNodeIds.Clear();
+                layout.ExpandedNodeIds.AddRange(
+                    expanded.Select(t => t.ToString()).Where(id => !string.IsNullOrEmpty(id)));
+            }
+
             // Compute structure hash if not set yet (first auto-save before any Apply YAML)
             if (string.IsNullOrEmpty(layout.StructureHash))
             {
@@ -2537,6 +2498,16 @@ namespace SSH_Helper
             }
 
             _presetManager.UpdateCanvasLayout(_activePresetName, layout);
+        }
+
+        private void ApplySetLayoutMode(JObject msg)
+        {
+            if (string.IsNullOrEmpty(_activePresetName)) return;
+            var mode = msg["mode"]?.ToString();
+            if (mode != "auto" && mode != "manual") return;
+            _presetManager.UpdateLayoutMode(
+                _activePresetName,
+                mode == "manual" ? Models.LayoutMode.Manual : Models.LayoutMode.AutoFlow);
         }
 
         private void UpdateHostCount()
@@ -6790,6 +6761,11 @@ namespace SSH_Helper
                 BeginInvoke(() => ApplyLayoutAutosave(msg));
             };
 
+            _flowCanvasForm.OnSetLayoutMode += (msg) =>
+            {
+                BeginInvoke(() => ApplySetLayoutMode(msg));
+            };
+
             _flowCanvasForm.OnBrowsePath += (msg) =>
             {
                 BeginInvoke(() => HandleFlowCanvasBrowsePathRequest(msg));
@@ -6822,24 +6798,42 @@ namespace SSH_Helper
                 var bridge = new FlowCanvasBridge();
                 var (nodes, edges) = bridge.TextToGraph(scriptText);
 
-                // Merge stored canvas layout if the script structure hasn't changed.
-                bool hasUserLayout = false;
+                // Resolve the effective mode: preset override, else the global default (else AutoFlow).
+                var ws = _configService.GetCurrent().WindowState;
+                var defaultMode = ws?.FlowCanvasDefaultLayoutMode ?? Models.LayoutMode.AutoFlow;
+                var effectiveMode = defaultMode;
+                var layoutAction = "reflow";
+                var newNodeIds = new JArray();
+
                 if (!string.IsNullOrEmpty(_activePresetName))
                 {
                     var preset = _presetManager.Get(_activePresetName);
+                    effectiveMode = preset?.LayoutMode ?? defaultMode;
                     var layout = preset?.CanvasLayout;
-                    if (layout != null)
+
+                    // Only Manual presets preserve positions. Auto-flow always re-lays-out.
+                    if (effectiveMode == Models.LayoutMode.Manual && layout != null && layout.Positions.Count > 0)
                     {
                         var currentHash = FlowCanvasBridge.ComputeStructureHash(nodes);
                         if (string.Equals(currentHash, layout.StructureHash, StringComparison.Ordinal))
                         {
-                            FlowCanvasBridge.MergeLayout(nodes, layout);
-                            hasUserLayout = true;
+                            FlowCanvasBridge.MergeLayout(nodes, layout); // identical structure: id-keyed
+                            layoutAction = "keep";
+                        }
+                        else
+                        {
+                            var (safe, ids) = FlowCanvasBridge.TryMergeLayoutByTuple(nodes, layout);
+                            if (safe)
+                            {
+                                layoutAction = "keep";
+                                foreach (var id in ids) newNodeIds.Add(id);
+                            }
+                            // unsafe -> layoutAction stays "reflow" (clean), never mis-maps
                         }
                     }
                 }
 
-                _flowCanvasForm.LoadGraph(nodes, edges, hasUserLayout);
+                _flowCanvasForm.LoadGraph(nodes, edges, effectiveMode, layoutAction, newNodeIds);
             }
             catch
             {
@@ -6892,11 +6886,14 @@ namespace SSH_Helper
             try
             {
                 var bridge = new FlowCanvasBridge();
-                var exportResult = bridge.ExportGraphToYaml(new JObject
+                var exportPayload = new JObject
                 {
                     ["nodes"] = nodes,
                     ["edges"] = edges
-                });
+                };
+                if (graphMessage["comments"] is JArray commentsArray)
+                    exportPayload["comments"] = commentsArray;
+                var exportResult = bridge.ExportGraphToYaml(exportPayload);
 
                 var warnings = exportResult.Warnings.ToArray();
                 if (!exportResult.Success)
@@ -6948,7 +6945,10 @@ namespace SSH_Helper
                     var disabledBlocks = (graphMessage["disabledBlocks"] as JArray)?
                         .Select(t => t.ToString())
                         .Where(id => !string.IsNullOrEmpty(id));
-                    var layout = FlowCanvasBridge.ExtractLayout(nodes, commentNodes, disabledBlocks);
+                    var expandedNodes = (graphMessage["expandedNodes"] as JArray)?
+                        .Select(t => t.ToString())
+                        .Where(id => !string.IsNullOrEmpty(id));
+                    var layout = FlowCanvasBridge.ExtractLayout(nodes, commentNodes, disabledBlocks, expandedNodes);
                     _presetManager.UpdateCanvasLayout(_activePresetName, layout);
                 }
 
@@ -10095,7 +10095,12 @@ namespace SSH_Helper
                 Commands = commands,
                 Timeout = timeout,
                 IsFavorite = existingPreset?.IsFavorite ?? false,
-                Folder = existingPreset?.Folder
+                Folder = existingPreset?.Folder,
+                // Preserve the saved canvas arrangement + layout mode across a content save —
+                // Save() replaces the stored PresetInfo wholesale, so without this a save would
+                // wipe the preset's manual layout and revert it to the default Auto-flow mode.
+                CanvasLayout = existingPreset?.CanvasLayout?.Clone(),
+                LayoutMode = existingPreset?.LayoutMode
             };
 
             bool isNew = !_presetManager.Presets.ContainsKey(presetName);
@@ -10161,6 +10166,12 @@ namespace SSH_Helper
             UpdatePresetHeaderIndicator();
             UpdateStatusBar($"Preset '{presetName}' saved");
             ClearPresetDeleteUndoHistory();
+
+            // Push the saved script to the open Flow Canvas (no-op if it's closed — self-guards).
+            // Re-import is mode-aware: an Auto-flow preset re-lays-out; a Manual preset keeps its
+            // arrangement and near-neighbor-places any blocks the edit added.
+            LoadCurrentScriptIntoCanvas();
+
             return true;
         }
 
@@ -15231,8 +15242,6 @@ namespace SSH_Helper
         /// </summary>
         private void CleanupSchedulerServices()
         {
-            _canvasLayoutCheckTimer?.Stop();
-            _canvasLayoutCheckTimer?.Dispose();
             _statusBarTimer?.Stop();
             _statusBarTimer?.Dispose();
             if (_jobExecutionService != null)

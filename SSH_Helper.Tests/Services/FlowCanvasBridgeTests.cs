@@ -400,8 +400,9 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
-    public void ExportGraphToYaml_CommentNodes_AreIgnoredWithWarning()
+    public void ExportGraphToYaml_PlainCommentNodes_AreConsumedSilently()
     {
+        // A comment node with blockType 'comment' but NO kind/anchor is a plain visual note — must NOT inject any # lines.
         var bridge = new FlowCanvasBridge();
         var graph = new JObject
         {
@@ -467,9 +468,315 @@ public class FlowCanvasBridgeTests
         var result = bridge.ExportGraphToYaml(graph);
 
         Assert.True(result.Success);
-        Assert.Contains(result.Warnings, w => w.Contains("Comment nodes are ignored", System.StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("Comment nodes are ignored", System.StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain("comment-1", result.NodeToStepPathMap.Keys);
         Assert.Contains("node-1", result.NodeToStepPathMap.Keys);
+        Assert.DoesNotContain("#", result.Yaml);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_AuthoredLeadingCommentOnLeafBlock_ExportsAsHashLine()
+    {
+        // Repro: user imports YAML, right-clicks a leaf (parse) block, "Add Comment (#)",
+        // types text, then Apply YAML. The authored comment arrives in comments[] keyed by
+        // attachedToNodeId (no stepPath). It must export as a leading "# ..." line.
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            name: Comment Export Repro
+            steps:
+              - send: "show"
+              - parse:
+                  format: fortigate
+                  from: raw
+                  into: fortigate
+              - set: "port = 1"
+            """;
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+
+        var parseNode = nodes.First(n => n["data"]?["blockType"]?.ToString() == "parse");
+        var parseId = parseNode["id"]!.ToString();
+
+        var graph = new JObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges,
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "comment-1",
+                    ["text"] = "trest",
+                    ["kind"] = "comment",
+                    ["anchor"] = new JObject { ["type"] = "leading" },
+                    ["attachedToNodeId"] = parseId
+                }
+            }
+        };
+
+        var export = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        Assert.Contains("# trest", export.Yaml);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_AuthoredLeadingCommentOnNestedLeafBlock_ExportsAsHashLine()
+    {
+        // Repro: the parse block lives INSIDE an imported container (foreach). The container
+        // round-trips via its stored snippet, so the child is skipped in the main loop. An
+        // authored comment keyed by the CHILD node id must still export as a "# ..." line.
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            name: Nested Comment Export Repro
+            steps:
+              - foreach: h in hosts
+                do:
+                  - send: "show"
+                  - parse:
+                      format: fortigate
+                      from: raw
+                      into: fortigate
+                  - set: "port = 1"
+            """;
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+
+        var parseNode = nodes.First(n => n["data"]?["blockType"]?.ToString() == "parse");
+        var parseId = parseNode["id"]!.ToString();
+
+        var graph = new JObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges,
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "comment-1",
+                    ["text"] = "trest",
+                    ["kind"] = "comment",
+                    ["anchor"] = new JObject { ["type"] = "leading" },
+                    ["attachedToNodeId"] = parseId
+                }
+            }
+        };
+
+        var export = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        Assert.Contains("# trest", export.Yaml);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_SingleBranchComment_NotDoubledOnRegeneration_Foreach()
+    {
+        // A comment between a single-branch container's header and its branch keyword must export
+        // ONCE (above the keyword), not also as a stray inline comment on the container header line.
+        var bridge = new FlowCanvasBridge();
+        var yaml =
+            "steps:\n" +
+            "- foreach: x in items\n" +
+            "  # loop body\n" +        // between header and do: -> branch comment only
+            "  do:\n" +
+            "    - print:\n" +
+            "        message: \"hi\"\n";
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var props = n["data"]?["props"] as JObject;
+            if (n["data"]?["blockType"]?.ToString() == "foreach" && props != null)
+                props["_forceGraphExport"] = true;
+        }
+
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# loop body"));
+        var lines = result.Yaml.Replace("\r\n", "\n").Split('\n');
+        Assert.DoesNotContain(lines, l => l.Contains("foreach") && l.Contains("#")); // no stray inline on header
+        int doIdx = Array.FindIndex(lines, l => l.Trim() == "do:");
+        int cIdx = Array.FindIndex(lines, l => l.Trim() == "# loop body");
+        Assert.True(doIdx >= 0 && cIdx == doIdx - 1, "comment sits directly above 'do:'");
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_SingleBranchComment_NotDoubledOnRegeneration_IfThenOnly()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml =
+            "steps:\n" +
+            "- if:\n" +
+            "    condition: a == \"b\"\n" +
+            "    # do the thing\n" +    // between condition and then: -> branch comment only
+            "    then:\n" +
+            "      - print:\n" +
+            "          message: \"hi\"\n";
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var props = n["data"]?["props"] as JObject;
+            if (n["data"]?["blockType"]?.ToString() == "if" && props != null)
+                props["_forceGraphExport"] = true;
+        }
+
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# do the thing"));
+        var lines = result.Yaml.Replace("\r\n", "\n").Split('\n');
+        Assert.DoesNotContain(lines, l => l.TrimStart().StartsWith("- if:") && l.Contains("#"));
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_BranchCommentRegeneration_EmitsBranchCommentAboveKeyword()
+    {
+        // Repro: a branch comment (above 'else:') and a leading comment (inside the else body) must
+        // keep their positions when the if regenerates from graph. The bug emitted BOTH as leading
+        // comments inside the body. The branch comment must re-emit ABOVE 'else:'.
+        var bridge = new FlowCanvasBridge();
+        var yaml =
+            "steps:\n" +
+            "- if:\n" +
+            "    condition: a == \"b\"\n" +
+            "    then:\n" +
+            "      - print:\n" +
+            "          message: \"did it\"\n" +
+            "    # nothing to do\n" +   // ABOVE else: -> branch comment
+            "    else:\n" +
+            "      # print\n" +         // inside else body, above the step -> leading comment
+            "      - print:\n" +
+            "          message: \"nope\"\n";
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        // Force the if to regenerate from graph (the path where the bug surfaced).
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var props = n["data"]?["props"] as JObject;
+            if (n["data"]?["blockType"]?.ToString() == "if" && props != null)
+                props["_forceGraphExport"] = true;
+        }
+
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var lines = result.Yaml.Replace("\r\n", "\n").Split('\n');
+        int elseIdx = Array.FindIndex(lines, l => l.Trim() == "else:");
+        int branchIdx = Array.FindIndex(lines, l => l.Trim() == "# nothing to do");
+        int leadingIdx = Array.FindIndex(lines, l => l.Trim() == "# print");
+
+        Assert.True(elseIdx >= 0, "else: present");
+        Assert.True(branchIdx >= 0, "branch comment present");
+        Assert.True(leadingIdx >= 0, "leading comment present");
+        Assert.Equal(elseIdx - 1, branchIdx);          // branch comment sits directly above 'else:'
+        Assert.True(leadingIdx > elseIdx, "leading comment is inside the else body, below the keyword");
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# nothing to do"));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# print"));
+
+        // The regenerated YAML must still parse cleanly.
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        Assert.Empty(parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true));
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_MultilineComment_EmitsHashOnEveryLine()
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, edges) = bridge.TextToGraph("steps:\n- print:\n    message: hi\n");
+        var printId = nodes.First(n => n["data"]?["blockType"]?.ToString() == "print")["id"]!.ToString();
+        var graph = new JObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges,
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c1", ["text"] = "nothing to do\ntest", ["kind"] = "comment",
+                    ["anchor"] = new JObject { ["type"] = "leading" }, ["attachedToNodeId"] = printId
+                }
+            }
+        };
+
+        var export = bridge.ExportGraphToYaml(graph);
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        Assert.Contains("# nothing to do", export.Yaml);
+        Assert.Contains("# test", export.Yaml);
+        // 'test' must never appear as a bare (un-#'d) line — that would be invalid YAML.
+        var parser = new ScriptParser();
+        Assert.Empty(parser.Validate(parser.Parse(export.Yaml), export.Yaml, enforceCanonicalSyntax: true));
+    }
+
+    [Fact]
+    public void TextToGraph_ConsecutiveLeadingComments_MergeIntoOneNode()
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, _) = bridge.TextToGraph("steps:\n# nothing to do\n# test\n- print:\n    message: hi\n");
+        var comments = nodes.Where(n => n["type"]?.ToString() == "comment").ToList();
+        Assert.Single(comments);
+        Assert.Equal("nothing to do\ntest", comments[0]["data"]?["text"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_BlankSeparatedComments_StayDistinct()
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, _) = bridge.TextToGraph("steps:\n# group one\n\n# group two\n- print:\n    message: hi\n");
+        var comments = nodes.Where(n => n["type"]?.ToString() == "comment").ToList();
+        Assert.Equal(2, comments.Count);
+    }
+
+    [Fact]
+    public void RoundTrip_MultilineBranchComment_Regeneration()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml =
+            "steps:\n" +
+            "- if:\n" +
+            "    condition: a == \"b\"\n" +
+            "    then:\n" +
+            "      - print:\n" +
+            "          message: \"x\"\n" +
+            "    # nothing to do\n" +
+            "    # test\n" +
+            "    else:\n" +
+            "      - print:\n" +
+            "          message: \"y\"\n";
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+
+        var branchComment = nodes.FirstOrDefault(n =>
+            n["type"]?.ToString() == "comment" && n["data"]?["anchor"]?["type"]?.ToString() == "branch");
+        Assert.NotNull(branchComment);
+        Assert.Equal("nothing to do\ntest", branchComment!["data"]?["text"]?.ToString());
+
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var p = n["data"]?["props"] as JObject;
+            if (n["data"]?["blockType"]?.ToString() == "if" && p != null) p["_forceGraphExport"] = true;
+        }
+        var export = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+
+        var lines = export.Yaml.Replace("\r\n", "\n").Split('\n');
+        int elseIdx = Array.FindIndex(lines, l => l.Trim() == "else:");
+        Assert.True(elseIdx >= 2);
+        Assert.Equal("# test", lines[elseIdx - 1].Trim());
+        Assert.Equal("# nothing to do", lines[elseIdx - 2].Trim());
+        var parser = new ScriptParser();
+        Assert.Empty(parser.Validate(parser.Parse(export.Yaml), export.Yaml, enforceCanonicalSyntax: true));
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ImportedOnlyNestedComment_RoundTripsViaSnippet_NotRegeneration()
+    {
+        // Scoping guard: a container whose only comments are IMPORTED (carry an anchor.stepPath) must
+        // keep exporting from its verbatim snippet — NOT regenerate — so untouched scripts stay stable.
+        // Only canvas-authored comments (no stepPath) should force regeneration.
+        var bridge = new FlowCanvasBridge();
+        var (nodes, edges) = bridge.TextToGraph(NestedCommentYaml);
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains(result.Diagnostics, d => d.Message.Contains("stored YAML snippet", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -2490,6 +2797,168 @@ public class FlowCanvasBridgeTests
         Assert.Equal("${interface_list}", choose.OptionsFrom);
     }
 
+    [Fact]
+    public void RoundTrip_LeadingAndInlineComments_ArePreserved()
+    {
+        var yaml = "steps:\n  # Create the address object\n  - send:\n      command: cfg  # needs vdom\n";
+        var result = RoundTripThroughBridge(yaml);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# Create the address object", result.Yaml);
+        Assert.Contains("# needs vdom", result.Yaml);
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# needs vdom"));
+    }
+
+    [Fact]
+    public void Export_NestedInlineComment_StaysOnItsLine()
+    {
+        // An inline comment on a line INSIDE a container's branch body must survive the round-trip
+        // verbatim on the original line — not be hoisted to the foreach header and not be lost.
+        // This test uses RoundTripThroughBridge which exercises the real TextToGraph→SplitYamlSteps
+        // snippet capture, then ExportGraphToYaml's snippet round-trip path for the imported foreach.
+        // Before the fix, SplitYamlSteps hoisted "inner note" to InlineComment and stripped it from
+        // the snippet, causing the export to place it on the foreach: header line instead.
+        var yaml = "steps:\n  - foreach:\n      iterator: h in ${hosts}\n      do:\n        - print:\n            message: ${h}  # inner note\n";
+        var result = RoundTripThroughBridge(yaml);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        // The comment must appear exactly once (not duplicated or lost)
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# inner note"));
+        // The comment must be on the message line, not on the foreach header
+        var lines = result.Yaml.Split('\n');
+        var messageLine = lines.FirstOrDefault(l => l.Contains("message:") && l.Contains("# inner note"));
+        var foreachLine = lines.FirstOrDefault(l => l.TrimStart().StartsWith("- foreach:") && l.Contains("# inner note"));
+        Assert.NotNull(messageLine);
+        Assert.Null(foreachLine);
+    }
+
+    [Fact]
+    public void Export_ContainerRegeneration_EmitsLeadingComment()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = "steps:\n  # guard the loop\n  - foreach:\n      iterator: h in ${hosts}\n      do:\n        - print:\n            message: ${h}\n";
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var props = n["data"]?["props"] as JObject;
+            if (props != null && props["_yamlSnippet"] != null) props["_forceGraphExport"] = true;
+        }
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# guard the loop", result.Yaml);
+    }
+
+    [Fact]
+    public void RoundTrip_QuotedHashInValue_NotStripped()
+    {
+        var yaml = "steps:\n  - send:\n      command: \"echo #1\"\n";
+        var result = RoundTripThroughBridge(yaml);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("#1", result.Yaml);
+    }
+
+    [Fact]
+    public void RoundTrip_HashNotPrecededByWhitespace_NotStripped()
+    {
+        var yaml = "steps:\n  - send:\n      command: v1#2\n";
+        var result = RoundTripThroughBridge(yaml);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("v1#2", result.Yaml);
+    }
+
+    [Fact]
+    public void RoundTrip_SystemInfoSample_PreservesSectionLabels()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var path = Path.Combine(repoRoot, "ScriptSamples", "bash", "system_info.yaml");
+        Assert.True(File.Exists(path), $"sample not found: {path}");
+        var yaml = File.ReadAllText(path);
+        var result = RoundTripThroughBridge(yaml);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        foreach (var label in new[] { "# Get hostname", "# Get OS info", "# Get memory info" })
+            Assert.Contains(label, result.Yaml);
+    }
+
+    private const string NestedCommentYaml =
+        "steps:\n" +
+        "- foreach: x in items\n" +
+        "  do:\n" +
+        "    - if:\n" +
+        "        condition: a == \"b\"\n" +
+        "        then:\n" +
+        "          - print:\n" +
+        "              message: \"did it\"\n" +
+        "      # nothing to do\n" +    // ABOVE the keyword -> annotates the branch
+        "      else: \n" +             // trailing space after the keyword (matches real-world YAML)
+        "        # print\n" +          // BELOW the keyword, inside the body -> annotates the step
+        "        - print:\n" +
+        "            message: \"nope\"\n";
+
+    [Fact]
+    public void TextToGraph_NestedComments_SplitIntoBranchAndLeadingAnchors()
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, _) = bridge.TextToGraph(NestedCommentYaml);
+
+        var elseChild = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["props"]?["_branchLabel"]?.ToString() == "else");
+        Assert.NotNull(elseChild);
+        var elseId = elseChild!["id"]!.ToString();
+
+        // Comment ABOVE the 'else:' keyword annotates the branch -> anchor 'branch' (renders above band).
+        var aboveKeyword = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["text"]?.ToString() == "nothing to do");
+        Assert.NotNull(aboveKeyword);
+        Assert.Equal("branch", aboveKeyword!["data"]?["anchor"]?["type"]?.ToString());
+        Assert.Equal(elseId, aboveKeyword["data"]?["attachedToNodeId"]?.ToString());
+
+        // Comment BELOW the keyword (inside the body) annotates the step -> anchor 'leading' (inside band).
+        var insideBody = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["text"]?.ToString() == "print");
+        Assert.NotNull(insideBody);
+        Assert.Equal("leading", insideBody!["data"]?["anchor"]?["type"]?.ToString());
+        Assert.Equal(elseId, insideBody["data"]?["attachedToNodeId"]?.ToString());
+    }
+
+    [Fact]
+    public void RoundTrip_NestedComments_PreservedExactlyOnce()
+    {
+        var result = RoundTripThroughBridge(NestedCommentYaml);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# nothing to do"));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# print"));
+    }
+
+    [Fact]
+    public void Export_NestedComments_SurviveContainerRegenerationExactlyOnce()
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, edges) = bridge.TextToGraph(NestedCommentYaml);
+        // Force the foreach container to regenerate from the graph (stored snippet bypassed),
+        // which previously dropped branch-internal comments (the deferred Task 5b case).
+        foreach (var n in nodes.OfType<JObject>())
+        {
+            var props = n["data"]?["props"] as JObject;
+            if (n["data"]?["blockType"]?.ToString() == "foreach" && props != null)
+                props["_forceGraphExport"] = true;
+        }
+        var result = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# nothing to do"));
+        Assert.Equal(1, CountOccurrences(result.Yaml, "# print"));
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int count = 0, idx = 0;
+        while ((idx = haystack.IndexOf(needle, idx, System.StringComparison.Ordinal)) >= 0)
+        { count++; idx += needle.Length; }
+        return count;
+    }
+
     private static FlowCanvasBridge.FlowCanvasExportResult RoundTripThroughBridge(string yaml)
     {
         var bridge = new FlowCanvasBridge();
@@ -3033,6 +3502,277 @@ public class FlowCanvasBridgeTests
         Assert.Contains("# keep-imported-snippet", result.Yaml);
     }
 
+    // R1 transport tests — use the REAL flat comments[] shape (no TextToGraph shortcut).
+
+    [Fact]
+    public void Export_AuthoredCommentInCommentsArray_EmitsHashLine()
+    {
+        // Authored canvas comment arrives in the flat comments[] array from React.
+        // anchor has type:'leading' and NO stepPath — only attachedToNodeId.
+        // The export must match by attachedToNodeId and emit "# Authored note" above the print step.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("node-1", "print", new JObject { ["message"] = "hello" })
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "node-1")
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c1",
+                    ["text"] = "Authored note",
+                    ["kind"] = "comment",
+                    ["attachedToNodeId"] = "node-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# Authored note", result.Yaml);
+
+        // Verify ordering: the comment line must appear before the print step.
+        var commentIdx = result.Yaml.IndexOf("# Authored note", StringComparison.Ordinal);
+        var printIdx = result.Yaml.IndexOf("print:", StringComparison.Ordinal);
+        Assert.True(commentIdx < printIdx,
+            $"Expected '# Authored note' before 'print:' but comment was at {commentIdx}, print at {printIdx}.");
+    }
+
+    [Fact]
+    public void Export_StickyInCommentsArray_NotEmitted()
+    {
+        // kind:'sticky' is visual-only and must never inject a # line.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("node-1", "print", new JObject { ["message"] = "hello" })
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "node-1")
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "s1",
+                    ["text"] = "Sticky visual note",
+                    ["kind"] = "sticky",
+                    ["attachedToNodeId"] = "node-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.DoesNotContain("# Sticky visual note", result.Yaml);
+    }
+
+    // R1 fix tests — prove comments inside container branches are not dropped.
+    // These tests use the REAL flat comments[] transport shape, not the TextToGraph shortcut.
+
+    [Fact]
+    public void Export_LeadingCommentOnThenBranchNode_EmitsHashLine()
+    {
+        // Canvas-authored comment (flat comments[]) attached to a node inside an if/then branch.
+        // Before the fix, TryGenerateBranchYaml had no access to comment dicts and silently dropped it.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject { ["condition"] = "true" }),
+                CreateBlockNode("then-1", "print", new JObject { ["message"] = "branch msg" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c1",
+                    ["text"] = "branch comment",
+                    ["kind"] = "comment",
+                    ["attachedToNodeId"] = "then-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# branch comment", result.Yaml);
+    }
+
+    [Fact]
+    public void Export_InlineCommentOnThenBranchNode_EmitsHashComment()
+    {
+        // Canvas-authored inline comment (flat comments[]) on a node inside an if/then branch.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject { ["condition"] = "true" }),
+                CreateBlockNode("then-1", "print", new JObject { ["message"] = "branch msg" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c2",
+                    ["text"] = "inline note",
+                    ["kind"] = "comment",
+                    ["attachedToNodeId"] = "then-1",
+                    ["anchor"] = new JObject { ["type"] = "inline" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# inline note", result.Yaml);
+    }
+
+    [Fact]
+    public void Export_CommentOnElseBranchNode_EmitsHashLine()
+    {
+        // Comment on a node inside the else branch must also survive export.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject { ["condition"] = "true" }),
+                CreateBlockNode("then-1", "print", new JObject { ["message"] = "then" }),
+                CreateBlockNode("else-1", "print", new JObject { ["message"] = "else" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+                CreateEdge("if-1", "else-1", branchPath: "else"),
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c3",
+                    ["text"] = "else comment",
+                    ["kind"] = "comment",
+                    ["attachedToNodeId"] = "else-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# else comment", result.Yaml);
+    }
+
+    [Fact]
+    public void Export_CommentOnForeachDoBranchNode_EmitsHashLine()
+    {
+        // Comment on a node inside a foreach/do branch.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("fe-1", "foreach", new JObject { ["iterator"] = "x in ${list}" }),
+                CreateBlockNode("do-1", "print", new JObject { ["message"] = "${x}" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "fe-1"),
+                CreateEdge("fe-1", "do-1", branchPath: "do"),
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "c4",
+                    ["text"] = "foreach body",
+                    ["kind"] = "comment",
+                    ["attachedToNodeId"] = "do-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# foreach body", result.Yaml);
+    }
+
+    [Fact]
+    public void Export_StickyOnBranchNode_IsNotEmitted()
+    {
+        // A sticky kind comment inside a branch must remain visual-only and not inject a # line.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject { ["condition"] = "true" }),
+                CreateBlockNode("then-1", "print", new JObject { ["message"] = "branch msg" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+            },
+            ["comments"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "s1",
+                    ["text"] = "sticky branch note",
+                    ["kind"] = "sticky",
+                    ["attachedToNodeId"] = "then-1",
+                    ["anchor"] = new JObject { ["type"] = "leading" }
+                }
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.DoesNotContain("# sticky branch note", result.Yaml);
+    }
+
     private static JObject CreateEdge(
         string source,
         string target,
@@ -3063,5 +3803,239 @@ public class FlowCanvasBridgeTests
             edge["data"] = data;
 
         return edge;
+    }
+
+    // R3 fix tests — Finding 3: the comment-node guard must fire when blockType is absent.
+
+    [Fact]
+    public void ExportGraphToYaml_CommentNodeWithMissingBlockType_IsSkippedNotCorrupted()
+    {
+        // Simulate a comment node whose data object lacks the blockType key entirely.
+        // The ?? "print" fallback would give blockType="print", so a blockType-only guard
+        // would miss it and attempt to generate a "- print:" step — corrupt output.
+        // The fixed guard additionally checks node["type"] == "comment" and must skip it.
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                new JObject
+                {
+                    ["id"] = "comment-missing-bt",
+                    ["type"] = "comment",           // type = comment
+                    ["position"] = new JObject { ["x"] = 10, ["y"] = 10 },
+                    ["data"] = new JObject          // blockType deliberately absent
+                    {
+                        ["label"] = "Visual note",
+                        ["props"] = new JObject()
+                    }
+                },
+                CreateBlockNode("node-1", "print", new JObject { ["message"] = "hello" })
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "node-1")
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        // The comment node must not have produced a "print:" step from the ?? fallback
+        Assert.DoesNotContain("- print:\n    message:", result.Yaml, StringComparison.Ordinal);
+        // The real print node must still appear
+        Assert.Contains("print:", result.Yaml);
+        // The comment node must not have a step-path mapping
+        Assert.DoesNotContain("comment-missing-bt", result.NodeToStepPathMap.Keys);
+    }
+}
+
+public class FlowCanvasBridgeSplitYamlStepsTests
+{
+    [Fact]
+    public void SplitYamlSteps_LeadingCommentAttachesToNextStep_AndIsStrippedFromSnippet()
+    {
+        var yaml = "steps:\n  # Get hostname\n  - send:\n      command: hostname\n";
+        var steps = FlowCanvasBridge.SplitYamlSteps(yaml);
+
+        Assert.Single(steps);
+        Assert.Equal(new[] { "Get hostname" }, steps[0].LeadingComments);
+        Assert.DoesNotContain("#", steps[0].Snippet);
+        Assert.Contains("- send:", steps[0].Snippet);
+    }
+
+    [Fact]
+    public void SplitYamlSteps_InlineComment_IsCapturedAndStripped()
+    {
+        var yaml = "steps:\n  - send:\n      command: cfg  # needs vdom\n";
+        var steps = FlowCanvasBridge.SplitYamlSteps(yaml);
+
+        Assert.Single(steps);
+        Assert.Equal("needs vdom", steps[0].InlineComment);
+        Assert.DoesNotContain("needs vdom", steps[0].Snippet);
+    }
+
+    [Fact]
+    public void SplitYamlSteps_NestedInlineComment_StaysInSnippet()
+    {
+        // A comment on a line INSIDE a container's body (do:/then:/else:/ nested list item)
+        // must NOT be hoisted onto the container's InlineComment field. It must stay verbatim
+        // in the snippet so the round-trip preserves it on the correct line.
+        var yaml = "steps:\n  - foreach:\n      iterator: h in ${hosts}\n      do:\n        - print:\n            message: ${h}  # inner note\n";
+        var steps = FlowCanvasBridge.SplitYamlSteps(yaml);
+
+        Assert.Single(steps);
+        Assert.Null(steps[0].InlineComment);
+        Assert.Contains("inner note", steps[0].Snippet);
+    }
+
+    [Fact]
+    public void SplitYamlSteps_HashInsideQuotes_IsNotTreatedAsComment()
+    {
+        var yaml = "steps:\n  - send:\n      command: \"echo #1\"\n";
+        var steps = FlowCanvasBridge.SplitYamlSteps(yaml);
+
+        Assert.Single(steps);
+        Assert.Null(steps[0].InlineComment);
+        Assert.Contains("#1", steps[0].Snippet);
+    }
+
+    [Fact]
+    public void SplitYamlSteps_BareTrailingHash_IsNotTreatedAsComment()
+    {
+        var yaml = "steps:\n  - send:\n      command: cfg  #\n";
+        var steps = FlowCanvasBridge.SplitYamlSteps(yaml);
+        Assert.Single(steps);
+        Assert.Null(steps[0].InlineComment);
+        Assert.Contains("#", steps[0].Snippet);
+    }
+
+    [Fact]
+    public void TextToGraph_LeadingComment_EmitsAnchoredCommentNode()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = "steps:\n  # Get hostname\n  - send:\n      command: hostname\n";
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var comment = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["blockType"]?.ToString() == "comment");
+        Assert.NotNull(comment);
+        Assert.Equal("comment", comment!["data"]?["kind"]?.ToString());
+        Assert.Equal("Get hostname", comment["data"]?["text"]?.ToString());
+        Assert.Equal("leading", comment["data"]?["anchor"]?["type"]?.ToString());
+        Assert.Equal("steps/0", comment["data"]?["anchor"]?["stepPath"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_HeaderComment_EmitsHeaderAnchoredNode()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = "# File header note\nname: demo\nsteps:\n  - send:\n      command: hostname\n";
+        var (nodes, _) = bridge.TextToGraph(yaml);
+        var header = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["anchor"]?["type"]?.ToString() == "header");
+        Assert.NotNull(header);
+        Assert.Equal("File header note", header!["data"]?["text"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_InlineComment_EmitsInlineAnchoredNode()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = "steps:\n  - send:\n      command: hostname  # note\n";
+        var (nodes, _) = bridge.TextToGraph(yaml);
+        var inline = nodes.OfType<JObject>().FirstOrDefault(n =>
+            n["data"]?["anchor"]?["type"]?.ToString() == "inline");
+        Assert.NotNull(inline);
+        Assert.Equal("note", inline!["data"]?["text"]?.ToString());
+        Assert.Equal("steps/0", inline["data"]?["anchor"]?["stepPath"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_CommentOnlyPreambleNoSteps_DoesNotWireStartToComment()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = "# just a note\nsteps:\n";
+        var (_, edges) = bridge.TextToGraph(yaml);
+        foreach (var e in edges.OfType<JObject>())
+        {
+            var target = e["target"]?.ToString();
+            Assert.False(target != null && target.StartsWith("comment-"),
+                $"start wired to a comment node: {target}");
+        }
+    }
+
+    // R3 fix tests — Finding 2: TrySplitTrailingComment must handle '' (escaped single-quote).
+    // A '' pair inside a single-quoted YAML value must NOT be treated as two string boundaries.
+
+    [Fact]
+    public void TrySplitTrailingComment_EscapedSingleQuoteInValue_NoFalseCommentSplit()
+    {
+        // command: 'it''s a test'  — the '' is an escaped single-quote; no trailing comment present.
+        // Before the fix the toggle approach would exit inSingle=false after the second ', causing
+        // any subsequent # to be treated as a comment when it is still inside the string.
+        var line = "command: 'it''s a test'";
+        var split = FlowCanvasBridge.TrySplitTrailingComment(line, out var code, out var comment);
+        Assert.False(split, "Should not see a trailing comment — the # is absent.");
+        Assert.Equal(line, code);
+        Assert.Equal(string.Empty, comment);
+    }
+
+    [Fact]
+    public void TrySplitTrailingComment_EscapedSingleQuoteThenRealComment_SplitsCorrectly()
+    {
+        // command: 'it''s ok'  # real trailing comment
+        // The '' is an escaped single-quote inside the string. The # after the closing ' is
+        // a genuine trailing comment.
+        var line = "command: 'it''s ok'  # real note";
+        var split = FlowCanvasBridge.TrySplitTrailingComment(line, out var code, out var comment);
+        Assert.True(split, "Should detect the trailing comment after the closing quote.");
+        Assert.Equal("command: 'it''s ok'", code);
+        Assert.Equal("real note", comment);
+    }
+
+    [Fact]
+    public void TrySplitTrailingComment_HashInsideEscapedSingleQuoteValue_NotSplit()
+    {
+        // command: 'it'' # note'  — the '' is escaped; the # is still inside the string.
+        // Before the fix, toggle logic would leave inSingle=false after the second quote of ''
+        // so the # would be incorrectly treated as a trailing comment, stripping part of the value.
+        var line = "command: 'it'' # note'";
+        var split = FlowCanvasBridge.TrySplitTrailingComment(line, out var code, out var comment);
+        Assert.False(split, "# is inside the single-quoted string after an escaped quote — must not split.");
+        Assert.Equal(line, code);
+        Assert.Equal(string.Empty, comment);
+    }
+
+    // R4 fix tests — Finding 1: TrySplitTrailingComment must not treat \" as a string boundary.
+    // A backslash-escaped double-quote inside a YAML double-quoted string must NOT prematurely
+    // close the string, causing a subsequent whitespace + '#' to be mis-read as a trailing comment.
+
+    [Fact]
+    public void TrySplitTrailingComment_BackslashEscapedDoubleQuoteWithHash_NotSplit()
+    {
+        // command: "echo \" # note"
+        // The \" is a YAML double-quote escape; the # is still inside the double-quoted string.
+        // Before the fix, the scanner would flip inDouble=false on the backslash-escaped ", then
+        // treat the subsequent " # note" fragment as outside the string and split on the #.
+        var line = @"command: ""echo \"" # note""";
+        var split = FlowCanvasBridge.TrySplitTrailingComment(line, out var code, out var comment);
+        Assert.False(split, "# is inside the double-quoted string after a backslash-escaped quote — must not split.");
+        Assert.Equal(line, code);
+        Assert.Equal(string.Empty, comment);
+    }
+
+    [Fact]
+    public void TrySplitTrailingComment_BackslashEscapedDoubleQuoteThenRealComment_SplitsCorrectly()
+    {
+        // command: "echo \"ok\""  # real trailing comment
+        // The \" pairs are escapes; the # after the closing " is a genuine trailing comment.
+        var line = @"command: ""echo \""ok\"""" # real note";
+        var split = FlowCanvasBridge.TrySplitTrailingComment(line, out var code, out var comment);
+        Assert.True(split, "Should detect the trailing comment after the closing double-quote.");
+        Assert.Equal(@"command: ""echo \""ok\""""", code);
+        Assert.Equal("real note", comment);
     }
 }

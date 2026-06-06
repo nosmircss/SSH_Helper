@@ -25,7 +25,11 @@ function childIndexOf(node: Node): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-export function buildLayoutTree(nodes: Node[], edges: Edge[]): LayoutTree {
+// keepOrphans: when true, top-level disconnected nodes (a freshly dropped, not-yet-wired block, or
+// a block whose edges were deleted) are NOT appended to the spine — they're left out of the tree so
+// the layout keeps their position. Automatic reflows pass true (don't yank an unwired block to the
+// bottom); the explicit Auto-Layout button passes false to organize everything.
+export function buildLayoutTree(nodes: Node[], edges: Edge[], keepOrphans = false): LayoutTree {
   const layoutable = nodes.filter((n) => n.id !== START_ID && !isComment(n));
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
 
@@ -152,8 +156,11 @@ export function buildLayoutTree(nodes: Node[], edges: Edge[]): LayoutTree {
     if (cursor && (onSpine.has(cursor) || claimed.has(cursor))) cursor = undefined;
   }
 
-  // Any remaining top-level nodes (disconnected/orphans) keep their place at the end.
-  for (const n of layoutable) if (!claimed.has(n.id) && !onSpine.has(n.id)) pushSpine(n.id);
+  // Any remaining top-level nodes (disconnected/orphans). With keepOrphans they're left OUT of the
+  // tree so the layout preserves their position; otherwise they're appended to the spine end.
+  if (!keepOrphans) {
+    for (const n of layoutable) if (!claimed.has(n.id) && !onSpine.has(n.id)) pushSpine(n.id);
+  }
 
   return { spine };
 }

@@ -32,6 +32,11 @@ namespace SSH_Helper.Models
         /// </summary>
         public List<string> DisabledBlockIds { get; set; } = new();
 
+        /// <summary>
+        /// Node IDs of blocks expanded to their read-only settings summary (presentation only).
+        /// </summary>
+        public List<string> ExpandedNodeIds { get; set; } = new();
+
         public CanvasLayoutData Clone()
         {
             return new CanvasLayoutData
@@ -39,7 +44,7 @@ namespace SSH_Helper.Models
                 StructureHash = StructureHash,
                 Positions = Positions.ToDictionary(
                     kvp => kvp.Key,
-                    kvp => new NodePosition { X = kvp.Value.X, Y = kvp.Value.Y }),
+                    kvp => new NodePosition { X = kvp.Value.X, Y = kvp.Value.Y, StepPath = kvp.Value.StepPath, BlockType = kvp.Value.BlockType }),
                 Comments = Comments.Select(c => new CanvasComment
                 {
                     Id = c.Id,
@@ -50,8 +55,16 @@ namespace SSH_Helper.Models
                     Width = c.Width,
                     Height = c.Height,
                     AttachedToNodeId = c.AttachedToNodeId,
+                    Kind = c.Kind,
+                    Anchor = c.Anchor == null ? null : new CanvasCommentAnchor
+                    {
+                        Type = c.Anchor.Type,
+                        StepPath = c.Anchor.StepPath,
+                        LineOffset = c.Anchor.LineOffset,
+                    },
                 }).ToList(),
                 DisabledBlockIds = new List<string>(DisabledBlockIds),
+                ExpandedNodeIds = new List<string>(ExpandedNodeIds),
             };
         }
     }
@@ -60,6 +73,12 @@ namespace SSH_Helper.Models
     {
         public double X { get; set; }
         public double Y { get; set; }
+
+        /// <summary>Stable structural key (e.g. "steps/2/then/0"); null for pre-migration layouts.</summary>
+        public string? StepPath { get; set; }
+
+        /// <summary>Block type at save time; pairs with StepPath to form the match tuple.</summary>
+        public string? BlockType { get; set; }
     }
 
     public class CanvasComment
@@ -72,5 +91,20 @@ namespace SSH_Helper.Models
         public double Width { get; set; } = 200;
         public double Height { get; set; } = 100;
         public string? AttachedToNodeId { get; set; }
+        /// <summary>
+        /// 'comment' (exports as a # line) or 'sticky' (visual-only). Defaults to 'sticky' when absent.
+        /// </summary>
+        public string? Kind { get; set; }
+        /// <summary>
+        /// Anchor describing how the comment attaches to a specific step position.
+        /// </summary>
+        public CanvasCommentAnchor? Anchor { get; set; }
+    }
+
+    public class CanvasCommentAnchor
+    {
+        public string? Type { get; set; }
+        public string? StepPath { get; set; }
+        public int? LineOffset { get; set; }
     }
 }

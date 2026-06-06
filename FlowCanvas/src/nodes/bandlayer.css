@@ -1,0 +1,13 @@
+/* Branch-band drag handles (the label pill). The grip dots (⠿) occupy space always so the pill
+   doesn't reflow, but are invisible until the pill is hovered. */
+.fc-band-grip {
+  opacity: 0;
+  letter-spacing: -1px;
+  transition: opacity 120ms ease;
+}
+.fc-band-handle:hover .fc-band-grip {
+  opacity: 0.9;
+}
+.fc-band-handle:active {
+  cursor: grabbing;
+}

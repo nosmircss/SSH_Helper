@@ -7,6 +7,8 @@ import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import type { DataBlockTestResult } from '../stores/slices/executionSlice';
 import { mix } from '../utils/tokens';
 import { branchColorVar } from '../utils/branchBands';
+import { CommentProperties } from './CommentProperties';
+import type { CommentNodeData } from '../nodes/CommentNode';
 
 /**
  * Buffered text-like input state that avoids stale blur commits.
@@ -1602,6 +1604,10 @@ export default function Properties() {
         onLabelChange={updateLabel}
       />
     );
+  }
+
+  if (selectedNodeId && node && node.type === 'comment') {
+    return <CommentProperties nodeId={selectedNodeId} data={blockData as unknown as CommentNodeData} />;
   }
 
   if (!node || !def || !blockData || !selectedNodeId) {

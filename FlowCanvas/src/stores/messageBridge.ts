@@ -11,7 +11,9 @@ import type { NodeDiagnostic } from './slices/uiSlice';
 import { isConnectionAllowed } from '../utils/connectionRules';
 import type { ConnectionVerdict } from '../utils/connectionRules';
 import type { Connection } from '@xyflow/react';
-import { computeHierarchicalLayout } from '../utils/layout/hierarchicalLayout';
+import { computeHierarchicalLayout, placeNewBlocksNearNeighbors } from '../utils/layout/hierarchicalLayout';
+import { placeAnchoredComments } from '../utils/layout/placeAnchoredComments';
+import type { CanvasSettings } from './slices/settingsSlice';
 
 interface FlowCanvasTestHooks {
   onOutgoingMessage?: (msg: unknown) => void;
@@ -130,12 +132,22 @@ export function initMessageBridge(): () => void {
         store.getState().setEdges(msg.edges as Edge[]);
         ensureStartNodeExists(store);
 
-        // No saved arrangement → lay it out with the structure-aware engine. Compute then
-        // setNodes once (synchronous, before paint) so there is no flash of raw positions.
-        const hasUserLayout = (msg as { hasUserLayout?: boolean }).hasUserLayout === true;
-        if (!hasUserLayout) {
-          const s = store.getState();
-          store.getState().setNodes(computeHierarchicalLayout(s.nodes, s.edges));
+        // Mode-aware layout: the host tells us the preset's mode and what to do on this load.
+        const layoutMode = (msg as { layoutMode?: string }).layoutMode === 'manual' ? 'manual' : 'auto';
+        const layoutAction = (msg as { layoutAction?: string }).layoutAction === 'keep' ? 'keep' : 'reflow';
+        const rawNewIds = (msg as { newNodeIds?: unknown[] }).newNodeIds;
+        const newNodeIds: string[] = Array.isArray(rawNewIds) ? rawNewIds.map(String) : [];
+        store.getState().restoreLayoutMode(layoutMode); // host-driven, no echo
+
+        const s = store.getState();
+        const sizing = { blockWidth: s.blockWidth, density: s.density, textScale: s.textScale, compactComments: s.compactCommentsEnabled };
+        if (layoutAction === 'reflow') {
+          store.getState().setNodes(computeHierarchicalLayout(s.nodes, s.edges, sizing));
+        } else {
+          // Manual keep: positions already merged by the host. Place only the new blocks near their
+          // neighbor, then (re-)anchor comments above their block/band.
+          const placed = placeNewBlocksNearNeighbors(s.nodes, s.edges, new Set(newNodeIds), sizing);
+          store.getState().setNodes(placeAnchoredComments(placed, store.getState().compactCommentsEnabled));
         }
 
         resetGraphSessionState(store);
@@ -152,6 +164,12 @@ export function initMessageBridge(): () => void {
         if (disabledIds.length > 0) {
           state.restoreDisabledBlocks(disabledIds);
         }
+        const expandedIds: string[] = [];
+        for (const node of state.nodes) {
+          const data = node.data as Record<string, unknown> | undefined;
+          if (data?.expanded === true) expandedIds.push(node.id);
+        }
+        if (expandedIds.length > 0) state.restoreExpandedNodes(expandedIds);
       }
     }),
 
@@ -372,7 +390,7 @@ export function initMessageBridge(): () => void {
       // Intentionally ignored: canvas is always dark regardless of main app theme
     }),
 
-    // Restore panel sizes from WinForms persisted settings
+    // Restore panel sizes and canvas settings from WinForms persisted settings
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.layoutRestore, (msg) => {
       if (msg.panelSizes && typeof msg.panelSizes === 'object') {
         const sizes: Record<string, number> = {};
@@ -381,9 +399,23 @@ export function initMessageBridge(): () => void {
         }
         store.getState().restorePanelSizes(sizes);
       }
-      if (typeof msg.heatmapEnabled === 'boolean') {
-        store.getState().restoreHeatmapEnabled(msg.heatmapEnabled);
+      if (typeof msg.heatmapEnabled === 'boolean') store.getState().restoreHeatmapEnabled(msg.heatmapEnabled);
+      // Restore the global DEFAULT mode (settings popover). The active preset's mode arrives via
+      // load-graph (restoreLayoutMode), so this only seeds the default shown in settings.
+      if (msg.defaultLayoutMode === 'auto' || msg.defaultLayoutMode === 'manual') {
+        store.getState().restoreDefaultLayoutMode(msg.defaultLayoutMode);
       }
+
+      const cs: Partial<CanvasSettings> = {};
+      if (typeof msg.blockWidth === 'number' && msg.blockWidth > 0) cs.blockWidth = msg.blockWidth;
+      if (typeof msg.textScale === 'number' && msg.textScale > 0) cs.textScale = msg.textScale;
+      if (typeof msg.density === 'number' && msg.density > 0) cs.density = msg.density;
+      if (typeof msg.defaultBlockExpanded === 'boolean') cs.defaultBlockExpanded = msg.defaultBlockExpanded;
+      if (Object.keys(cs).length > 0) store.getState().restoreCanvasSettings(cs);
+
+      if (typeof msg.snapToGrid === 'boolean') store.getState().restoreSnapToGrid(msg.snapToGrid);
+      if (typeof msg.branchBandsEnabled === 'boolean') store.getState().restoreBranchBands(msg.branchBandsEnabled);
+      if (typeof msg.compactCommentsEnabled === 'boolean') store.getState().restoreCompactComments(msg.compactCommentsEnabled);
     }),
 
     // Restore UI prefs from WinForms persisted settings (no echo back to host)
