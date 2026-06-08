@@ -274,43 +274,11 @@ function FlowCanvasInner() {
     ? [...selectedNodeIds][0]
     : null;
 
-  // Walk backward through the flow to find the nearest send/interactive block
-  // that produced SSH output. Extract/Print/etc. operate on the output of the
-  // preceding send command, so clicking them should show that send's output.
-  const OUTPUT_BLOCK_TYPES = new Set(['send', 'interactive']);
-  const outputSourceId = useMemo(() => {
-    if (!firstSelectedId) return null;
-    const nodeMap = new Map(nodes.map(n => [n.id, n]));
-    // Build a reverse adjacency map (target -> sources)
-    const parentMap = new Map<string, string[]>();
-    for (const e of edges) {
-      const list = parentMap.get(e.target) || [];
-      list.push(e.source);
-      parentMap.set(e.target, list);
-    }
-    // If the selected node itself is a send/interactive with output, use it
-    const selectedNode = nodeMap.get(firstSelectedId);
-    if (selectedNode && OUTPUT_BLOCK_TYPES.has((selectedNode.data as any)?.blockType)) {
-      if (blockOutputs.get(firstSelectedId)?.length) return firstSelectedId;
-    }
-    // BFS backward to find the nearest send/interactive ancestor with output
-    const visited = new Set<string>();
-    const queue = [firstSelectedId];
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (visited.has(current)) continue;
-      visited.add(current);
-      const parents = parentMap.get(current) || [];
-      for (const pid of parents) {
-        const pnode = nodeMap.get(pid);
-        if (pnode && OUTPUT_BLOCK_TYPES.has((pnode.data as any)?.blockType)) {
-          if (blockOutputs.get(pid)?.length) return pid;
-        }
-        queue.push(pid);
-      }
-    }
-    return null;
-  }, [firstSelectedId, nodes, edges, blockOutputs]);
+  // The output pane mirrors the SELECTED block's own per-step output. The executor
+  // computes that per block (a send shows its own output; a container/non-send shows the
+  // output of the send preceding its start), so the pane shows exactly that — blank when
+  // the block carried nothing, never walking to a neighbour's output.
+  const outputSourceId = firstSelectedId;
 
   const selectedOutput = outputSourceId
     ? blockOutputs.get(outputSourceId)

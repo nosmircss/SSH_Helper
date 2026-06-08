@@ -74,6 +74,16 @@ namespace SSH_Helper.Services.Scripting
     {
         private readonly Dictionary<StepType, IScriptCommand> _commands;
 
+        // Container steps re-enter the executor to run nested steps. After they finish,
+        // ScriptContext.LastCommandOutput holds the output of a send nested INSIDE them, so
+        // their block must instead report the output carried from the send preceding the
+        // container's start. Leaf steps keep LastCommandOutput as-is.
+        private static readonly HashSet<StepType> ContainerStepTypes = new()
+        {
+            StepType.If, StepType.Foreach, StepType.While, StepType.Repeat,
+            StepType.Try, StepType.Switch, StepType.Parallel, StepType.Call,
+        };
+
         /// <summary>
         /// Raised before a step begins execution.
         /// </summary>
@@ -96,14 +106,15 @@ namespace SSH_Helper.Services.Scripting
 
         internal ScriptExecutor(
             IBrowserCallbackUiHost? browserCallbackUiHost,
-            ILocalCmdConfirmation? localCmdConfirmation = null)
+            ILocalCmdConfirmation? localCmdConfirmation = null,
+            Func<ScriptContext, SendCommand.ISendCommandSession?>? sendSessionResolver = null)
         {
             browserCallbackUiHost ??= new BrowserCallbackUiHost(BrowserCallbackWebViewProfileManager.Shared);
 
             // Register command handlers
             _commands = new Dictionary<StepType, IScriptCommand>
             {
-                { StepType.Send, new SendCommand() },
+                { StepType.Send, sendSessionResolver is null ? new SendCommand() : new SendCommand(sendSessionResolver) },
                 { StepType.Print, new PrintCommand() },
                 { StepType.Wait, new WaitCommand() },
                 { StepType.Set, new SetCommand() },
@@ -344,9 +355,22 @@ namespace SSH_Helper.Services.Scripting
                         StepName = null
                     });
 
+                    // Output carried into this step = whatever the most recent send produced
+                    // before the step started. A container overwrites LastCommandOutput via a
+                    // nested send, so capture it now to report it instead.
+                    var carriedOutput = context.LastCommandOutput;
+
                     var sw = System.Diagnostics.Stopwatch.StartNew();
                     var result = await ExecuteStepAsync(step, context, cancellationToken);
                     sw.Stop();
+
+                    // A send block shows its own output (empty when it produced none). A non-send
+                    // leaf never changed LastCommandOutput, so it already holds the preceding
+                    // send's output. A container reports the send preceding its start, not the
+                    // nested send it just ran.
+                    var stepOutput = ContainerStepTypes.Contains(stepType)
+                        ? carriedOutput
+                        : context.LastCommandOutput;
 
                     // Fire step-completed event
                     StepCompleted?.Invoke(this, new StepExecutionEventArgs
@@ -357,7 +381,7 @@ namespace SSH_Helper.Services.Scripting
                         LineNumber = step.LineNumber,
                         StepName = null,
                         Success = result.Success,
-                        Output = context.LastCommandOutput,
+                        Output = stepOutput,
                         DurationMs = sw.ElapsedMilliseconds,
                         IterationCount = result.IterationCount,
                         BranchTaken = result.BranchTaken
