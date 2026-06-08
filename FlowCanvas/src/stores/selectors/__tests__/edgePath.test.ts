@@ -114,6 +114,40 @@ describe('selectEdgePathStatus', () => {
     expect(selectEdgePathStatus(state, 'then')).toBe('idle');
   });
 
+  // Live build: a branch arm lights AS the run reaches it, not only after the container completes
+  // and reports branchTaken. The child entering a non-idle state proves the arm was taken.
+  it('lights a branch arm on-path live while the container is still running, once its child is reached', () => {
+    const edges: Edge[] = [
+      { id: 'then', source: 'if-1', target: 't', data: { branchPath: 'then' } } as Edge,
+      { id: 'else', source: 'if-1', target: 'e', sourceHandle: 'false', data: { branchPath: 'else' } } as Edge,
+    ];
+    // Container still mid-execution (no branchTaken yet); the THEN child has entered 'running'.
+    const state = makeState({
+      edges, nodes: [ifNode],
+      blockStates: new Map([['if-1', 'running'], ['t', 'running']]),
+    });
+    expect(selectEdgePathStatus(state, 'then')).toBe('on-path'); // builds live
+    expect(selectEdgePathStatus(state, 'else')).toBe('idle');    // sibling unreached & unresolved
+  });
+
+  it('lights a branch arm live for a child that already completed inside a still-running container', () => {
+    const edges: Edge[] = [{ id: 'then', source: 'if-1', target: 't', data: { branchPath: 'then' } } as Edge];
+    const state = makeState({
+      edges, nodes: [ifNode],
+      blockStates: new Map([['if-1', 'running'], ['t', 'success']]),
+    });
+    expect(selectEdgePathStatus(state, 'then')).toBe('on-path');
+  });
+
+  it('lights a loop body arm on-path live once its child runs, before the loop completes', () => {
+    const edges: Edge[] = [{ id: 'body', source: 'loop-1', target: 'x', data: { branchPath: 'do' } } as Edge];
+    const state = makeState({
+      edges, nodes: [loopNode],
+      blockStates: new Map([['loop-1', 'running'], ['x', 'running']]),
+    });
+    expect(selectEdgePathStatus(state, 'body')).toBe('on-path');
+  });
+
   it('returns idle for branch edges when the conditional itself errored', () => {
     const edges: Edge[] = [{ id: 'then', source: 'if-1', target: 't', data: { branchPath: 'then' } } as Edge];
     const state = makeState({

@@ -89,6 +89,43 @@ test.describe('Flow Canvas Execution Path Highlight', () => {
     await expect(edgePath(page, 'edge-if-then')).toHaveClass(/fc-edge-onpath/);
   });
 
+  test('builds the neon path live: the taken arm lights before the container completes', async ({ page }) => {
+    // Drive the REAL message order: the container is still 'running' and the THEN child has just
+    // started — branchTaken has NOT been sent yet (it only rides the container's completion).
+    await postHostMessage(page, { type: 'execution-started' });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'if-1', state: 'running' });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'then-1', state: 'running' });
+
+    // The taken arm is already neon — the path builds AS the run reaches it, not at the end.
+    await expect(edgePath(page, 'edge-if-then')).toHaveClass(/fc-edge-onpath/);
+    // The untaken sibling is still dark: the branch hasn't resolved, so it is neither lit nor faded.
+    await expect(edgePath(page, 'edge-if-else')).not.toHaveClass(/fc-edge-onpath/);
+    await expect(edgePath(page, 'edge-if-else')).not.toHaveClass(/fc-edge-untaken/);
+
+    // Once the container completes (branchTaken arrives), the sibling fades to untaken.
+    await postHostMessage(page, { type: 'execution-update', stepId: 'then-1', state: 'success', duration: 10 });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'if-1', state: 'success', duration: 10, branchTaken: 'then' });
+    await expect(edgePath(page, 'edge-if-then')).toHaveClass(/fc-edge-onpath/);
+    await expect(edgePath(page, 'edge-if-else')).toHaveClass(/fc-edge-untaken/);
+  });
+
+  test('the single frontier dot rides the deepest running edge (a running container yields to its child)', async ({ page }) => {
+    const packetOn = (edgeId: string) =>
+      page.locator(`.react-flow__edge[data-id="${edgeId}"] circle.fc-edge-packet`);
+
+    await postHostMessage(page, { type: 'execution-started' });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'if-1', state: 'running' });
+    // Before any child runs, the dot is on the way INTO the container.
+    await expect(packetOn('edge-start-if')).toHaveCount(1);
+    await expect(packetOn('edge-if-then')).toHaveCount(0);
+
+    // The THEN child starts: control is now deeper, so the container yields its incoming dot and the
+    // single dot moves to the if→then edge — never two dots at once.
+    await postHostMessage(page, { type: 'execution-update', stepId: 'then-1', state: 'running' });
+    await expect(packetOn('edge-start-if')).toHaveCount(0);
+    await expect(packetOn('edge-if-then')).toHaveCount(1);
+  });
+
   test('Clear Path resets the edges but keeps node result badges', async ({ page }) => {
     await runThenBranch(page);
     await expect(edgePath(page, 'edge-if-then')).toHaveClass(/fc-edge-onpath/);

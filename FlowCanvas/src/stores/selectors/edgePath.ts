@@ -70,6 +70,26 @@ export function selectEdgeIsBranch(state: FlowStore, edgeId: string): boolean {
 }
 
 /**
+ * Is this edge the SINGLE live frontier for the run packet (the travelling dot)? True when the
+ * edge's target block is currently running AND control has not descended past it — i.e. the target
+ * has no running successor. While a container is running, its only running successors are its
+ * children (its continuation sibling has not been reached yet), so "has a running successor" means
+ * "control is deeper inside" — and that running child's own incoming edge carries the dot instead.
+ * This keeps exactly one dot, on the DEEPEST running block, so nested containers yield their
+ * incoming dot rather than showing a second one. Edge-derived (no _stepPath dependency) so it holds
+ * for canvas-built and imported graphs alike, at any nesting depth. Returns a boolean →
+ * referentially stable, no extra renders.
+ */
+export function selectEdgeIsRunningFrontier(state: FlowStore, edgeId: string): boolean {
+  const edge = state.edges.find((e) => e.id === edgeId);
+  if (!edge) return false;
+  if (state.blockStates.get(edge.target) !== 'running') return false;
+  return !state.edges.some(
+    (e) => e.source === edge.target && state.blockStates.get(e.target) === 'running',
+  );
+}
+
+/**
  * Classify an edge against the last/current run: 'on-path' (traversed), 'untaken'
  * (a sibling branch that did not fire — faded), or 'idle' (never reached / hidden).
  *
@@ -96,9 +116,6 @@ export function selectEdgePathStatus(state: FlowStore, edgeId: string): EdgePath
     return targetState && targetState !== 'idle' ? 'on-path' : 'idle';
   }
 
-  const sourceState = state.blockStates.get(edge.source);
-  if (!sourceState || sourceState === 'idle' || sourceState === 'running') return 'idle';
-
   const sourceNode = state.nodes.find((n) => n.id === edge.source);
   const targetNode = state.nodes.find((n) => n.id === edge.target);
   const blockType = blockTypeOf(sourceNode);
@@ -109,6 +126,23 @@ export function selectEdgePathStatus(state: FlowStore, edgeId: string): EdgePath
   // specific arm against branchTaken.
   const branchPath = branchPathOf(edge);
   const isBranch = edgeIsBranch(edge, targetNode);
+
+  // Live build: a branch arm lights on-path the moment its child block is REACHED (any non-idle
+  // exec state), WITHOUT waiting for the container's completion. branchTaken arrives only on the
+  // container's completion message — long after the taken arm's child has started — so relying on
+  // it alone makes the whole branch neon snap in at the end. The child only runs when its arm is
+  // actually taken, so this is a safe live proxy: the taken arm lights as the run reaches it; the
+  // untaken arm's child never runs (stays idle) so it falls through to the branchTaken logic below,
+  // which fades it once the container resolves. (Plain/spine edges already build live via the
+  // sourceState pass-through below; only branch arms were blocked by the container staying
+  // 'running' for the whole time its children execute.)
+  if (isBranch) {
+    const targetState = state.blockStates.get(edge.target);
+    if (targetState && targetState !== 'idle') return 'on-path';
+  }
+
+  const sourceState = state.blockStates.get(edge.source);
+  if (!sourceState || sourceState === 'idle' || sourceState === 'running') return 'idle';
 
   if (!isBranch) {
     // Plain successor / container continuation: traversed only if the source completed

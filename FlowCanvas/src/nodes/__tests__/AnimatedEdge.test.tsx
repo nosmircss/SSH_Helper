@@ -125,7 +125,7 @@ describe('AnimatedEdge run packet', () => {
     expect(hasPacket(elseArm.container)).toBe(false);
   });
 
-  it('animates the packet on an edge once control reaches its target', () => {
+  it('animates the packet on the single edge whose target is currently running (the live frontier)', () => {
     const edges: Edge[] = [{ id: 'e1', source: 'node-1', target: 'node-2' } as Edge];
     setStore({ edges, isRunning: true, blockStates: new Map([['node-2', 'running']]) });
 
@@ -133,14 +133,23 @@ describe('AnimatedEdge run packet', () => {
     expect(hasPacket(container)).toBe(true);
   });
 
-  it('keeps the trail continuous across a skipped/disabled target', () => {
-    // Disabled and when:-guard-skipped steps emit no 'running' update — only a completion
-    // with state skipped/disabled. The edge into them must still animate or the trail breaks.
+  it('does not leave a dot behind on a completed edge (the neon trail carries it, not the dot)', () => {
+    // The frontier dot moves on; the edge it left is now a solid neon on-path wire, no dot.
+    const edges: Edge[] = [{ id: 'e1', source: 'node-1', target: 'node-2' } as Edge];
+    setStore({ edges, isRunning: true, blockStates: new Map([['node-2', 'success']]) });
+
+    const { container } = renderEdge({ ...baseProps });
+    expect(hasPacket(container)).toBe(false);
+  });
+
+  it('does not put a dot on a skipped/disabled target (the neon overlay keeps that segment lit)', () => {
+    // Disabled / when:-guard-skipped steps never enter 'running', so the frontier dot skips them;
+    // the on-path neon (driven separately by selectEdgePathStatus) keeps the trail continuous.
     const edges: Edge[] = [{ id: 'e1', source: 'node-1', target: 'node-2' } as Edge];
     setStore({ edges, isRunning: true, blockStates: new Map([['node-2', 'disabled']]) });
 
     const { container } = renderEdge({ ...baseProps });
-    expect(hasPacket(container)).toBe(true);
+    expect(hasPacket(container)).toBe(false);
   });
 
   it('does not animate a packet on an edge whose target has not been reached', () => {
@@ -159,5 +168,46 @@ describe('AnimatedEdge run packet', () => {
 
     setStore({ edges, isRunning: true, reducedMotion: true, blockStates: new Map([['node-2', 'running']]) });
     expect(hasPacket(renderEdge({ ...baseProps }).container)).toBe(false);
+  });
+
+  it('rides only the deepest running edge — a running container yields its dot to its running child', () => {
+    const edges: Edge[] = [
+      { id: 'into-if', source: 'p', target: 'if-1' } as Edge,
+      { id: 'if-then', source: 'if-1', target: 't', data: { branchPath: 'then' } } as Edge,
+    ];
+    setStore({ edges, isRunning: true, blockStates: new Map([['if-1', 'running'], ['t', 'running']]) });
+
+    const intoIf = renderEdge({ ...baseProps, id: 'into-if', source: 'p', target: 'if-1' });
+    const ifThen = renderEdge({ ...baseProps, id: 'if-then', source: 'if-1', target: 't' });
+    expect(hasPacket(intoIf.container)).toBe(false); // container yields its incoming dot
+    expect(hasPacket(ifThen.container)).toBe(true);  // deepest running edge keeps the single dot
+  });
+
+  it('keeps the dot on a container incoming edge until a child actually starts running', () => {
+    const edges: Edge[] = [
+      { id: 'into-if', source: 'p', target: 'if-1' } as Edge,
+      { id: 'if-then', source: 'if-1', target: 't', data: { branchPath: 'then' } } as Edge,
+    ];
+    // Container running, but no child has started yet — the dot belongs on the way in.
+    setStore({ edges, isRunning: true, blockStates: new Map([['if-1', 'running']]) });
+
+    const intoIf = renderEdge({ ...baseProps, id: 'into-if', source: 'p', target: 'if-1' });
+    expect(hasPacket(intoIf.container)).toBe(true);
+  });
+
+  it('rides the deepest edge through multiple nesting levels', () => {
+    // if-1 ▸ loop-1 ▸ send-1, all running. Only the innermost edge (loop-1 → send-1) carries the dot.
+    const edges: Edge[] = [
+      { id: 'into-if', source: 'p', target: 'if-1' } as Edge,
+      { id: 'if-loop', source: 'if-1', target: 'loop-1', data: { branchPath: 'then' } } as Edge,
+      { id: 'loop-send', source: 'loop-1', target: 'send-1', data: { branchPath: 'do' } } as Edge,
+    ];
+    setStore({
+      edges, isRunning: true,
+      blockStates: new Map([['if-1', 'running'], ['loop-1', 'running'], ['send-1', 'running']]),
+    });
+    expect(hasPacket(renderEdge({ ...baseProps, id: 'into-if', source: 'p', target: 'if-1' }).container)).toBe(false);
+    expect(hasPacket(renderEdge({ ...baseProps, id: 'if-loop', source: 'if-1', target: 'loop-1' }).container)).toBe(false);
+    expect(hasPacket(renderEdge({ ...baseProps, id: 'loop-send', source: 'loop-1', target: 'send-1' }).container)).toBe(true);
   });
 });
