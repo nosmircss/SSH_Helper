@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 // ── Minimal stubs for @xyflow/react (data-position exposes the handle's side) ──
@@ -136,6 +136,27 @@ describe('BaseBlock — just-placed entrance highlight', () => {
   it('shouldClearJustPlaced ignores the entrance pulse once the flag is already cleared', () => {
     expect(shouldClearJustPlaced(JUST_PLACED_ANIMATION, false)).toBe(false);
     expect(shouldClearJustPlaced(JUST_PLACED_ANIMATION, undefined)).toBe(false);
+  });
+});
+
+describe('BaseBlock — breakpoint gutter', () => {
+  it('renders the breakpoint gutter on a top-level block', () => {
+    renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
+    expect(screen.getByTitle('Toggle breakpoint')).toBeInTheDocument();
+  });
+
+  it('renders the breakpoint gutter on a child (nested) block so breakpoints work inside loops/containers', () => {
+    renderNode({ data: { blockType: 'send', label: 'Send', props: { _isChildOf: 'loop-1', _stepPath: 'steps/0/do/0' } } as any });
+    expect(screen.getByTitle('Toggle breakpoint')).toBeInTheDocument();
+  });
+
+  it('toggles the breakpoint when the gutter on a nested block is clicked', () => {
+    const toggle = vi.fn();
+    mock.state.toggleBreakpoint = toggle;
+    renderNode({ id: 'child-1', data: { blockType: 'send', label: 'Send', props: { _isChildOf: 'loop-1', _stepPath: 'steps/0/do/0' } } as any });
+    fireEvent.click(screen.getByTitle('Toggle breakpoint'));
+    expect(toggle).toHaveBeenCalledWith('child-1');
+    mock.state.toggleBreakpoint = () => {}; // restore for other tests
   });
 });
 

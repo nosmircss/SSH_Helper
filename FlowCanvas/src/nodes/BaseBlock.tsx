@@ -322,22 +322,21 @@ function BaseBlock({ data, selected, id }: NodeProps) {
 
       {/* Header */}
       <div style={headerStyle}>
-        {/* Breakpoint gutter */}
-        {!isChild && (
-          <span
-            onClick={handleBreakpointToggle}
-            style={{
-              width: 10, height: 10, borderRadius: '50%',
-              background: hasBreakpoint ? 'var(--fc-state-error)' : 'transparent',
-              border: hasBreakpoint ? 'none' : '1px solid var(--fc-border-subtle)',
-              flexShrink: 0,
-              cursor: 'pointer',
-              boxShadow: hasBreakpoint ? '0 0 4px var(--fc-glow-error)' : 'none',
-              transition: 'background 0.15s',
-            }}
-            title="Toggle breakpoint"
-          />
-        )}
+        {/* Breakpoint gutter — shown on every block (incl. nested children) so breakpoints
+            can be set inside loops/containers; the executor pauses by step path at any depth. */}
+        <span
+          onClick={handleBreakpointToggle}
+          style={{
+            width: 10, height: 10, borderRadius: '50%',
+            background: hasBreakpoint ? 'var(--fc-state-error)' : 'transparent',
+            border: hasBreakpoint ? 'none' : '1px solid var(--fc-border-subtle)',
+            flexShrink: 0,
+            cursor: 'pointer',
+            boxShadow: hasBreakpoint ? '0 0 4px var(--fc-glow-error)' : 'none',
+            transition: 'background 0.15s',
+          }}
+          title="Toggle breakpoint"
+        />
 
         {/* Category-tinted icon chip */}
         <span style={iconChipStyle}>
