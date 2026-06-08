@@ -7,7 +7,7 @@ import { selectEdgePathStatus, selectEdgeIsBranch } from '../stores/selectors/ed
 import './animatededge.css';
 
 function AnimatedEdge(props: EdgeProps) {
-  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, source, style } = props;
+  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, target, style } = props;
 
   const isRunning = useFlowStore((s) => s.isRunning);
   const blockStates = useFlowStore((s) => s.blockStates);
@@ -37,8 +37,16 @@ function AnimatedEdge(props: EdgeProps) {
   const color = (typeof style?.stroke === 'string' ? style.stroke : undefined) ?? 'var(--fc-edge-idle)';
   const markerId = markerIdForStroke(color);
 
-  const sourceState = blockStates.get(source);
-  const active = isRunning && (sourceState === 'success' || sourceState === 'running');
+  // The run packet rides an edge only once control has REACHED its target block (any non-idle
+  // exec state). Keying on the TARGET — not the source — is what keeps the dot off undecided and
+  // untaken branches: a branch's child enters 'running' on its own only when that arm is actually
+  // taken, so unvisited arms (their children stay idle) never animate, with no dependency on the
+  // late branchTaken signal. 'skipped'/'disabled' count as reached so the trail stays continuous
+  // across a disabled or when:-guard-skipped block (those emit no 'running'); 'error' counts too —
+  // control did arrive at a failed leaf. Mirrors selectEdgePathStatus, which is 'idle' while a
+  // source is still running.
+  const targetState = blockStates.get(target);
+  const active = isRunning && targetState !== undefined && targetState !== 'idle';
 
   const gradientId = `fc-grad-${id}`;
 

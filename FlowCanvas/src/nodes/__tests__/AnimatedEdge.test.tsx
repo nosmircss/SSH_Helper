@@ -41,6 +41,10 @@ function pathClass(container: HTMLElement): string {
   return container.querySelector('.react-flow__edge-path')?.getAttribute('class') ?? '';
 }
 
+function hasPacket(container: HTMLElement): boolean {
+  return container.querySelector('circle.fc-edge-packet') !== null;
+}
+
 describe('AnimatedEdge path overlay', () => {
   beforeEach(() => setStore({}));
 
@@ -89,5 +93,71 @@ describe('AnimatedEdge path overlay', () => {
 
     const { container } = renderEdge({ ...baseProps, style: { stroke: 'var(--fc-edge-idle)' } });
     expect(pathClass(container)).not.toContain('fc-edge-onpath');
+  });
+});
+
+describe('AnimatedEdge run packet', () => {
+  beforeEach(() => setStore({}));
+
+  const ifEdges: Edge[] = [
+    { id: 'e1', source: 'if-1', target: 't', data: { branchPath: 'then' } } as Edge,
+    { id: 'e2', source: 'if-1', target: 'e', sourceHandle: 'false', data: { branchPath: 'else' } } as Edge,
+  ];
+  const ifNodes: Node[] = [{ id: 'if-1', position: { x: 0, y: 0 }, data: { blockType: 'if' } } as Node];
+
+  it('does not animate a packet on the arms of a running IF before a branch is taken', () => {
+    // IF is mid-execution; neither branch child has started, so both stay idle.
+    setStore({ edges: ifEdges, nodes: ifNodes, isRunning: true, blockStates: new Map([['if-1', 'running']]) });
+
+    const thenArm = renderEdge({ ...baseProps, id: 'e1', source: 'if-1', target: 't' });
+    const elseArm = renderEdge({ ...baseProps, id: 'e2', source: 'if-1', target: 'e' });
+    expect(hasPacket(thenArm.container)).toBe(false);
+    expect(hasPacket(elseArm.container)).toBe(false);
+  });
+
+  it('animates the packet only on the taken arm once its child block runs', () => {
+    // THEN child has entered 'running'; the ELSE child is never visited and stays idle.
+    setStore({ edges: ifEdges, nodes: ifNodes, isRunning: true, blockStates: new Map([['if-1', 'running'], ['t', 'running']]) });
+
+    const thenArm = renderEdge({ ...baseProps, id: 'e1', source: 'if-1', target: 't' });
+    const elseArm = renderEdge({ ...baseProps, id: 'e2', source: 'if-1', target: 'e' });
+    expect(hasPacket(thenArm.container)).toBe(true);
+    expect(hasPacket(elseArm.container)).toBe(false);
+  });
+
+  it('animates the packet on an edge once control reaches its target', () => {
+    const edges: Edge[] = [{ id: 'e1', source: 'node-1', target: 'node-2' } as Edge];
+    setStore({ edges, isRunning: true, blockStates: new Map([['node-2', 'running']]) });
+
+    const { container } = renderEdge({ ...baseProps });
+    expect(hasPacket(container)).toBe(true);
+  });
+
+  it('keeps the trail continuous across a skipped/disabled target', () => {
+    // Disabled and when:-guard-skipped steps emit no 'running' update — only a completion
+    // with state skipped/disabled. The edge into them must still animate or the trail breaks.
+    const edges: Edge[] = [{ id: 'e1', source: 'node-1', target: 'node-2' } as Edge];
+    setStore({ edges, isRunning: true, blockStates: new Map([['node-2', 'disabled']]) });
+
+    const { container } = renderEdge({ ...baseProps });
+    expect(hasPacket(container)).toBe(true);
+  });
+
+  it('does not animate a packet on an edge whose target has not been reached', () => {
+    const edges: Edge[] = [{ id: 'e1', source: 'node-1', target: 'node-2' } as Edge];
+    setStore({ edges, isRunning: true, blockStates: new Map([['node-1', 'success']]) });
+
+    const { container } = renderEdge({ ...baseProps });
+    expect(hasPacket(container)).toBe(false);
+  });
+
+  it('never animates a packet when not running or under reduced motion', () => {
+    const edges: Edge[] = [{ id: 'e1', source: 'node-1', target: 'node-2' } as Edge];
+
+    setStore({ edges, isRunning: false, blockStates: new Map([['node-2', 'running']]) });
+    expect(hasPacket(renderEdge({ ...baseProps }).container)).toBe(false);
+
+    setStore({ edges, isRunning: true, reducedMotion: true, blockStates: new Map([['node-2', 'running']]) });
+    expect(hasPacket(renderEdge({ ...baseProps }).container)).toBe(false);
   });
 });
