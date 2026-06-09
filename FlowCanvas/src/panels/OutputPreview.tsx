@@ -7,6 +7,7 @@
  */
 import { useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
+import { selectIterationScope } from '../stores/selectors/iterationScope';
 import RunOutputView from './RunOutputView';
 
 interface OutputPreviewProps {
@@ -30,6 +31,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
   const poppedOut = useFlowStore((s) => s.runOutputPoppedOut);
   const closeWindow = useFlowStore((s) => s.closeRunOutputWindow);
   const [historyIndex, setHistoryIndex] = useState(-1); // -1 = latest
+  const iterScope = useFlowStore((s) => (nodeId ? selectIterationScope(s, nodeId) : null));
   const [height, setHeight] = useState(storeHeight);
   const heightRef = useRef(height);
   const dragging = useRef(false);
@@ -54,10 +56,14 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
     else togglePanel('output');
   };
 
-  // Reset history index when selected node changes
+  // Iteration stepper sync: a selected iteration pins the viewer to that iteration's
+  // output entry; returning to ALL (or changing the selected node) returns to the latest.
   useEffect(() => {
-    setHistoryIndex(-1);
-  }, [nodeId]);
+    if (!nodeId) return;
+    if (!iterScope) { setHistoryIndex(-1); return; }
+    const idx = iterScope.nodes.get(nodeId)?.outputIdx;
+    setHistoryIndex(idx != null ? idx : -1);
+  }, [iterScope, nodeId]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();

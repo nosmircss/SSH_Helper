@@ -7,6 +7,7 @@ import { nodeBorderColor, resolveNodeShadow } from '../utils/nodeStyle';
 import { summarizeBlock } from '../utils/blockSummary';
 import { BLOCK_WIDTH_INSET } from '../utils/nodeSize';
 import { BlockIcon } from './BlockIcon';
+import { selectIterationScope, selectVisibleIterations, LOOP_TYPES } from '../stores/selectors/iterationScope';
 import './baseblock.css';
 import './execution-cinematics.css';
 
@@ -100,8 +101,21 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     s.blockTimings.forEach((t) => { if (t.duration && t.duration > max) max = t.duration; });
     return max;
   });
-  const loopIteration = useFlowStore((s) => s.loopIterations.get(id));
-  const branchTakenKey = useFlowStore((s) => s.branchTaken.get(id));
+  const loopIterationAggregate = useFlowStore((s) => s.loopIterations.get(id));
+  const branchTakenAggregate = useFlowStore((s) => s.branchTaken.get(id));
+  // Iteration scoping: when an ancestor loop has a selected iteration, this block's
+  // indicator/badges/duration show that single iteration. Display-only and transient —
+  // node.data is never written. The governing record is referentially stable between
+  // store changes, so this selector doesn't churn renders.
+  const iterScope = useFlowStore((s) => selectIterationScope(s, id));
+  const scopedEntry = iterScope?.nodes.get(id);
+  const isLoopBlock = LOOP_TYPES.has(blockData.blockType);
+  // An inner loop's ×N under an outer selection = its iterations within that outer iteration.
+  const scopedInnerCount = useFlowStore((s) =>
+    iterScope && isLoopBlock ? selectVisibleIterations(s, id).length : null,
+  );
+  const loopIteration = iterScope ? (scopedInnerCount ?? undefined) : loopIterationAggregate;
+  const branchTakenKey = iterScope ? scopedEntry?.branchTaken : branchTakenAggregate;
   const isExpanded = useFlowStore((s) => s.isExpanded(id));
   const toggleExpanded = useFlowStore((s) => s.toggleExpanded);
   const selectNode = useFlowStore((s) => s.selectNode);
@@ -140,9 +154,11 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   // Duration badge: settled value after completion. While running, the live ticker (read above)
   // drives the badge; on completion it locks to the measured duration.
   const timing = blockTimings.get(id);
-  const durationMs = timing?.duration;
+  const durationMs = iterScope ? scopedEntry?.duration : timing?.duration;
+  // Not reached in the selected iteration → render as idle (chip hidden).
+  const displayExecState = iterScope ? (scopedEntry?.state ?? 'idle') : execState;
   const durationText = durationMs != null ? formatDuration(durationMs) : null;
-  const badgeText = execState === 'running' ? liveText : durationText;
+  const badgeText = displayExecState === 'running' ? liveText : durationText;
 
   // Run-heatmap tint: only on idle/success blocks so it never overrides the
   // running pulse or the error glow (precedence). Render-time only — never
@@ -237,21 +253,21 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     flexShrink: 0,
   };
 
-  const execIndicator = execState !== 'idle' && execState !== 'disabled' ? (
+  const execIndicator = displayExecState !== 'idle' && displayExecState !== 'disabled' ? (
     <span style={{
       fontSize: 9,
       marginLeft: 'auto',
       display: 'flex',
       alignItems: 'center',
       gap: 3,
-      color: execState === 'running' ? 'var(--fc-accent)'
-        : execState === 'success' ? 'var(--fc-state-success)'
-        : execState === 'skipped' ? 'var(--fc-text-secondary)'
+      color: displayExecState === 'running' ? 'var(--fc-accent)'
+        : displayExecState === 'success' ? 'var(--fc-state-success)'
+        : displayExecState === 'skipped' ? 'var(--fc-text-secondary)'
         : 'var(--fc-state-error)',
       fontWeight: 600,
     }}>
-      {execState === 'running' ? 'RUNNING'
-        : execState === 'success' ? (
+      {displayExecState === 'running' ? 'RUNNING'
+        : displayExecState === 'success' ? (
           <>
             <svg className="fc-check" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">
               <path d="M5 13l4 4L19 7" pathLength={1} />
@@ -259,7 +275,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
             DONE
           </>
         )
-        : execState === 'skipped' ? '— SKIP'
+        : displayExecState === 'skipped' ? '— SKIP'
         : '✗ ERROR'}
       {badgeText && (
         <span data-testid="exec-duration-badge" style={{
