@@ -4,6 +4,14 @@ import { selectVisibleIterations } from '../stores/selectors/iterationScope';
 import { mix } from '../utils/tokens';
 import type { BranchBand } from '../utils/branchBands';
 
+/** Scrubber appears when the visible iteration count exceeds this. */
+const SCRUBBER_THRESHOLD = 20;
+/** Above this many ticks, each tick becomes a bucket of iterations. */
+const MAX_TICKS = 60;
+/** Horizontal clearances along the band's top edge (px): past the LOOP pill / reserved for the cluster. */
+const SCRUB_LEFT = 86;
+const SCRUB_RIGHT_RESERVE = 230;
+
 const chip: CSSProperties = {
   borderRadius: 999, padding: '2px 7px', cursor: 'pointer',
   font: 'inherit', letterSpacing: '0.05em',
@@ -66,21 +74,71 @@ export default function IterationCluster({ band }: IterationClusterProps) {
   const label = current ? (current.label ?? `#${current.i + 1}`) : null;
   const counter = pos < 0 ? `${visible.length}` : `${pos + 1}/${visible.length}`;
 
+  const showScrubber = visible.length > SCRUBBER_THRESHOLD;
+  const bucketSize = showScrubber ? Math.ceil(visible.length / MAX_TICKS) : 1;
+  const buckets: { startPos: number; failed: boolean; active: boolean }[] = [];
+  if (showScrubber) {
+    for (let b = 0; b * bucketSize < visible.length; b++) {
+      const start = b * bucketSize;
+      const end = Math.min(visible.length, start + bucketSize);
+      buckets.push({
+        startPos: start,
+        failed: visible.slice(start, end).some((r) => r.failed),
+        active: pos >= start && pos < end,
+      });
+    }
+  }
+
   return (
-    <div
-      data-testid="iteration-cluster"
-      // Lives inside the ViewportPortal (the React Flow pane): without this, a click on any
-      // chip bubbles to the pane, clearing the selection / arming box-select (same guard as
-      // the band drag handle in BranchBandsLayer).
-      onPointerDown={(e) => e.stopPropagation()}
-      style={{
-        position: 'absolute',
-        transform: `translate(calc(${band.x + band.width - 8}px - 100%), ${band.y - 11}px)`,
-        display: 'flex', alignItems: 'center', gap: 4,
-        zIndex: 6, pointerEvents: 'auto',
-        font: '600 9px/1.4 system-ui, sans-serif',
-      }}
-    >
+    <>
+      {showScrubber && (
+        <div
+          data-testid="iter-scrubber"
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            transform: `translate(${band.x + SCRUB_LEFT}px, ${band.y - 8}px)`,
+            width: Math.max(60, band.width - SCRUB_LEFT - SCRUB_RIGHT_RESERVE),
+            height: 15, display: 'flex', alignItems: 'center', gap: 1,
+            background: 'var(--fc-surface-0)',
+            border: `1px solid ${mix(band.colorVar, 45)}`,
+            borderRadius: 999, padding: '0 6px',
+            zIndex: 6, pointerEvents: 'auto',
+          }}
+        >
+          {buckets.map((bk, idx) => (
+            <span
+              key={idx}
+              data-testid="iter-tick"
+              onClick={() => setSelection(loopId, visible[bk.startPos].seq)}
+              title={`${visible[bk.startPos].label ?? `#${visible[bk.startPos].i + 1}`} · ${bk.startPos + 1}/${visible.length}`}
+              style={{
+                flex: 1, minWidth: 2, borderRadius: 2, cursor: 'pointer',
+                height: bk.active ? 11 : bk.failed ? 8 : 6,
+                background: bk.active
+                  ? 'var(--fc-edge-traversed)'
+                  : bk.failed
+                    ? 'var(--fc-state-error)'
+                    : mix(band.colorVar, 35),
+              }}
+            />
+          ))}
+        </div>
+      )}
+      <div
+        data-testid="iteration-cluster"
+        // Lives inside the ViewportPortal (the React Flow pane): without this, a click on any
+        // chip bubbles to the pane, clearing the selection / arming box-select (same guard as
+        // the band drag handle in BranchBandsLayer).
+        onPointerDown={(e) => e.stopPropagation()}
+        style={{
+          position: 'absolute',
+          transform: `translate(calc(${band.x + band.width - 8}px - 100%), ${band.y - 11}px)`,
+          display: 'flex', alignItems: 'center', gap: 4,
+          zIndex: 6, pointerEvents: 'auto',
+          font: '600 9px/1.4 system-ui, sans-serif',
+        }}
+      >
       <button
         data-testid="iter-all"
         onClick={() => setSelection(loopId, null)}
@@ -138,5 +196,6 @@ export default function IterationCluster({ band }: IterationClusterProps) {
         </span>
       )}
     </div>
+    </>
   );
 }

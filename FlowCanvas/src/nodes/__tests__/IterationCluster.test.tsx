@@ -103,3 +103,27 @@ describe('IterationCluster', () => {
     expect(screen.getByTestId('iter-counter').textContent).toBe('3/3');
   });
 });
+
+describe('IterationCluster — scrubber', () => {
+  it('appears above 20 iterations, not at 20', () => {
+    seed(20);
+    const first = render(<IterationCluster band={band} />);
+    expect(screen.queryByTestId('iter-scrubber')).toBeNull();
+    first.unmount();
+
+    seed(21);
+    render(<IterationCluster band={band} />);
+    expect(screen.getByTestId('iter-scrubber')).not.toBeNull();
+  });
+
+  it('buckets ticks at 60 max and clicking a tick selects its first iteration', () => {
+    seed(200, [150]);
+    render(<IterationCluster band={band} />);
+    const ticks = screen.getAllByTestId('iter-tick');
+    expect(ticks.length).toBeLessThanOrEqual(60);
+
+    fireEvent.click(ticks[0]);
+    const records = useFlowStore.getState().iterationLog.get('L')!;
+    expect(useFlowStore.getState().iterationSelections.get('L')).toBe(records[0].seq);
+  });
+});
