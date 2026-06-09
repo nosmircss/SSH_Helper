@@ -33,64 +33,73 @@ namespace SSH_Helper.Services.Scripting.Commands
             int iteration = 0;
             int executed = 0;
 
-            while (iteration < maxIterations)
+            context.PushIterationFrame(step.StepPath ?? string.Empty, -1);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Evaluate expression directly; ExpressionEvaluator resolves variables.
-                var condition = step.While;
-                var result = evaluator.Evaluate(condition);
-
-                if (!result)
+                while (iteration < maxIterations)
                 {
-                    context.EmitOutput($"While: condition false after {iteration} iteration(s)", ScriptOutputType.Debug);
-                    break;
-                }
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                if (iteration == 0)
-                {
-                    context.EmitOutput($"While: entering loop", ScriptOutputType.Debug);
-                }
+                    // Evaluate expression directly; ExpressionEvaluator resolves variables.
+                    var condition = step.While;
+                    var result = evaluator.Evaluate(condition);
 
-                // Set iteration variable
-                context.SetVariable("_iteration", iteration);
+                    if (!result)
+                    {
+                        context.EmitOutput($"While: condition false after {iteration} iteration(s)", ScriptOutputType.Debug);
+                        break;
+                    }
 
-                // Execute the 'do' block
-                var execResult = await _executor.ExecuteStepsAsync(step.Do, context, cancellationToken, context.LoopDepth + 1);
-                executed++;
+                    if (iteration == 0)
+                    {
+                        context.EmitOutput($"While: entering loop", ScriptOutputType.Debug);
+                    }
 
-                // Handle control flow
-                if (execResult.ShouldExit)
-                {
-                    execResult.IterationCount = executed;
-                    return execResult;
-                }
+                    // Set iteration variable
+                    context.SetVariable("_iteration", iteration);
+                    context.SetCurrentIterationFrame(iteration);
 
-                if (execResult.ShouldReturn)
-                {
-                    execResult.IterationCount = executed;
-                    return execResult;
-                }
+                    // Execute the 'do' block
+                    var execResult = await _executor.ExecuteStepsAsync(step.Do, context, cancellationToken, context.LoopDepth + 1);
+                    executed++;
 
-                if (execResult.ShouldBreak)
-                {
-                    context.EmitOutput($"While: break after {iteration + 1} iteration(s)", ScriptOutputType.Debug);
-                    break;
-                }
+                    // Handle control flow
+                    if (execResult.ShouldExit)
+                    {
+                        execResult.IterationCount = executed;
+                        return execResult;
+                    }
 
-                if (execResult.ShouldContinue)
-                {
+                    if (execResult.ShouldReturn)
+                    {
+                        execResult.IterationCount = executed;
+                        return execResult;
+                    }
+
+                    if (execResult.ShouldBreak)
+                    {
+                        context.EmitOutput($"While: break after {iteration + 1} iteration(s)", ScriptOutputType.Debug);
+                        break;
+                    }
+
+                    if (execResult.ShouldContinue)
+                    {
+                        iteration++;
+                        continue;
+                    }
+
+                    if (!execResult.Success)
+                    {
+                        execResult.IterationCount = executed;
+                        return execResult;
+                    }
+
                     iteration++;
-                    continue;
                 }
-
-                if (!execResult.Success)
-                {
-                    execResult.IterationCount = executed;
-                    return execResult;
-                }
-
-                iteration++;
+            }
+            finally
+            {
+                context.PopIterationFrame();
             }
 
             if (iteration >= maxIterations)

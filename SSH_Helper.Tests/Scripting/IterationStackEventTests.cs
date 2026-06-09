@@ -188,4 +188,115 @@ public class IterationStackEventTests
         var after = events.Single(e => e.StepPath == "steps/1");
         (after.IterationStack ?? new List<IterationFrame>()).Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task While_TagsNestedEvents_PerIteration_NoLabel()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("n", 0);
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    While = "n < 3",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new() { Set = "n = n + 1", StepPath = "steps/0/do/0" }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var bodyEvents = events.Where(e => e.StepPath == "steps/0/do/0").ToList();
+        bodyEvents.Should().HaveCount(3);
+        bodyEvents.Select(e => e.IterationStack![0].Index).Should().Equal(0, 1, 2);
+        bodyEvents.Should().OnlyContain(e => e.IterationStack![0].Label == null);
+        bodyEvents.Should().OnlyContain(e => e.IterationStack![0].LoopStepPath == "steps/0");
+    }
+
+    [Fact]
+    public async Task Repeat_TagsNestedEvents_PerIteration_NoLabel()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("n", 0);
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Until = "n >= 3",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new() { Set = "n = n + 1", StepPath = "steps/0/do/0" }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var bodyEvents = events.Where(e => e.StepPath == "steps/0/do/0").ToList();
+        bodyEvents.Should().HaveCount(3);
+        bodyEvents.Select(e => e.IterationStack![0].Index).Should().Equal(0, 1, 2);
+        bodyEvents.Should().OnlyContain(e => e.IterationStack![0].Label == null);
+        bodyEvents.Should().OnlyContain(e => e.IterationStack![0].LoopStepPath == "steps/0");
+    }
+
+    [Fact]
+    public async Task NestedLoops_StackTwoFramesDeep()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("outer", "[\"o1\",\"o2\"]");
+        context.SetVariable("inner", "[\"i1\",\"i2\",\"i3\"]");
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Foreach = "o in outer",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new()
+                        {
+                            Foreach = "v in inner",
+                            StepPath = "steps/0/do/0",
+                            Do = new List<ScriptStep>
+                            {
+                                new() { Set = "last = v", StepPath = "steps/0/do/0/do/0" }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var leaf = events.Where(e => e.StepPath == "steps/0/do/0/do/0").ToList();
+        leaf.Should().HaveCount(6); // 2 outer × 3 inner
+
+        foreach (var e in leaf)
+        {
+            e.IterationStack.Should().HaveCount(2);
+            e.IterationStack![0].LoopStepPath.Should().Be("steps/0");
+            e.IterationStack![1].LoopStepPath.Should().Be("steps/0/do/0");
+        }
+        // Inner index restarts per outer iteration.
+        leaf.Select(e => (e.IterationStack![0].Index, e.IterationStack![1].Index))
+            .Should().Equal((0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2));
+
+        // The inner loop's OWN completions carry just the outer frame (its own frame popped).
+        var innerLoopEvents = events.Where(e => e.StepPath == "steps/0/do/0").ToList();
+        innerLoopEvents.Should().HaveCount(2);
+        innerLoopEvents.Select(e => e.IterationStack!.Single().Index).Should().Equal(0, 1);
+    }
 }
