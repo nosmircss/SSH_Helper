@@ -11,6 +11,7 @@ const KIND_COLOR: Record<string, string> = {
   banner: 'var(--fc-host-accent)',
   error: 'var(--fc-state-error)',
   normal: 'var(--fc-term-text)',
+  plain: 'var(--fc-term-text)', // color toggle off — no per-line classification
 };
 
 export default function RunOutputView() {
@@ -23,6 +24,7 @@ export default function RunOutputView() {
   const toggleWrap = useFlowStore((s) => s.toggleRunOutputWrap);
   const toggleFollow = useFlowStore((s) => s.toggleRunOutputFollow);
   const togglePoppedOut = useFlowStore((s) => s.toggleRunOutputPoppedOut);
+  const poppedOut = useFlowStore((s) => s.runOutputPoppedOut);
 
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
@@ -38,7 +40,10 @@ export default function RunOutputView() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const lines = useMemo(() => (color ? runOutput.split('\n') : null), [color, runOutput]);
+  // Split into lines and strip the trailing CR of each CRLF pair. The \r is a line-ending
+  // artifact (the main form's TextBox doesn't show it either); leaving it on causes a
+  // CR-only blank line ("\r") to collapse in a white-space:pre div, dropping blank lines.
+  const lines = useMemo(() => runOutput.split('\n').map((l) => l.replace(/\r$/, '')), [runOutput]);
 
   // Stick-to-bottom while following.
   useEffect(() => {
@@ -80,7 +85,10 @@ export default function RunOutputView() {
         <ToolbarButton testid="run-output-btn-wrap" active={wrap} onClick={toggleWrap} title="Word wrap">↵ Wrap</ToolbarButton>
         <ToolbarButton testid="run-output-btn-color" active={color} onClick={toggleColor} title="Colorize output">🎨 Color</ToolbarButton>
         <ToolbarButton testid="run-output-btn-copy" active={false} onClick={() => navigator.clipboard.writeText(runOutput)} title="Copy all">⧉ Copy</ToolbarButton>
-        <ToolbarButton testid="run-output-btn-popout" active={false} onClick={togglePoppedOut} title="Pop out / dock">⤢ Pop out</ToolbarButton>
+        {/* When popped out, the overlay's own Dock button replaces this — hide it to avoid redundancy. */}
+        {!poppedOut && (
+          <ToolbarButton testid="run-output-btn-popout" active={false} onClick={togglePoppedOut} title="Pop out">⤢ Pop out</ToolbarButton>
+        )}
       </div>
 
       {findOpen && (
@@ -115,10 +123,11 @@ export default function RunOutputView() {
         {!hasOutput && (
           <div style={{ color: 'var(--fc-text-muted)' }}>No run output yet — run a script to see it here.</div>
         )}
-        {hasOutput && color && (
+        {hasOutput && (
           <div>
-            {lines!.map((line, i) => {
-              const kind = classifyRunOutputLine(line);
+            {lines.map((line, i) => {
+              // color off -> 'plain' (no classification colors); find highlight still applies in both modes.
+              const kind = color ? classifyRunOutputLine(line) : 'plain';
               return (
                 <div key={i} data-testid="run-output-line" data-kind={kind} style={{ color: KIND_COLOR[kind], whiteSpace }}>
                   {highlight(line, findQuery)}
@@ -126,9 +135,6 @@ export default function RunOutputView() {
               );
             })}
           </div>
-        )}
-        {hasOutput && !color && (
-          <pre data-testid="run-output-plain" style={{ margin: 0, color: 'var(--fc-term-text)', whiteSpace, fontFamily: 'inherit' }}>{runOutput}</pre>
         )}
       </div>
     </div>

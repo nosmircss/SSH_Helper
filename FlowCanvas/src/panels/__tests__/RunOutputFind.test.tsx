@@ -22,7 +22,7 @@ vi.mock('../../stores/useFlowStore', () => ({
 import RunOutputView from '../RunOutputView';
 
 describe('RunOutputView find', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => { mock.state.runOutputColor = true; vi.clearAllMocks(); });
 
   it('opens the find box when Find is clicked', () => {
     render(<RunOutputView />);
@@ -45,5 +45,13 @@ describe('RunOutputView find', () => {
     act(() => { fireEvent.click(screen.getByTestId('run-output-btn-find')); }); // close
     expect(screen.queryByTestId('run-output-find-input')).toBeNull();
     expect(document.querySelectorAll('mark').length).toBe(0);
+  });
+
+  it('highlights matches in plain (color-off) mode too', () => {
+    mock.state.runOutputColor = false;
+    render(<RunOutputView />);
+    act(() => { fireEvent.click(screen.getByTestId('run-output-btn-find')); });
+    fireEvent.change(screen.getByTestId('run-output-find-input'), { target: { value: 'bravo' } });
+    expect(document.querySelectorAll('mark').length).toBe(2);
   });
 });

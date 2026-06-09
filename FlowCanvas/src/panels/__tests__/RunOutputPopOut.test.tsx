@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 
 const mock = vi.hoisted(() => ({
@@ -52,5 +52,26 @@ describe('RunOutputPopOut', () => {
     expect(removeSpy).toHaveBeenCalledWith('mousemove', expect.any(Function));
     expect(removeSpy).toHaveBeenCalledWith('mouseup', expect.any(Function));
     removeSpy.mockRestore();
+  });
+
+  it('resizes the overlay when the corner handle is dragged', () => {
+    render(<RunOutputPopOut />);
+    const panel = screen.getByTestId('run-output-popout');
+    expect(panel.style.width).toBe('520px');
+    expect(panel.style.height).toBe('300px');
+    fireEvent.mouseDown(screen.getByTestId('run-output-popout-resize'), { clientX: 700, clientY: 360 });
+    act(() => { window.dispatchEvent(new MouseEvent('mousemove', { clientX: 760, clientY: 420 })); });
+    expect(screen.getByTestId('run-output-popout').style.width).toBe('580px'); // 520 + 60
+    expect(screen.getByTestId('run-output-popout').style.height).toBe('360px'); // 300 + 60
+    act(() => { window.dispatchEvent(new MouseEvent('mouseup')); });
+  });
+
+  it('does not shrink below the minimum size', () => {
+    render(<RunOutputPopOut />);
+    fireEvent.mouseDown(screen.getByTestId('run-output-popout-resize'), { clientX: 700, clientY: 360 });
+    act(() => { window.dispatchEvent(new MouseEvent('mousemove', { clientX: 0, clientY: 0 })); });
+    expect(screen.getByTestId('run-output-popout').style.width).toBe('260px'); // clamped to MIN_W
+    expect(screen.getByTestId('run-output-popout').style.height).toBe('140px'); // clamped to MIN_H
+    act(() => { window.dispatchEvent(new MouseEvent('mouseup')); });
   });
 });
