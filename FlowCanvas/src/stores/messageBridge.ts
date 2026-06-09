@@ -288,6 +288,17 @@ export function initMessageBridge(): () => void {
       }
     }),
 
+    // Full run output — live mirror of the main form's output box
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.runOutput, (msg) => {
+      if (typeof msg.chunk === 'string' && msg.chunk.length > 0) {
+        store.getState().appendRunOutput(msg.chunk);
+      }
+    }),
+
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.runOutputClear, () => {
+      store.getState().clearRunOutput();
+    }),
+
     // Test step result (single-step execution)
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.testStepResult, (msg) => {
       const state = store.getState();
