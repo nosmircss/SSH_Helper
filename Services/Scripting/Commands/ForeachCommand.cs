@@ -39,6 +39,16 @@ namespace SSH_Helper.Services.Scripting.Commands
             return DictPattern.IsMatch(expr) || ForeachPattern.IsMatch(expr);
         }
 
+        private const int MaxLabelLength = 48;
+
+        private static string? TruncateLabel(string? value)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            return value!.Length <= MaxLabelLength
+                ? value
+                : value.Substring(0, MaxLabelLength - 1) + "…";
+        }
+
         public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(step.Foreach))
@@ -65,7 +75,8 @@ namespace SSH_Helper.Services.Scripting.Commands
                     {
                         context.SetVariable(keyName, entries[i].Key);
                         context.SetVariable(valueName, entries[i].Value);
-                    });
+                    },
+                    labelFor: i => TruncateLabel(entries[i].Key));
             }
 
             // Single form: "item in collection"
@@ -80,7 +91,8 @@ namespace SSH_Helper.Services.Scripting.Commands
                 count: items.Count,
                 metadataPrefix: itemVarName,
                 iterationNames: new[] { itemVarName },
-                setIteration: i => context.SetVariable(itemVarName, items[i]));
+                setIteration: i => context.SetVariable(itemVarName, items[i]),
+                labelFor: i => TruncateLabel(items[i]));
         }
 
         private async Task<CommandResult> IterateAsync(
@@ -90,7 +102,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             int count,
             string metadataPrefix,
             IReadOnlyList<string> iterationNames,
-            Action<int> setIteration)
+            Action<int> setIteration,
+            Func<int, string?>? labelFor = null)
         {
             context.EmitOutput($"Foreach: iterating {count} item(s)", ScriptOutputType.Debug);
 
@@ -112,6 +125,11 @@ namespace SSH_Helper.Services.Scripting.Commands
             var evaluator = new ExpressionEvaluator(context);
             int executed = 0;
 
+            // Iteration frame: tags every nested step event with (loop path, index, item label)
+            // so the canvas can attribute events to iterations. Index -1 until the first
+            // iteration starts; no events fire in that window.
+            context.PushIterationFrame(step.StepPath ?? string.Empty, -1);
+
             try
             {
                 for (int index = 0; index < count; index++)
@@ -124,6 +142,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     context.SetVariable($"{metadataPrefix}_first", index == 0);
                     context.SetVariable($"{metadataPrefix}_last", index == count - 1);
                     context.SetVariable($"{metadataPrefix}_count", count);
+                    context.SetCurrentIterationFrame(index, labelFor?.Invoke(index));
 
                     if (!string.IsNullOrEmpty(step.When))
                     {
@@ -158,6 +177,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
             finally
             {
+                context.PopIterationFrame();
                 foreach (var name in scopedNames)
                 {
                     var (existed, value) = saved[name];
