@@ -72,6 +72,51 @@ describe('iterationSlice — recordIterationEvent', () => {
     expect(useFlowStore.getState().totalIterations.get('L')).toBe(5);
   });
 
+  it('never mutates a previously captured record (copy-on-write integrity)', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    rec('A', [F('L', 0)], { state: 'running' });
+    const captured = useFlowStore.getState().iterationLog.get('L')![0];
+
+    rec('A', [F('L', 0)], { state: 'success', duration: 7 });
+
+    // The captured snapshot is frozen; the new state holds the updated record.
+    expect(captured.nodes.get('A')!.state).toBe('running');
+    const current = useFlowStore.getState().iterationLog.get('L')![0];
+    expect(current.nodes.get('A')!.state).toBe('success');
+  });
+
+  it('running then success in the same iteration ends success (non-error last-write-wins)', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    rec('A', [F('L', 0)], { state: 'running' });
+    rec('A', [F('L', 0)], { state: 'success' });
+
+    const records = useFlowStore.getState().iterationLog.get('L')!;
+    expect(records).toHaveLength(1);
+    expect(records[0].nodes.get('A')!.state).toBe('success');
+  });
+
+  it('records multiple nodes into the same iteration record', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    rec('A', [F('L', 0)], { state: 'success', duration: 3 });
+    rec('B', [F('L', 0)], { state: 'error' });
+
+    const records = useFlowStore.getState().iterationLog.get('L')!;
+    expect(records).toHaveLength(1);
+    expect(records[0].nodes.get('A')).toMatchObject({ state: 'success', duration: 3 });
+    expect(records[0].nodes.get('B')).toMatchObject({ state: 'error' });
+    expect(records[0].failed).toBe(true);
+  });
+
+  it('leaves untouched loops referentially identical across unrelated events', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    rec('A', [F('M', 0)], { state: 'success' });
+    const mRecords = useFlowStore.getState().iterationLog.get('M');
+
+    rec('B', [F('L', 0)], { state: 'success' });
+
+    expect(useFlowStore.getState().iterationLog.get('M')).toBe(mRecords);
+  });
+
   it('ignores malformed frames and empty stacks', () => {
     const rec = useFlowStore.getState().recordIterationEvent;
     rec('A', [], { state: 'success' });

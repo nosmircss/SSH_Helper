@@ -97,6 +97,9 @@ export const createIterationSlice: StateCreator<FlowStore, [], [], IterationSlic
         };
         records.push(rec);
         if (records.length > s.iterationHistoryCap) {
+          // Evicting an outer record can leave inner records with a dangling parent.seq;
+          // consumers resolve parents via seq lookup and must tolerate a missing record
+          // (terminate the walk) — do NOT chase children on evict.
           records.splice(0, records.length - s.iterationHistoryCap);
         }
       }
