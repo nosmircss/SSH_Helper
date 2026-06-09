@@ -11,6 +11,8 @@ const mock = vi.hoisted(() => ({
     outputTab: 'block' as 'block' | 'run',
     setOutputTab: vi.fn((t: 'block' | 'run') => { mock.state.outputTab = t; }),
     runOutputUnread: false,
+    runOutputPoppedOut: false,
+    closeRunOutputWindow: vi.fn(),
     // RunOutputView selectors (used when the run tab is active):
     runOutput: '',
     isRunning: false,
@@ -20,6 +22,7 @@ const mock = vi.hoisted(() => ({
     toggleRunOutputColor: vi.fn(),
     toggleRunOutputWrap: vi.fn(),
     toggleRunOutputFollow: vi.fn(),
+    openRunOutputWindow: vi.fn(),
   } as any,
 }));
 
@@ -37,6 +40,7 @@ describe('OutputPreview tabs', () => {
   beforeEach(() => {
     mock.state.outputTab = 'block';
     mock.state.runOutputUnread = false;
+    mock.state.runOutputPoppedOut = false;
     vi.clearAllMocks();
   });
 
@@ -74,5 +78,13 @@ describe('OutputPreview tabs', () => {
     mock.state.outputTab = 'run';
     renderPanel();
     expect(screen.queryByTestId('output-tab-run-unread')).toBeNull();
+  });
+
+  it('clicking the Run tab while popped out docks back (closeRunOutputWindow)', () => {
+    mock.state.runOutputPoppedOut = true;
+    mock.state.outputTab = 'block';
+    renderPanel();
+    screen.getByTestId('output-tab-run').click();
+    expect(mock.state.closeRunOutputWindow).toHaveBeenCalledTimes(1);
   });
 });

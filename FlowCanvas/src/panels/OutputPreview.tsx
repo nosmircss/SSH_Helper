@@ -28,6 +28,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
   const setOutputTab = useFlowStore((s) => s.setOutputTab);
   const runOutputUnread = useFlowStore((s) => s.runOutputUnread);
   const poppedOut = useFlowStore((s) => s.runOutputPoppedOut);
+  const closeWindow = useFlowStore((s) => s.closeRunOutputWindow);
   const [historyIndex, setHistoryIndex] = useState(-1); // -1 = latest
   const [height, setHeight] = useState(storeHeight);
   const heightRef = useRef(height);
@@ -132,7 +133,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
         <TabButton testid="output-tab-block" active={outputTab === 'block'} onClick={() => setOutputTab('block')}>
           Block Output
         </TabButton>
-        <TabButton testid="output-tab-run" active={outputTab === 'run'} onClick={() => setOutputTab('run')}>
+        <TabButton testid="output-tab-run" active={outputTab === 'run'} onClick={() => (poppedOut ? closeWindow() : setOutputTab('run'))}>
           Run Output
           {runOutputUnread && outputTab !== 'run' && (
             <span data-testid="output-tab-run-unread" style={{
@@ -207,9 +208,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
           </pre>
         </>
       ) : (
-        poppedOut
-          ? <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fc-text-muted)', fontSize: 11 }}>Run Output is popped out</div>
-          : <RunOutputView />
+        <RunOutputView />
       )}
     </div>
   );
