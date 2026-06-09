@@ -434,6 +434,11 @@ export function initMessageBridge(): () => void {
       if (typeof msg.snapToGrid === 'boolean') store.getState().restoreSnapToGrid(msg.snapToGrid);
       if (typeof msg.branchBandsEnabled === 'boolean') store.getState().restoreBranchBands(msg.branchBandsEnabled);
       if (typeof msg.compactCommentsEnabled === 'boolean') store.getState().restoreCompactComments(msg.compactCommentsEnabled);
+      store.getState().restoreRunOutputPrefs({
+        runOutputColor: typeof msg.runOutputColor === 'boolean' ? msg.runOutputColor : undefined,
+        runOutputWrap: typeof msg.runOutputWrap === 'boolean' ? msg.runOutputWrap : undefined,
+        runOutputFollow: typeof msg.runOutputFollow === 'boolean' ? msg.runOutputFollow : undefined,
+      });
     }),
 
     // Restore UI prefs from WinForms persisted settings (no echo back to host)
