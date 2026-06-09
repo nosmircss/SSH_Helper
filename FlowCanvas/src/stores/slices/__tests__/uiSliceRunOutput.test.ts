@@ -9,7 +9,7 @@ import { messageBus } from '../../../MessageBus';
 
 describe('uiSlice run-output view prefs', () => {
   beforeEach(() => {
-    useFlowStore.setState({ outputTab: 'block', runOutputColor: true, runOutputWrap: false, runOutputFollow: true, runOutputUnread: false });
+    useFlowStore.setState({ outputTab: 'block', runOutputColor: true, runOutputWrap: false, runOutputFollow: true, runOutputUnread: false, runOutputPoppedOut: false });
     vi.clearAllMocks();
   });
 
@@ -36,6 +36,12 @@ describe('uiSlice run-output view prefs', () => {
     expect(messageBus.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'layout-save', runOutputWrap: true }));
     useFlowStore.getState().toggleRunOutputFollow();
     expect(messageBus.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'layout-save', runOutputFollow: false }));
+  });
+
+  it('toggleRunOutputPoppedOut flips the floating-overlay flag', () => {
+    expect(useFlowStore.getState().runOutputPoppedOut).toBe(false);
+    useFlowStore.getState().toggleRunOutputPoppedOut();
+    expect(useFlowStore.getState().runOutputPoppedOut).toBe(true);
   });
 
   it('restore setters apply without echo', () => {

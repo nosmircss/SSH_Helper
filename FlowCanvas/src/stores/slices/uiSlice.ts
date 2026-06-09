@@ -52,6 +52,7 @@ export interface UISlice {
   runOutputWrap: boolean;
   runOutputFollow: boolean;
   runOutputUnread: boolean;
+  runOutputPoppedOut: boolean;
   exportStatus: {
     hasErrors: boolean;
     errors: string[];
@@ -95,6 +96,7 @@ export interface UISlice {
   toggleRunOutputWrap: () => void;
   toggleRunOutputFollow: () => void;
   restoreRunOutputPrefs: (prefs: Partial<{ runOutputColor: boolean; runOutputWrap: boolean; runOutputFollow: boolean }>) => void;
+  toggleRunOutputPoppedOut: () => void;
   setExportStatus: (status: UISlice['exportStatus']) => void;
   clearExportStatus: () => void;
   setDiagnostics: (d: NodeDiagnostic[]) => void;
@@ -131,6 +133,7 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   runOutputWrap: false,
   runOutputFollow: true,
   runOutputUnread: false,
+  runOutputPoppedOut: false,
   exportStatus: {
     hasErrors: false,
     errors: [],
@@ -315,6 +318,8 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     runOutputWrap: prefs.runOutputWrap ?? s.runOutputWrap,
     runOutputFollow: prefs.runOutputFollow ?? s.runOutputFollow,
   })),
+
+  toggleRunOutputPoppedOut: () => set((s) => ({ runOutputPoppedOut: !s.runOutputPoppedOut })),
 
   setExportStatus: (status) => {
     set({ exportStatus: status });
