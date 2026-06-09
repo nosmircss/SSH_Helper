@@ -7,11 +7,9 @@ import { messageBus } from '../MessageBus';
 import { useFlowStore } from './useFlowStore';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 
-// Module-level cleanup so re-initing (e.g. StrictMode double-effect) removes old handlers first.
-let _cleanup: (() => void) | null = null;
-
+// Returns a cleanup the caller owns (matches initMessageBridge). RunOutputWindowApp calls this in
+// a useEffect, so React's own cleanup handles StrictMode's mount→cleanup→mount double-invoke.
 export function initRunOutputWindowBridge(): () => void {
-  _cleanup?.();
   const store = useFlowStore;
   const unsubs = [
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.runOutput, (msg) => {
@@ -37,6 +35,5 @@ export function initRunOutputWindowBridge(): () => void {
     }),
   ];
   messageBus.sendReady();
-  _cleanup = () => unsubs.forEach((u) => u());
-  return _cleanup;
+  return () => unsubs.forEach((u) => u());
 }

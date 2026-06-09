@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 vi.mock('../../utils/layoutAutosave', () => ({ sendLayoutAutosave: vi.fn(), flushLayoutAutosave: vi.fn() }));
 vi.mock('../../MessageBus', () => {
   const handlers = new Map<string, Set<(m: any) => void>>();
@@ -28,10 +28,14 @@ const emit = (m: any) => (messageBus as any).__emit(m);
 describe('runOutputWindowBridge', () => {
   let cleanup: () => void;
   beforeEach(() => {
+    vi.clearAllMocks();
     useFlowStore.getState().clearRunOutput();
     useFlowStore.getState().setRunning(false);
     cleanup = initRunOutputWindowBridge();
   });
+  // Tear down each init's handlers so they don't accumulate across tests (the bridge returns its
+  // own cleanup now — no module-level dedup).
+  afterEach(() => cleanup());
 
   it('sends ready on init', () => {
     expect(messageBus.sendReady).toHaveBeenCalled();
@@ -53,6 +57,5 @@ describe('runOutputWindowBridge', () => {
     emit({ type: 'layout-restore', runOutputColor: false, runOutputWrap: true });
     expect(useFlowStore.getState().runOutputColor).toBe(false);
     expect(useFlowStore.getState().runOutputWrap).toBe(true);
-    cleanup();
   });
 });
