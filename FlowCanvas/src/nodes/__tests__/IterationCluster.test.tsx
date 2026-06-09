@@ -73,4 +73,33 @@ describe('IterationCluster', () => {
     const records = useFlowStore.getState().iterationLog.get('L')!;
     expect(useFlowStore.getState().iterationSelections.get('L')).toBe(records[1].seq);
   });
+
+  it('shows the eviction hint when records were dropped under the history cap', () => {
+    const prevCap = useFlowStore.getState().iterationHistoryCap;
+    try {
+      useFlowStore.setState({ iterationHistoryCap: 2 });
+      seed(5);
+      render(<IterationCluster band={band} />);
+      expect(screen.getByTestId('iter-counter').textContent).toBe('2');
+      expect(screen.getByTestId('iter-evicted').textContent).toBe('of 5');
+    } finally {
+      useFlowStore.setState({ iterationHistoryCap: prevCap });
+    }
+  });
+
+  it('falls back to #N when an iteration has no label (while/repeat)', () => {
+    useFlowStore.getState().clearIterations();
+    useFlowStore.getState().recordIterationEvent('A', [{ loopId: 'L', i: 0 }], { state: 'success' });
+    render(<IterationCluster band={band} />);
+    fireEvent.click(screen.getByTestId('iter-next'));
+    expect(screen.getByTestId('iter-label').textContent).toBe('#1');
+  });
+
+  it('◀ from ALL jumps to the last iteration and ▶ clamps at the end', () => {
+    render(<IterationCluster band={band} />);
+    fireEvent.click(screen.getByTestId('iter-prev'));
+    expect(screen.getByTestId('iter-counter').textContent).toBe('3/3');
+    fireEvent.click(screen.getByTestId('iter-next'));
+    expect(screen.getByTestId('iter-counter').textContent).toBe('3/3');
+  });
 });

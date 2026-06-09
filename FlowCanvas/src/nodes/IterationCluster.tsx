@@ -69,6 +69,10 @@ export default function IterationCluster({ band }: IterationClusterProps) {
   return (
     <div
       data-testid="iteration-cluster"
+      // Lives inside the ViewportPortal (the React Flow pane): without this, a click on any
+      // chip bubbles to the pane, clearing the selection / arming box-select (same guard as
+      // the band drag handle in BranchBandsLayer).
+      onPointerDown={(e) => e.stopPropagation()}
       style={{
         position: 'absolute',
         transform: `translate(calc(${band.x + band.width - 8}px - 100%), ${band.y - 11}px)`,
@@ -130,7 +134,7 @@ export default function IterationCluster({ band }: IterationClusterProps) {
       )}
       {evicted && (
         <span data-testid="iter-evicted" style={{ color: 'var(--fc-text-secondary)' }}>
-          of {total}
+          of {total.toLocaleString()}
         </span>
       )}
     </div>
