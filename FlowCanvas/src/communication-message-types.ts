@@ -73,4 +73,16 @@ export interface ExecutionUpdateMessage {
   iterationCount?: number | null;
   /** Taken branch scope-key (if/switch), e.g. 'else', 'cases/2/do', 'elif/0/then'. */
   branchTaken?: string | null;
+  /** Live loop-iteration stack for this step event (outermost first); absent outside loops. */
+  iterationStack?: IterationFrameMsg[] | null;
+}
+
+/** One frame of a loop-iteration stack (outermost first), as sent by the host. */
+export interface IterationFrameMsg {
+  /** Canvas node id of the loop block. */
+  loopId: string;
+  /** 0-based iteration index within that loop. */
+  i: number;
+  /** Foreach item value (truncated host-side); null/absent for while/repeat. */
+  label?: string | null;
 }
