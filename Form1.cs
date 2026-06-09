@@ -13927,6 +13927,9 @@ namespace SSH_Helper
             ScrollOutputToEnd();
 
             // Mirror the same chunk into the Flow Canvas Run Output tab (no-op if closed).
+            // Forward RAW output, not NormalizeNewlinesForDisplay(output): the LF->CRLF fixup
+            // is specific to the WinForms TextBox sink; React renders bare \n natively, and
+            // normalizing here would double-convert CRLF in the canvas. Do not "fix" this.
             _flowCanvasForm?.SendRunOutputAppend(output);
         }
 
