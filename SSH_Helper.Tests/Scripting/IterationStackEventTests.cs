@@ -132,6 +132,34 @@ public class IterationStackEventTests
     }
 
     [Fact]
+    public async Task Foreach_TruncationDoesNotSplitSurrogatePairs()
+    {
+        // 46 z's then an emoji (surrogate pair at positions 46-47): a naive cut at 47
+        // would strand the high surrogate. The guard trims one extra char instead.
+        var item = new string('z', 46) + "\U0001F600" + new string('z', 10);
+        var context = new ScriptContext();
+        context.SetVariable("items", $"[\"{item}\"]");
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Foreach = "x in items",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep> { new() { Set = "last = x", StepPath = "steps/0/do/0" } }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var label = events.Single(e => e.StepPath == "steps/0/do/0").IterationStack![0].Label!;
+        char.IsHighSurrogate(label[label.Length - 2]).Should().BeFalse(); // char before '…' is not a stranded high surrogate
+        label.Should().EndWith("…");
+    }
+
+    [Fact]
     public async Task Foreach_StackIsPopped_AfterBreak()
     {
         var context = new ScriptContext();

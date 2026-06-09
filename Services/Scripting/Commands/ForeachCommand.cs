@@ -44,9 +44,10 @@ namespace SSH_Helper.Services.Scripting.Commands
         private static string? TruncateLabel(string? value)
         {
             if (string.IsNullOrEmpty(value)) return value;
-            return value!.Length <= MaxLabelLength
-                ? value
-                : value.Substring(0, MaxLabelLength - 1) + "…";
+            if (value!.Length <= MaxLabelLength) return value;
+            var cut = MaxLabelLength - 1;
+            if (char.IsHighSurrogate(value[cut - 1])) cut--;
+            return value.Substring(0, cut) + "…";
         }
 
         public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
