@@ -52,6 +52,11 @@ export function selectIterationScope(state: FlowStore, nodeId: string): Iteratio
 /**
  * The records of `loopId` visible under the current ancestor selections, time-ordered.
  * Unconstrained when no ancestor loop has a selection.
+ *
+ * Click-time only: invoked on selection changes and when a loop's iteration cluster
+ * renders (behind useMemo) — never on the per-edge render path. Returns a FRESH array
+ * every call (filter allocates), so callers must memoize the result; feeding it raw
+ * into a zustand selector would re-render on every store change.
  */
 export function selectVisibleIterations(state: FlowStore, loopId: string): IterationRecord[] {
   const records = state.iterationLog?.get(loopId) ?? [];
