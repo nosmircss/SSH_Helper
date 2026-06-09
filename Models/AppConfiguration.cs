@@ -523,6 +523,12 @@ namespace SSH_Helper.Models
         public bool? FlowCanvasRunOutputWrap { get; set; }
         public bool? FlowCanvasRunOutputFollow { get; set; }
 
+        // Detached Run Output window geometry (persisted across sessions; null = not yet set)
+        public int? FlowCanvasRunOutputWindowLeft { get; set; }
+        public int? FlowCanvasRunOutputWindowTop { get; set; }
+        public int? FlowCanvasRunOutputWindowWidth { get; set; }
+        public int? FlowCanvasRunOutputWindowHeight { get; set; }
+
         /// <summary>
         /// LEGACY: replaced by FlowCanvasDefaultLayoutMode. Still deserialized so the value can be
         /// migrated on load (the migration nulls it). The canvas write-back to this field is removed
