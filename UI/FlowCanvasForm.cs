@@ -439,7 +439,9 @@ namespace SSH_Helper.UI
             });
 
             var rm = ws.FlowCanvasReducedMotion;
-            if (rm.HasValue) SendMessage(new { type = "pref-restore", reducedMotion = rm.Value });
+            var iterCap = ws.FlowCanvasIterationHistoryCap;
+            if (rm.HasValue || iterCap.HasValue)
+                SendMessage(new { type = "pref-restore", reducedMotion = rm, iterationHistoryCap = iterCap });
         }
 
         private void SavePanelSizes(JObject? msg)
@@ -495,11 +497,13 @@ namespace SSH_Helper.UI
         {
             if (_configService == null) return;
             var v = msg["reducedMotion"]?.Value<bool>();
-            if (v == null) return;
+            var cap = msg["iterationHistoryCap"]?.Value<int>();
+            if (v == null && cap == null) return;
             _configService.Update(c =>
             {
                 c.WindowState ??= new Models.WindowState();
-                c.WindowState.FlowCanvasReducedMotion = v.Value;
+                if (v != null) c.WindowState.FlowCanvasReducedMotion = v.Value;
+                if (cap is > 0) c.WindowState.FlowCanvasIterationHistoryCap = cap.Value;
             });
         }
 

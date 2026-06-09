@@ -518,6 +518,9 @@ namespace SSH_Helper.Models
         public bool? FlowCanvasBranchBands { get; set; }
         public bool? FlowCanvasCompactComments { get; set; }
 
+        // Flow Canvas loop-iteration history cap (persisted from React UI; null = React default of 500)
+        public int? FlowCanvasIterationHistoryCap { get; set; }
+
         // Flow Canvas Run Output tab view prefs (persisted from React UI; null = use the React default)
         public bool? FlowCanvasRunOutputColor { get; set; }
         public bool? FlowCanvasRunOutputWrap { get; set; }

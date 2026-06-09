@@ -80,6 +80,8 @@ export default function SettingsPopover() {
   const toggleHeatmap = useFlowStore((s) => s.toggleHeatmap);
   const reducedMotion = useFlowStore((s) => s.reducedMotion);
   const toggleReducedMotion = useFlowStore((s) => s.toggleReducedMotion);
+  const iterationHistoryCap = useFlowStore((s) => s.iterationHistoryCap);
+  const setIterationHistoryCap = useFlowStore((s) => s.setIterationHistoryCap);
 
   useEffect(() => {
     if (!open) return;
@@ -95,6 +97,10 @@ export default function SettingsPopover() {
   const textOptions: readonly { label: string; v: number }[] = TEXT_SCALES.map((p) => ({ label: p.label, v: p.v as number }));
   const densityOptions: readonly { label: string; v: number }[] = DENSITIES.map((p) => ({ label: p.label, v: p.v as number }));
   const newBlocksOptions: readonly { label: string; v: number }[] = [{ label: 'Collapsed', v: 0 }, { label: 'Expanded', v: 1 }];
+  const iterationCapOptions: readonly { label: string; v: number }[] = [
+    { label: '100', v: 100 }, { label: '250', v: 250 }, { label: '500', v: 500 },
+    { label: '1k', v: 1000 }, { label: '5k', v: 5000 },
+  ];
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -127,6 +133,12 @@ export default function SettingsPopover() {
           <Segmented label="Block width" value={blockWidth} options={widthOptions} onChange={setBlockWidth} />
           <Segmented label="Text size" value={textScale} options={textOptions} onChange={setTextScale} />
           <Segmented label="Canvas density" value={density} options={densityOptions} onChange={setDensity} />
+          <Segmented
+            label="Loop history (iterations kept per loop)"
+            value={iterationHistoryCap}
+            options={iterationCapOptions}
+            onChange={setIterationHistoryCap}
+          />
           <Segmented
             label="New blocks"
             value={defaultBlockExpanded ? 1 : 0}
