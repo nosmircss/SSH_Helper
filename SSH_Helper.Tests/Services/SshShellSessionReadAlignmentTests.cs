@@ -165,5 +165,49 @@ namespace SSH_Helper.Tests.Services
 
             output.Should().Contain("Version: v7.2.1");
         }
+
+        [Fact]
+        public void Execute_AfterEnteringConfigSubmode_CurrentPromptTracksLivePrompt()
+        {
+            // Entering a FortiGate config submode changes the live prompt from "FG-VM64-KVM #"
+            // to "FG-VM64-KVM (setting) #". CurrentPrompt drives the displayed command prefix,
+            // the ${_prompt} variable, and trailing-prompt stripping, so it must reflect the
+            // real prompt the device is sitting at rather than staying frozen at the login one.
+            var responses = new Dictionary<string, string[]>
+            {
+                ["config log syslogd4 setting\r"] = new[] { " config log syslogd4 setting\r\r\n\r\nFG-VM64-KVM (setting) #" },
+            };
+            var stream = new FakeShellStream(responses);
+            using var session = CreateSession(stream);
+
+            session.CurrentPrompt.Should().Be(BasePrompt, "the session starts at the login prompt");
+
+            Run(session, "config log syslogd4 setting");
+
+            session.CurrentPrompt.Should().Be("FG-VM64-KVM (setting) #",
+                "the displayed prompt must follow the device into the config submode, not stay at login");
+        }
+
+        [Fact]
+        public void Execute_ExitingConfigSubmode_CurrentPromptReturnsToBasePrompt()
+        {
+            // The round trip: once submode tracking works, exiting it with `end` must restore the
+            // base prompt rather than leaving the display stuck on "(setting) #".
+            var responses = new Dictionary<string, string[]>
+            {
+                ["config log syslogd4 setting\r"] = new[] { " config log syslogd4 setting\r\r\n\r\nFG-VM64-KVM (setting) #" },
+                ["end\r"] = new[] { " end\r\r\n\r\nFG-VM64-KVM #" },
+            };
+            var stream = new FakeShellStream(responses);
+            using var session = CreateSession(stream);
+
+            Run(session, "config log syslogd4 setting");
+            session.CurrentPrompt.Should().Be("FG-VM64-KVM (setting) #");
+
+            Run(session, "end");
+
+            session.CurrentPrompt.Should().Be(BasePrompt,
+                "exiting the submode must return the displayed prompt to the base prompt");
+        }
     }
 }

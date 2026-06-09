@@ -849,7 +849,7 @@ namespace SSH_Helper.Services
                     {
                         EmitDebug($"Prompt regex matched! Command complete.");
                         promptMatched = true;
-                        UpdatePromptIfChanged(new StringBuilder(normalized));
+                        UpdatePromptTracking(new StringBuilder(normalized));
                         break;
                     }
                 }
@@ -1095,7 +1095,7 @@ namespace SSH_Helper.Services
                         {
                             matched = true;
                             // Update prompt if the output indicates a prompt change.
-                            UpdatePromptIfChanged(new StringBuilder(normalized));
+                            UpdatePromptTracking(new StringBuilder(normalized));
                             break;
                         }
                     }
@@ -1229,14 +1229,31 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Checks if the prompt has changed (e.g., entered config mode) and updates tracking.
+        /// Refreshes prompt tracking after a command completes.
         /// </summary>
-        private void UpdatePromptIfChanged(StringBuilder buffer)
+        /// <remarks>
+        /// Two values are tracked from one buffer because they have opposite needs:
+        /// <list type="bullet">
+        ///   <item><see cref="_currentPrompt"/> (drives the displayed command prefix, the
+        ///   <c>${_prompt}</c> variable, and trailing-prompt stripping) is refreshed to the
+        ///   literal prompt line this command ended on, so config submodes like
+        ///   "host (setting) #" show the real prompt instead of the frozen login one.</item>
+        ///   <item><see cref="_promptPattern"/> (used to match command completion) stays
+        ///   deliberately tolerant and is only rebuilt when the stable prompt anchor genuinely
+        ///   changes — rebuilding it for every submode hop would just produce the same pattern
+        ///   (the anchor is unchanged) while needlessly recreating the Rebex ScriptEvent.</item>
+        /// </list>
+        /// </remarks>
+        private void UpdatePromptTracking(StringBuilder buffer)
         {
-            if (PromptDetector.TryDetectDifferentPrompt(buffer, _promptPattern, out var newPrompt))
+            if (PromptDetector.TryDetectPromptFromTail(buffer.ToString(), out var livePrompt))
             {
-                _currentPrompt = newPrompt;
-                _promptPattern = PromptDetector.BuildPromptRegex(newPrompt);
+                _currentPrompt = livePrompt;
+            }
+
+            if (PromptDetector.TryDetectDifferentPrompt(buffer, _promptPattern, out var changedPrompt))
+            {
+                _promptPattern = PromptDetector.BuildPromptRegex(changedPrompt);
                 RebuildPromptEvent(_promptPattern.ToString());
             }
         }
