@@ -44,6 +44,14 @@ namespace SSH_Helper.Services.Scripting
 
         /// <summary>Scope-path key of the branch taken (only set on StepCompleted for if/switch).</summary>
         public string? BranchTaken { get; init; }
+
+        /// <summary>
+        /// Live loop-iteration stack at the moment the event fired (outermost first).
+        /// Null or empty outside loops. The list is an immutable point-in-time snapshot —
+        /// later iterations never mutate it. NOTE: a loop's own StepCompleted fires after
+        /// its frame is popped, so a loop's events carry only its ancestors' frames.
+        /// </summary>
+        public IReadOnlyList<IterationFrame>? IterationStack { get; init; }
     }
 
     /// <summary>
@@ -299,6 +307,10 @@ namespace SSH_Helper.Services.Scripting
                 {
                     var step = steps[stepIndex];
                     var stepPath = step.StepPath ?? $"steps/{stepIndex}";
+                    // Loop commands read step.StepPath to tag iteration frames, so make the
+                    // effective path visible on the step even when it wasn't assigned
+                    // (hand-built scripts). Idempotent: same value on every iteration.
+                    step.StepPath ??= stepPath;
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // Handle debug pausing
@@ -320,7 +332,8 @@ namespace SSH_Helper.Services.Scripting
                             StepType = stepType,
                             LineNumber = step.LineNumber,
                             Success = true,
-                            Skipped = true
+                            Skipped = true,
+                            IterationStack = context.IterationStack
                         });
                         continue;
                     }
@@ -339,7 +352,8 @@ namespace SSH_Helper.Services.Scripting
                                 StepType = stepType,
                                 LineNumber = step.LineNumber,
                                 Success = true,
-                                Skipped = true
+                                Skipped = true,
+                                IterationStack = context.IterationStack
                             });
                             continue;
                         }
@@ -352,7 +366,8 @@ namespace SSH_Helper.Services.Scripting
                         StepPath = stepPath,
                         StepType = stepType,
                         LineNumber = step.LineNumber,
-                        StepName = null
+                        StepName = null,
+                        IterationStack = context.IterationStack
                     });
 
                     // Output carried into this step = whatever the most recent send produced
@@ -384,7 +399,8 @@ namespace SSH_Helper.Services.Scripting
                         Output = stepOutput,
                         DurationMs = sw.ElapsedMilliseconds,
                         IterationCount = result.IterationCount,
-                        BranchTaken = result.BranchTaken
+                        BranchTaken = result.BranchTaken,
+                        IterationStack = context.IterationStack
                     });
 
                     if (result.SuppressedError)
