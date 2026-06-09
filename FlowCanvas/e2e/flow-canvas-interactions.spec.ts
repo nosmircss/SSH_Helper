@@ -85,6 +85,17 @@ test.describe('Flow Canvas Interaction Correctness', () => {
     await expect(nodeById(page, 'node-3')).toHaveCount(1);
   });
 
+  test('clicking a block switches the output panel to the Block Output tab', async ({ page }) => {
+    // Move off the Block tab first so the switch is observable.
+    await page.getByTestId('output-tab-run').click();
+    await expect(page.getByTestId('run-output-view')).toBeVisible();
+
+    await nodeById(page, 'node-1').click();
+
+    // Block tab active again → the run console is no longer mounted.
+    await expect(page.getByTestId('run-output-view')).toHaveCount(0);
+  });
+
   test('apply yaml payload omits schema default props', async ({ page }) => {
     await setGraphViaActions(page, createDefaultStrippingFixture());
     await clearOutgoingMessages(page);

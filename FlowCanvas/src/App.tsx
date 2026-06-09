@@ -77,6 +77,7 @@ function FlowCanvasInner() {
   const onConnect = useFlowStore((s) => s.onConnect);
   const addNode = useFlowStore((s) => s.addNode);
   const selectNode = useFlowStore((s) => s.selectNode);
+  const setOutputTab = useFlowStore((s) => s.setOutputTab);
   const clearSelection = useFlowStore((s) => s.clearSelection);
   const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
   const selectedEdgeIds = useFlowStore((s) => s.selectedEdgeIds);
@@ -233,10 +234,12 @@ function FlowCanvasInner() {
         useFlowStore.getState().toggleNodeSelection(node.id);
       } else {
         selectNode(node.id);
+        // Focusing a single block surfaces its own output, so reveal the Block Output tab.
+        setOutputTab('block');
       }
       hideContextMenu();
     },
-    [selectNode, hideContextMenu],
+    [selectNode, setOutputTab, hideContextMenu],
   );
 
   const onEdgeClick = useCallback(
