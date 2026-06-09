@@ -128,3 +128,11 @@ totalIterations: Map<loopNodeId, number>               // survives eviction, for
 
 - **ParallelCommand context sharing** (above) — the one place attribution could silently break; gated by a dedicated test before the feature is considered done.
 - **Memory at scale** — bounded by the retention cap; `blockOutputs[]` and `timelineEntries[]` growth for huge loops is pre-existing behavior, not made worse by this feature (records store indices, not copies).
+
+## Known limitations (shipped)
+
+1. **Branch bands required.** The cluster anchors to the band layer (`BranchBandsLayer.tsx`), so it only appears when branch bands are enabled in the display settings. With bands off there is no host element to pin to and the stepper is hidden.
+2. **Re-execution merge hole.** A loop re-run with an identical `(i, parent-seq)` signature, without an intervening `execution-started`, merges into the prior record. This shows up for a single-iteration loop re-invoked via `call`, or for repeated test-step reruns — the new pass updates the existing record instead of creating a fresh one.
+3. **Cancelled-run artifact.** A step that is mid-flight when the run is cancelled leaves its per-node state as `running` in the record. Stepping into that iteration shows a static `RUNNING` chip with no animation or ticker, since no terminal `success`/`error` event ever arrived.
+4. **Nested-loop eviction hint.** `totalIterations` tracks the max per-pass index, while the kept-records count spans all passes of an inner loop under nesting. As a result the `of N` eviction hint can be silent or misleading for inner loops — it reflects the largest single pass, not the cumulative retained set.
+5. **Narrow bands (< ~376px wide).** The scrubber has a 60px floor width, so on a band narrower than roughly `SCRUB_LEFT + 60 + SCRUB_RIGHT_RESERVE` it can overlap the cluster pill. The `SCRUB_LEFT` and `SCRUB_RIGHT_RESERVE` constants in `IterationCluster.tsx` are tunable if this becomes a problem.
