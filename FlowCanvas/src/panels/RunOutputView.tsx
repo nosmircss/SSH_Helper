@@ -74,7 +74,7 @@ export default function RunOutputView() {
           </span>
         )}
         <div style={{ flex: 1 }} />
-        <ToolbarButton testid="run-output-btn-find" active={findOpen} onClick={() => setFindOpen((v) => !v)} title="Find">⌕ Find</ToolbarButton>
+        <ToolbarButton testid="run-output-btn-find" active={findOpen} onClick={() => { if (findOpen) setFindQuery(''); setFindOpen((v) => !v); }} title="Find">⌕ Find</ToolbarButton>
         <ToolbarButton testid="run-output-btn-follow" active={follow} onClick={toggleFollow} title="Stick to bottom">⤓ Follow</ToolbarButton>
         <ToolbarButton testid="run-output-btn-wrap" active={wrap} onClick={toggleWrap} title="Word wrap">↵ Wrap</ToolbarButton>
         <ToolbarButton testid="run-output-btn-color" active={color} onClick={toggleColor} title="Colorize output">🎨 Color</ToolbarButton>

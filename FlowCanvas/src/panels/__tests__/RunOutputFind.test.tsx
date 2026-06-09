@@ -36,4 +36,14 @@ describe('RunOutputView find', () => {
     fireEvent.change(screen.getByTestId('run-output-find-input'), { target: { value: 'bravo' } });
     expect(screen.getByTestId('run-output-find-count').textContent).toContain('2');
   });
+
+  it('clears the query (and highlights) when the find box is closed', () => {
+    render(<RunOutputView />);
+    act(() => { fireEvent.click(screen.getByTestId('run-output-btn-find')); });
+    fireEvent.change(screen.getByTestId('run-output-find-input'), { target: { value: 'bravo' } });
+    expect(document.querySelectorAll('mark').length).toBeGreaterThan(0);
+    act(() => { fireEvent.click(screen.getByTestId('run-output-btn-find')); }); // close
+    expect(screen.queryByTestId('run-output-find-input')).toBeNull();
+    expect(document.querySelectorAll('mark').length).toBe(0);
+  });
 });
