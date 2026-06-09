@@ -23,6 +23,8 @@ export const CANVAS_HOST_MESSAGES = {
     layoutRestore: 'layout-restore',
     browsePathResult: 'browse-path-result',
     prefRestore: 'pref-restore',
+    runOutput: 'run-output',
+    runOutputClear: 'run-output-clear',
   },
   outgoing: {
     ready: 'ready',
