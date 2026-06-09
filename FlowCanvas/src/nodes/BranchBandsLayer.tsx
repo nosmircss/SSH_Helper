@@ -6,6 +6,7 @@ import { computeBranchBands, branchPillLabel, type BranchBand } from '../utils/b
 import { BLOCK_WIDTH_INSET } from '../utils/nodeSize';
 import { mix } from '../utils/tokens';
 import { sendLayoutAutosave } from '../utils/layoutAutosave';
+import IterationCluster from './IterationCluster';
 import './bandlayer.css';
 
 export default function BranchBandsLayer() {
@@ -110,6 +111,13 @@ export default function BranchBandsLayer() {
           </div>
         );
       })}
+
+      {/* Iteration stepper clusters: one per loop band, top-right. Post-run only —
+          the component returns null while running or with no recorded iterations.
+          Sibling of the rectangles/handles so zIndex isn't trapped (same precedent). */}
+      {bands.filter((b) => b.branchKey === 'do').map((b) => (
+        <IterationCluster key={`${b.id}::iters`} band={b} />
+      ))}
     </ViewportPortal>
   );
 }
