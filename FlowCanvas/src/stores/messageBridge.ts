@@ -206,6 +206,7 @@ export function initMessageBridge(): () => void {
       store.getState().clearTimeline();
       store.getState().setRunning(true);
       store.getState().clearExportStatus();
+      store.getState().setOutputTab('run');
     }),
 
     // Execution finished
@@ -292,6 +293,9 @@ export function initMessageBridge(): () => void {
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.runOutput, (msg) => {
       if (typeof msg.chunk === 'string' && msg.chunk.length > 0) {
         store.getState().appendRunOutput(msg.chunk);
+        if (store.getState().outputTab !== 'run') {
+          store.getState().setRunOutputUnread(true);
+        }
       }
     }),
 
