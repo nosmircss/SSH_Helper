@@ -206,7 +206,7 @@ export function initMessageBridge(): () => void {
       store.getState().clearTimeline();
       store.getState().setRunning(true);
       store.getState().clearExportStatus();
-      store.getState().setOutputTab('run');
+      if (!store.getState().runOutputPoppedOut) store.getState().setOutputTab('run');
     }),
 
     // Execution finished
@@ -294,7 +294,7 @@ export function initMessageBridge(): () => void {
       if (typeof msg.chunk === 'string' && msg.chunk.length > 0) {
         const state = store.getState();
         state.appendRunOutput(msg.chunk);
-        if (state.outputTab !== 'run') {
+        if (state.outputTab !== 'run' && !state.runOutputPoppedOut) {
           state.setRunOutputUnread(true);
         }
       }
@@ -304,6 +304,13 @@ export function initMessageBridge(): () => void {
       const state = store.getState();
       state.clearRunOutput();
       state.setRunOutputUnread(false); // clearing the buffer also clears any stale unread dot
+    }),
+
+    // The detached Run Output window was closed (by its own X) — dock the console back.
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.runOutputWindowClosed, () => {
+      const state = store.getState();
+      state.setRunOutputPoppedOut(false);
+      state.setOutputTab('run');
     }),
 
     // Test step result (single-step execution)
