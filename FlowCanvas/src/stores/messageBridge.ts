@@ -204,6 +204,7 @@ export function initMessageBridge(): () => void {
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.executionStarted, () => {
       store.getState().clearExecution();
       store.getState().clearTimeline();
+      store.getState().clearIterations();
       store.getState().setRunning(true);
       store.getState().clearExportStatus();
       if (!store.getState().runOutputPoppedOut) store.getState().setOutputTab('run');
@@ -276,16 +277,35 @@ export function initMessageBridge(): () => void {
       if (typeof msg.branchTaken === 'string' && msg.branchTaken.trim().length > 0) {
         state.setBranchTaken(stepId, msg.branchTaken.trim());
       }
+
+      // Iteration attribution: every tagged event lands in the iteration log (transient,
+      // never written onto node.data, so export is unaffected).
+      if (Array.isArray(msg.iterationStack) && msg.iterationStack.length > 0) {
+        state.recordIterationEvent(stepId, msg.iterationStack, {
+          state: execState,
+          duration: msg.duration != null ? Number(msg.duration) : undefined,
+          branchTaken:
+            typeof msg.branchTaken === 'string' && msg.branchTaken.trim().length > 0
+              ? msg.branchTaken.trim()
+              : undefined,
+        });
+      }
     }),
 
     // Per-step output
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.stepOutput, (msg) => {
       if (msg.stepId && msg.output) {
+        const stepId = String(msg.stepId);
         store.getState().appendBlockOutput(
-          String(msg.stepId),
+          stepId,
           String(msg.output),
           msg.stepType ? String(msg.stepType) : undefined
         );
+        // Tie this output entry to its iteration so the stepper can recall it.
+        if (Array.isArray(msg.iterationStack) && msg.iterationStack.length > 0) {
+          const outputIdx = (store.getState().blockOutputs.get(stepId)?.length ?? 1) - 1;
+          store.getState().recordIterationEvent(stepId, msg.iterationStack, { outputIdx });
+        }
       }
     }),
 
@@ -452,6 +472,9 @@ export function initMessageBridge(): () => void {
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.prefRestore, (msg) => {
       if (typeof msg.reducedMotion === 'boolean') {
         store.getState().restoreReducedMotion(msg.reducedMotion);
+      }
+      if (typeof msg.iterationHistoryCap === 'number' && msg.iterationHistoryCap > 0) {
+        store.getState().restoreIterationHistoryCap(msg.iterationHistoryCap);
       }
     }),
   ];

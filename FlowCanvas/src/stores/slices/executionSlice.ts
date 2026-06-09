@@ -112,7 +112,9 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
   setPathVisible: (visible) => set({ pathVisible: visible }),
 
   // Clear Path: hide the edge highlight only. Node blockStates/badges are untouched.
-  clearPath: () => set({ pathVisible: false }),
+  // Iteration selections reset too — a hidden path with a live iteration scope would
+  // leave badges/outputs silently showing one iteration with no visible cue.
+  clearPath: () => set({ pathVisible: false, iterationSelections: new Map() }),
 
   appendRunOutput: (chunk) => set((s) => {
     let next = s.runOutput + chunk;
