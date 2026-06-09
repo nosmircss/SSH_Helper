@@ -126,4 +126,14 @@ describe('IterationCluster — scrubber', () => {
     const records = useFlowStore.getState().iterationLog.get('L')!;
     expect(useFlowStore.getState().iterationSelections.get('L')).toBe(records[0].seq);
   });
+
+  it('pressing the scrubber begins a scrub and selects a bucket', () => {
+    seed(100);
+    render(<IterationCluster band={band} />);
+    const scrubber = screen.getByTestId('iter-scrubber');
+    // jsdom getBoundingClientRect returns zeros → frac 0 → bucket 0 → records[0].
+    fireEvent.pointerDown(scrubber, { clientX: 0, pointerId: 1 });
+    const records = useFlowStore.getState().iterationLog.get('L')!;
+    expect(useFlowStore.getState().iterationSelections.get('L')).toBe(records[0].seq);
+  });
 });

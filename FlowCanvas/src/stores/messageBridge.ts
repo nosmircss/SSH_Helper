@@ -77,6 +77,7 @@ function resetGraphSessionState(store: typeof useFlowStore): void {
   store.getState().clearExecution();
   store.getState().clearTimeline();
   store.getState().clearExportStatus();
+  store.getState().clearIterations();
 }
 
 function installFlowCanvasTestHooks(store: typeof useFlowStore): void {

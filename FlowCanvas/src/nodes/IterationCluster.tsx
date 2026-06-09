@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties } from 'react';
+import { useMemo, useRef, type CSSProperties } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
 import { selectVisibleIterations } from '../stores/selectors/iterationScope';
 import { mix } from '../utils/tokens';
@@ -47,6 +47,10 @@ export default function IterationCluster({ band }: IterationClusterProps) {
     [log, sels, nodes, loopId],
   );
 
+  // Pointer-drag scrubbing state (must precede the early return — hooks stay unconditional).
+  const scrubDragging = useRef(false);
+  const lastScrubPos = useRef(-1);
+
   if (isRunning || visible.length === 0) return null;
 
   const selection = sels.get(loopId) ?? null;
@@ -89,12 +93,33 @@ export default function IterationCluster({ band }: IterationClusterProps) {
     }
   }
 
+  // Map a pointer x within the scrubber strip to its bucket and select that bucket's first
+  // retained iteration. Only writes when the bucket changes, to avoid redundant store churn.
+  const scrubToClientX = (el: HTMLDivElement, clientX: number) => {
+    const rect = el.getBoundingClientRect();
+    const frac = rect.width > 0 ? Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)) : 0;
+    const bucketIdx = Math.min(buckets.length - 1, Math.floor(frac * buckets.length));
+    const startPos = buckets[bucketIdx]?.startPos ?? 0;
+    if (startPos !== lastScrubPos.current) {
+      lastScrubPos.current = startPos;
+      setSelection(loopId, visible[startPos].seq);
+    }
+  };
+
   return (
     <>
       {showScrubber && (
         <div
           data-testid="iter-scrubber"
-          onPointerDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* jsdom / unsupported */ }
+            scrubDragging.current = true;
+            scrubToClientX(e.currentTarget, e.clientX);
+          }}
+          onPointerMove={(e) => { if (scrubDragging.current) scrubToClientX(e.currentTarget, e.clientX); }}
+          onPointerUp={() => { scrubDragging.current = false; lastScrubPos.current = -1; }}
+          onLostPointerCapture={() => { scrubDragging.current = false; lastScrubPos.current = -1; }}
           style={{
             position: 'absolute',
             transform: `translate(${band.x + SCRUB_LEFT}px, ${band.y - 8}px)`,
@@ -171,6 +196,7 @@ export default function IterationCluster({ band }: IterationClusterProps) {
             {label}
           </span>
         )}
+        {label && <span aria-hidden style={{ color: 'var(--fc-text-secondary)' }}>·</span>}
         <span data-testid="iter-counter" style={{ color: 'oklch(88% 0.02 275)', fontVariantNumeric: 'tabular-nums' }}>
           {counter}
         </span>

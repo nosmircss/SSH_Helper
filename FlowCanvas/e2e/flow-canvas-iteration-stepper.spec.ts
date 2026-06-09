@@ -118,4 +118,10 @@ test.describe('Flow Canvas Iteration Stepper', () => {
     await postHostMessage(page, { type: 'execution-started' });
     await expect(page.getByTestId('iteration-cluster')).toHaveCount(0);
   });
+
+  test('loading a new graph clears stale iteration state', async ({ page }) => {
+    await expect(page.getByTestId('iteration-cluster')).toHaveCount(1);
+    await loadGraphFixture(page, loopGraph()); // re-load (same shape, new session)
+    await expect(page.getByTestId('iteration-cluster')).toHaveCount(0);
+  });
 });
