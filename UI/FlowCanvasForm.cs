@@ -285,6 +285,14 @@ namespace SSH_Helper.UI
                         OnBrowsePath?.Invoke(msg);
                         break;
 
+                    case "open-run-output-window":
+                        OnOpenRunOutputWindow?.Invoke(msg);
+                        break;
+
+                    case "close-run-output-window":
+                        OnCloseRunOutputWindow?.Invoke(msg);
+                        break;
+
                     case "show-error":
                         var errorMsg = msg["message"]?.ToString() ?? "Unknown error";
                         BeginInvoke(() => DialogTheme.Show(this, errorMsg, "Flow Canvas", MessageBoxButtons.OK, MessageBoxIcon.Error));
@@ -389,6 +397,8 @@ namespace SSH_Helper.UI
         public event Action<JObject>? OnLayoutAutosave;
         public event Action<JObject>? OnSetLayoutMode;
         public event Action<JObject>? OnBrowsePath;
+        public event Action<JObject>? OnOpenRunOutputWindow;
+        public event Action<JObject>? OnCloseRunOutputWindow;
 
         private void ApplyTheme()
         {
