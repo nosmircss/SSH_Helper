@@ -299,4 +299,69 @@ public class IterationStackEventTests
         innerLoopEvents.Should().HaveCount(2);
         innerLoopEvents.Select(e => e.IterationStack!.Single().Index).Should().Equal(0, 1);
     }
+
+    [Fact]
+    public async Task ParallelArms_WithLoops_DoNotCrossContaminateStacks()
+    {
+        // Two parallel arms, each a foreach over 3 items, sharing one ScriptContext —
+        // exactly how ParallelCommand executes arms (shared context + Task.Run).
+        // Every body event must carry exactly its OWN arm's single frame.
+        var context = new ScriptContext();
+        context.SetVariable("itemsA", "[\"a0\",\"a1\",\"a2\"]");
+        context.SetVariable("itemsB", "[\"b0\",\"b1\",\"b2\"]");
+        // AssignStepPaths wraps each parallel arm in a singleton list with scope
+        // "steps/N/parallel/I", so the arm itself lands at "steps/0/parallel/0/0"
+        // and its Do children at "steps/0/parallel/0/0/do/0" (confirmed by
+        // ScriptExecutorStepPathTests line 112-113: parallel/0/0, parallel/1/0).
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Parallel = new SSH_Helper.Services.Scripting.Models.ParallelOptions
+                    {
+                        Steps = new List<ScriptStep>
+                        {
+                            new()
+                            {
+                                Foreach = "a in itemsA",
+                                Do = new List<ScriptStep>
+                                {
+                                    new() { Set = "lastA = a" }
+                                }
+                            },
+                            new()
+                            {
+                                Foreach = "b in itemsB",
+                                Do = new List<ScriptStep>
+                                {
+                                    new() { Set = "lastB = b" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        // Canonical paths after AssignStepPaths: arm foreach = steps/0/parallel/I/0,
+        // body set = steps/0/parallel/I/0/do/0.
+        var armA = events.Where(e => e.StepPath == "steps/0/parallel/0/0/do/0").ToList();
+        var armB = events.Where(e => e.StepPath == "steps/0/parallel/1/0/do/0").ToList();
+        armA.Should().HaveCount(3);
+        armB.Should().HaveCount(3);
+
+        armA.Should().OnlyContain(e =>
+            e.IterationStack!.Count == 1 &&
+            e.IterationStack![0].LoopStepPath == "steps/0/parallel/0/0");
+        armB.Should().OnlyContain(e =>
+            e.IterationStack!.Count == 1 &&
+            e.IterationStack![0].LoopStepPath == "steps/0/parallel/1/0");
+
+        armA.Select(e => e.IterationStack![0].Index).OrderBy(i => i).Should().Equal(0, 1, 2);
+        armB.Select(e => e.IterationStack![0].Index).OrderBy(i => i).Should().Equal(0, 1, 2);
+    }
 }
