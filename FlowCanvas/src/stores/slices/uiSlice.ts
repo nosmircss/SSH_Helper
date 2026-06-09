@@ -46,6 +46,12 @@ export interface UISlice {
     problems: boolean;
   };
   panelSizes: PanelSizes;
+  // Run Output tab view state
+  outputTab: 'block' | 'run';
+  runOutputColor: boolean;
+  runOutputWrap: boolean;
+  runOutputFollow: boolean;
+  runOutputUnread: boolean;
   exportStatus: {
     hasErrors: boolean;
     errors: string[];
@@ -83,6 +89,12 @@ export interface UISlice {
   togglePanel: (panel: keyof UISlice['panelsVisible']) => void;
   setPanelSize: (key: keyof PanelSizes, value: number) => void;
   restorePanelSizes: (sizes: Partial<PanelSizes>) => void;
+  setOutputTab: (tab: 'block' | 'run') => void;
+  setRunOutputUnread: (unread: boolean) => void;
+  toggleRunOutputColor: () => void;
+  toggleRunOutputWrap: () => void;
+  toggleRunOutputFollow: () => void;
+  restoreRunOutputPrefs: (prefs: Partial<{ runOutputColor: boolean; runOutputWrap: boolean; runOutputFollow: boolean }>) => void;
   setExportStatus: (status: UISlice['exportStatus']) => void;
   clearExportStatus: () => void;
   setDiagnostics: (d: NodeDiagnostic[]) => void;
@@ -114,6 +126,11 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     problems: false,
   },
   panelSizes: { ...DEFAULT_PANEL_SIZES },
+  outputTab: 'block',
+  runOutputColor: true,
+  runOutputWrap: false,
+  runOutputFollow: true,
+  runOutputUnread: false,
   exportStatus: {
     hasErrors: false,
     errors: [],
@@ -267,6 +284,37 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
       panelSizes: { ...s.panelSizes, ...sizes },
     }));
   },
+
+  setOutputTab: (tab) => set((s) => ({
+    outputTab: tab,
+    runOutputUnread: tab === 'run' ? false : s.runOutputUnread,
+  })),
+
+  setRunOutputUnread: (unread) => set({ runOutputUnread: unread }),
+
+  toggleRunOutputColor: () => set((s) => {
+    const next = !s.runOutputColor;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, runOutputColor: next });
+    return { runOutputColor: next };
+  }),
+
+  toggleRunOutputWrap: () => set((s) => {
+    const next = !s.runOutputWrap;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, runOutputWrap: next });
+    return { runOutputWrap: next };
+  }),
+
+  toggleRunOutputFollow: () => set((s) => {
+    const next = !s.runOutputFollow;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, runOutputFollow: next });
+    return { runOutputFollow: next };
+  }),
+
+  restoreRunOutputPrefs: (prefs) => set((s) => ({
+    runOutputColor: prefs.runOutputColor ?? s.runOutputColor,
+    runOutputWrap: prefs.runOutputWrap ?? s.runOutputWrap,
+    runOutputFollow: prefs.runOutputFollow ?? s.runOutputFollow,
+  })),
 
   setExportStatus: (status) => {
     set({ exportStatus: status });
