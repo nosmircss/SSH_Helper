@@ -1,6 +1,8 @@
 import type { StateCreator } from 'zustand';
 import type { FlowStore } from '../useFlowStore';
 
+const MAX_RUN_OUTPUT_LINES = 5000;
+
 export type BlockExecState = 'idle' | 'running' | 'success' | 'error' | 'skipped' | 'disabled';
 
 export interface BlockOutput {
@@ -27,6 +29,8 @@ export interface ExecutionSlice {
   dataBlockTestResults: Map<string, DataBlockTestResult>;
   /** When false, the "Clear Path" control hides the edge highlight without touching node badges. */
   pathVisible: boolean;
+  /** Live mirror of the main form's output box (full combined run stream). */
+  runOutput: string;
 
   setRunning: (running: boolean) => void;
   setBlockState: (id: string, state: BlockExecState) => void;
@@ -36,6 +40,8 @@ export interface ExecutionSlice {
   setBranchTaken: (id: string, key: string) => void;
   setPathVisible: (visible: boolean) => void;
   clearPath: () => void;
+  appendRunOutput: (chunk: string) => void;
+  clearRunOutput: () => void;
   clearExecution: () => void;
   getBlockOutput: (id: string) => BlockOutput[];
   setDataBlockTestResult: (id: string, result: DataBlockTestResult) => void;
@@ -45,6 +51,7 @@ export interface ExecutionSlice {
 export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlice> = (set, get) => ({
   isRunning: false,
   pathVisible: true,
+  runOutput: '',
   blockStates: new Map(),
   blockOutputs: new Map(),
   blockTimings: new Map(),
@@ -107,6 +114,18 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
   // Clear Path: hide the edge highlight only. Node blockStates/badges are untouched.
   clearPath: () => set({ pathVisible: false }),
 
+  appendRunOutput: (chunk) => set((s) => {
+    let next = s.runOutput + chunk;
+    // Bound memory + DOM: keep only the last MAX_RUN_OUTPUT_LINES lines.
+    const lines = next.split('\n');
+    if (lines.length > MAX_RUN_OUTPUT_LINES) {
+      next = lines.slice(lines.length - MAX_RUN_OUTPUT_LINES).join('\n');
+    }
+    return { runOutput: next };
+  }),
+
+  clearRunOutput: () => set({ runOutput: '' }),
+
   clearExecution: () => {
     set({
       blockStates: new Map(),
@@ -116,6 +135,7 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
       branchTaken: new Map(),
       dataBlockTestResults: new Map(),
       pathVisible: true,
+      runOutput: '',
     });
     // Reset all node exec states to idle
     set((s) => ({
