@@ -6778,6 +6778,11 @@ namespace SSH_Helper
 
             // Send the initial target host to the Host Bar
             SendTargetHostToCanvas();
+
+            // Seed the Run Output tab with whatever the main output box currently holds,
+            // so a canvas opened after a run isn't empty. Clear first so reopening doesn't double up.
+            _flowCanvasForm.SendRunOutputClear();
+            _flowCanvasForm.SendRunOutputAppend(GetBufferedOutputSnapshot());
         }
 
         private void LoadCurrentScriptIntoCanvas()
@@ -13920,6 +13925,9 @@ namespace SSH_Helper
 
             txtOutput.AppendText(NormalizeNewlinesForDisplay(output));
             ScrollOutputToEnd();
+
+            // Mirror the same chunk into the Flow Canvas Run Output tab (no-op if closed).
+            _flowCanvasForm?.SendRunOutputAppend(output);
         }
 
         /// <summary>
@@ -14004,6 +14012,9 @@ namespace SSH_Helper
                 NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
                 txtOutput.Invalidate();
             }
+
+            // Mirror the clear into the Flow Canvas Run Output tab (no-op if closed).
+            _flowCanvasForm?.SendRunOutputClear();
         }
 
         private void ScrollOutputToEnd()
