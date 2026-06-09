@@ -23,7 +23,7 @@ export default function RunOutputView() {
   const toggleColor = useFlowStore((s) => s.toggleRunOutputColor);
   const toggleWrap = useFlowStore((s) => s.toggleRunOutputWrap);
   const toggleFollow = useFlowStore((s) => s.toggleRunOutputFollow);
-  const togglePoppedOut = useFlowStore((s) => s.toggleRunOutputPoppedOut);
+  const openWindow = useFlowStore((s) => s.openRunOutputWindow);
   const poppedOut = useFlowStore((s) => s.runOutputPoppedOut);
 
   const [findOpen, setFindOpen] = useState(false);
@@ -85,9 +85,8 @@ export default function RunOutputView() {
         <ToolbarButton testid="run-output-btn-wrap" active={wrap} onClick={toggleWrap} title="Word wrap">↵ Wrap</ToolbarButton>
         <ToolbarButton testid="run-output-btn-color" active={color} onClick={toggleColor} title="Colorize output">🎨 Color</ToolbarButton>
         <ToolbarButton testid="run-output-btn-copy" active={false} onClick={() => navigator.clipboard.writeText(runOutput)} title="Copy all">⧉ Copy</ToolbarButton>
-        {/* When popped out, the overlay's own Dock button replaces this — hide it to avoid redundancy. */}
         {!poppedOut && (
-          <ToolbarButton testid="run-output-btn-popout" active={false} onClick={togglePoppedOut} title="Pop out">⤢ Pop out</ToolbarButton>
+          <ToolbarButton testid="run-output-btn-popout" active={false} onClick={openWindow} title="Pop out to a window">⤢ Pop out</ToolbarButton>
         )}
       </div>
 

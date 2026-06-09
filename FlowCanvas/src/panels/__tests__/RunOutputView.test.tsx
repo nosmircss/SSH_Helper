@@ -13,7 +13,7 @@ const mock = vi.hoisted(() => ({
     toggleRunOutputColor: vi.fn(),
     toggleRunOutputWrap: vi.fn(),
     toggleRunOutputFollow: vi.fn(),
-    toggleRunOutputPoppedOut: vi.fn(),
+    openRunOutputWindow: vi.fn(),
   } as any,
 }));
 
@@ -85,9 +85,11 @@ describe('RunOutputView', () => {
     expect(mock.state.toggleRunOutputColor).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the Pop out button when docked, hides it when popped out', () => {
+  it('shows the Pop out button when docked (calls openRunOutputWindow), hides it when popped out', () => {
     const { rerender } = render(<RunOutputView />);
-    expect(screen.getByTestId('run-output-btn-popout')).toBeInTheDocument();
+    const btn = screen.getByTestId('run-output-btn-popout');
+    btn.click();
+    expect(mock.state.openRunOutputWindow).toHaveBeenCalledTimes(1);
     mock.state.runOutputPoppedOut = true;
     rerender(<RunOutputView />);
     expect(screen.queryByTestId('run-output-btn-popout')).toBeNull();
