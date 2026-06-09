@@ -5,7 +5,7 @@ import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
 import { isConnectionAllowed } from '../../utils/connectionRules';
 import { branchColorVar } from '../../utils/branchBands';
-import { deriveChildMembership, applyChildMembership, clearConnectAuthoredMembership } from '../../utils/childMembership';
+import { deriveChildMembership, applyChildMembership, clearConnectAuthoredMembership, renumberStepPaths } from '../../utils/childMembership';
 import { reflowLayout } from '../reflow';
 import { anchorReservesLayoutSpace } from '../../utils/layout/hierarchicalLayout';
 
@@ -307,7 +307,11 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
         if (follow.length > 0) allChanges = [...allChanges, ...follow];
       }
 
-      const nextNodes = applyNodeChanges(allChanges, state.nodes);
+      const appliedNodes = applyNodeChanges(allChanges, state.nodes);
+      // A node 'remove' shifts surviving siblings' positions in their branch — renumber so their
+      // _stepPath stays contiguous (keeps the runtime step↔node map in sync). Gated to removes so
+      // drag/select changes never touch _stepPath.
+      const nextNodes = removedIds.size > 0 ? renumberStepPaths(appliedNodes) : appliedNodes;
       const hasSelectionChange = allChanges.some((c) => c.type === 'select');
       const hasGraphMutation = allChanges.some((c) => c.type !== 'select');
       return {
@@ -327,7 +331,9 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       // Deleting a wire that conferred band membership releases the block back to the spine.
       const removedIds = new Set(changes.filter((c) => c.type === 'remove').map((c) => c.id));
       const removed = removedIds.size > 0 ? state.edges.filter((e) => removedIds.has(e.id)) : [];
-      const nextNodes = removed.length > 0 ? clearConnectAuthoredMembership(state.nodes, removed) : state.nodes;
+      const cleared = removed.length > 0 ? clearConnectAuthoredMembership(state.nodes, removed) : state.nodes;
+      // Releasing a wire-authored child to an orphan frees its slot — renumber former siblings.
+      const nextNodes = cleared !== state.nodes ? renumberStepPaths(cleared) : cleared;
       return {
         ...(nextNodes !== state.nodes ? { nodes: nextNodes } : {}),
         edges: applyEdgeChanges(changes, state.edges),
@@ -428,7 +434,10 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       if (anchorReservesLayoutSpace(n)) removedReservingComment = true;
     }
     set((state) => ({
-      nodes: state.nodes.filter((n) => !toRemove.has(n.id)),
+      // Renumber so surviving container children keep contiguous _stepPath indices — a removed
+      // nested block otherwise leaves a gap that desyncs the runtime step↔node map (dead neon +
+      // missing per-block output until reopen). See renumberStepPaths.
+      nodes: renumberStepPaths(state.nodes.filter((n) => !toRemove.has(n.id))),
       edges: state.edges.filter((e) => !toRemove.has(e.source) && !toRemove.has(e.target)),
       selectedNodeIds: new Set([...state.selectedNodeIds].filter((id) => !toRemove.has(id))),
       isDirty: true,
@@ -442,7 +451,9 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
     const idSet = new Set(ids);
     set((state) => {
       const removed = state.edges.filter((e) => idSet.has(e.id));
-      const nextNodes = clearConnectAuthoredMembership(state.nodes, removed);
+      const cleared = clearConnectAuthoredMembership(state.nodes, removed);
+      // Releasing a wire-authored child to an orphan frees its slot — renumber former siblings.
+      const nextNodes = cleared !== state.nodes ? renumberStepPaths(cleared) : cleared;
       return {
         ...(nextNodes !== state.nodes ? { nodes: nextNodes } : {}),
         edges: state.edges.filter((e) => !idSet.has(e.id)),

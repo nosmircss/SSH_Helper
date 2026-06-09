@@ -156,6 +156,91 @@ export function applyChildMembership(nodes: Node[], membership: ChildMembership)
 }
 
 /**
+ * Re-derive contiguous `_stepPath` indices for every container child from the current graph
+ * structure (`_isChildOf` + the existing `_stepPath` ordering), per branch scope, recursively.
+ *
+ * Why this exists: `applyChildMembership` bumps later siblings' indices +1 to make room when a
+ * block is wired in, but no delete path renumbers them back DOWN — so removing a nested block
+ * leaves a gap (e.g. `do/0, do/2, do/3`). The executor always assigns SEQUENTIAL paths
+ * (`do/0, do/1, do/2`) to the exported YAML, so any gap makes the runtime node↔stepPath map
+ * disagree with the executor from the gap onward, silently dropping those nodes' step-update /
+ * step-output events (dead neon + missing per-block output). Running this after any removal keeps
+ * `_stepPath` self-consistent so the map always matches what runs.
+ *
+ * Pure. Only rewrites `_stepPath`, only on nodes whose index actually changed. Nodes without a
+ * `_stepPath` (canvas-authored / freshly dropped) and orphans whose parent link is broken are
+ * left untouched — they fall through to the exporter's own top-level fallback.
+ */
+export function renumberStepPaths(nodes: Node[]): Node[] {
+  const oldPath = new Map<string, string>();
+  const childrenOf = new Map<string, string[]>();
+  const roots: string[] = [];
+
+  for (const n of nodes) {
+    if (n.type === 'comment') continue;
+    const p = propsOf(n);
+    const sp = p['_stepPath'];
+    if (typeof sp !== 'string' || sp.length === 0) continue; // not an executable step
+    oldPath.set(n.id, sp);
+    const parent = p['_isChildOf'];
+    if (typeof parent === 'string' && parent.length > 0) {
+      const list = childrenOf.get(parent);
+      if (list) list.push(n.id);
+      else childrenOf.set(parent, [n.id]);
+    } else {
+      roots.push(n.id);
+    }
+  }
+
+  const trailingIndex = (id: string): number => {
+    const m = oldPath.get(id)!.match(TRAILING_INDEX);
+    return m ? Number(m[1]) : 0;
+  };
+
+  const newPath = new Map<string, string>();
+  const assign = (id: string, assignedPath: string): void => {
+    newPath.set(id, assignedPath);
+    const kids = childrenOf.get(id);
+    if (!kids || kids.length === 0) return;
+    const head = `${oldPath.get(id)!}/`;
+    // Group children by branch scope (relative path minus the trailing step index). The scope keeps
+    // any branch selector indices intact (e.g. "elif/0/then", "cases/2/do") — only the final step
+    // index is renumbered.
+    const groups = new Map<string, string[]>();
+    for (const kid of kids) {
+      const kp = oldPath.get(kid);
+      if (kp === undefined || !kp.startsWith(head)) continue; // dangling metadata → leave as-is
+      const rel = kp.slice(head.length);
+      const lastSlash = rel.lastIndexOf('/');
+      if (lastSlash === -1) continue; // malformed (no scope segment) → leave as-is
+      const scope = rel.slice(0, lastSlash);
+      const list = groups.get(scope);
+      if (list) list.push(kid);
+      else groups.set(scope, [kid]);
+    }
+    for (const [scope, arr] of groups) {
+      arr.sort((a, b) => trailingIndex(a) - trailingIndex(b));
+      arr.forEach((kid, i) => assign(kid, `${assignedPath}/${scope}/${i}`));
+    }
+  };
+
+  roots.sort((a, b) => trailingIndex(a) - trailingIndex(b));
+  roots.forEach((id, i) => assign(id, `steps/${i}`));
+
+  let changed = false;
+  const result = nodes.map((n) => {
+    const np = newPath.get(n.id);
+    if (np === undefined) return n;
+    const data = (n.data as Record<string, unknown>) ?? {};
+    const existing = (data.props as Record<string, unknown> | undefined) ?? {};
+    if (existing['_stepPath'] === np) return n;
+    changed = true;
+    return { ...n, data: { ...data, props: { ...existing, _stepPath: np } } };
+  });
+  return changed ? result : nodes;
+}
+
+/**
  * Revert connect-authored membership when its conferring wire is deleted. Given the ids of removed
  * edges, any target node we previously tagged via the wire (MEMBERSHIP_MARKER) loses its membership
  * metadata and falls back to a top-level orphan — so the band releases it, matching the user's model
