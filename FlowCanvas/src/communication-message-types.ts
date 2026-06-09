@@ -25,6 +25,7 @@ export const CANVAS_HOST_MESSAGES = {
     prefRestore: 'pref-restore',
     runOutput: 'run-output',
     runOutputClear: 'run-output-clear',
+    runOutputWindowClosed: 'run-output-window-closed',
   },
   outgoing: {
     ready: 'ready',
@@ -42,6 +43,8 @@ export const CANVAS_HOST_MESSAGES = {
     browsePath: 'browse-path',
     prefSave: 'pref-save',
     setLayoutMode: 'set-layout-mode',
+    openRunOutputWindow: 'open-run-output-window',
+    closeRunOutputWindow: 'close-run-output-window',
   },
   deprecatedOutgoingAliases: {
     runRequest: 'run-request',
