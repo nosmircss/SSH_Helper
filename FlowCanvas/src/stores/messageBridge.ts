@@ -292,15 +292,18 @@ export function initMessageBridge(): () => void {
     // Full run output — live mirror of the main form's output box
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.runOutput, (msg) => {
       if (typeof msg.chunk === 'string' && msg.chunk.length > 0) {
-        store.getState().appendRunOutput(msg.chunk);
-        if (store.getState().outputTab !== 'run') {
-          store.getState().setRunOutputUnread(true);
+        const state = store.getState();
+        state.appendRunOutput(msg.chunk);
+        if (state.outputTab !== 'run') {
+          state.setRunOutputUnread(true);
         }
       }
     }),
 
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.runOutputClear, () => {
-      store.getState().clearRunOutput();
+      const state = store.getState();
+      state.clearRunOutput();
+      state.setRunOutputUnread(false); // clearing the buffer also clears any stale unread dot
     }),
 
     // Test step result (single-step execution)

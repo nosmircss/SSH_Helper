@@ -68,4 +68,11 @@ describe('OutputPreview tabs', () => {
     renderPanel();
     expect(screen.getByTestId('output-tab-run-unread')).toBeInTheDocument();
   });
+
+  it('hides the unread dot when already on the run tab', () => {
+    mock.state.runOutputUnread = true;
+    mock.state.outputTab = 'run';
+    renderPanel();
+    expect(screen.queryByTestId('output-tab-run-unread')).toBeNull();
+  });
 });
