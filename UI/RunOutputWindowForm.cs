@@ -222,15 +222,33 @@ namespace SSH_Helper.UI
 
         private void SavePersistedGeometry()
         {
-            if (_configService == null || WindowState != FormWindowState.Normal) return;
+            if (_configService == null) return;
+            // Persist the last *Normal* geometry, not the live properties: if the window is
+            // maximized/minimized at close, _lastLocation/_lastSize still hold the most-recent
+            // Normal geometry (they're only updated while WindowState == Normal).
+            var loc = _lastLocation;
+            var sz = _lastSize;
+            if (loc == null || sz == null) return;
             _configService.Update(c =>
             {
                 c.WindowState ??= new Models.WindowState();
-                c.WindowState.FlowCanvasRunOutputWindowLeft = Location.X;
-                c.WindowState.FlowCanvasRunOutputWindowTop = Location.Y;
-                c.WindowState.FlowCanvasRunOutputWindowWidth = Size.Width;
-                c.WindowState.FlowCanvasRunOutputWindowHeight = Size.Height;
+                c.WindowState.FlowCanvasRunOutputWindowLeft = loc.Value.X;
+                c.WindowState.FlowCanvasRunOutputWindowTop = loc.Value.Y;
+                c.WindowState.FlowCanvasRunOutputWindowWidth = sz.Value.Width;
+                c.WindowState.FlowCanvasRunOutputWindowHeight = sz.Value.Height;
             });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (_webView.CoreWebView2 != null)
+                    _webView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
+                _webView.Dispose();
+                _statusLabel.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 }
