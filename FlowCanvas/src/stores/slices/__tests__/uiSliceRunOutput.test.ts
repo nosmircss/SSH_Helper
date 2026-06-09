@@ -50,4 +50,15 @@ describe('uiSlice run-output view prefs', () => {
     expect([s.runOutputColor, s.runOutputWrap, s.runOutputFollow]).toEqual([false, true, false]);
     expect(messageBus.send).not.toHaveBeenCalled();
   });
+
+  it('restoreRunOutputPrefs preserves current values for undefined/partial input (?? not ||)', () => {
+    // Fresh-config path: nothing persisted -> defaults must survive (false is NOT clobbered to default).
+    useFlowStore.getState().restoreRunOutputPrefs({});
+    let s = useFlowStore.getState();
+    expect([s.runOutputColor, s.runOutputWrap, s.runOutputFollow]).toEqual([true, false, true]);
+    // Partial: only color changes to false; wrap/follow untouched (regression guard for ?? vs ||).
+    useFlowStore.getState().restoreRunOutputPrefs({ runOutputColor: false });
+    s = useFlowStore.getState();
+    expect([s.runOutputColor, s.runOutputWrap, s.runOutputFollow]).toEqual([false, false, true]);
+  });
 });
