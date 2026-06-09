@@ -5258,6 +5258,37 @@ namespace SSH_Helper.Services
             return int.TryParse(parts[1], out stepIndex);
         }
 
+        /// <summary>
+        /// Converts a live iteration stack into the canvas message payload: each frame's loop
+        /// step-path is mapped to its canvas node id. Frames that don't resolve (subroutine
+        /// loops with no canvas node, empty paths, not-yet-started frames with Index &lt; 0)
+        /// are skipped individually — a dropped middle frame simply re-parents its children
+        /// to the nearest resolvable ancestor on the React side. Returns null when nothing
+        /// resolves, so callers serialize the field as absent.
+        /// </summary>
+        internal static List<Dictionary<string, object?>>? BuildIterationStackPayload(
+            IReadOnlyList<IterationFrame>? stack,
+            IReadOnlyDictionary<string, string>? stepPathToNodeId)
+        {
+            if (stack == null || stack.Count == 0 || stepPathToNodeId == null) return null;
+
+            List<Dictionary<string, object?>>? frames = null;
+            foreach (var frame in stack)
+            {
+                if (string.IsNullOrWhiteSpace(frame.LoopStepPath)) continue;
+                if (frame.Index < 0) continue;
+                if (!stepPathToNodeId.TryGetValue(frame.LoopStepPath, out var loopNodeId)) continue;
+
+                (frames ??= new List<Dictionary<string, object?>>()).Add(new Dictionary<string, object?>
+                {
+                    ["loopId"] = loopNodeId,
+                    ["i"] = frame.Index,
+                    ["label"] = frame.Label,
+                });
+            }
+            return frames;
+        }
+
         #endregion
 
         #region Canvas Layout Persistence

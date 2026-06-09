@@ -13612,7 +13612,8 @@ namespace SSH_Helper
             {
                 type = "execution-update",
                 stepId = nodeId,
-                state = e.Skipped ? "skipped" : "running"
+                state = e.Skipped ? "skipped" : "running",
+                iterationStack = FlowCanvasBridge.BuildIterationStackPayload(e.IterationStack, _stepPathToNodeIdMap)
             });
         }
 
@@ -13633,6 +13634,7 @@ namespace SSH_Helper
 
             var activeContext = _sshService.ActiveScriptContext;
             var variables = activeContext?.GetAllVariables();
+            var iterationStack = FlowCanvasBridge.BuildIterationStackPayload(e.IterationStack, _stepPathToNodeIdMap);
 
             _flowCanvasForm.SendMessage(new
             {
@@ -13642,7 +13644,8 @@ namespace SSH_Helper
                 duration = e.DurationMs,
                 iterationCount = e.IterationCount,
                 branchTaken = e.BranchTaken,
-                variables
+                variables,
+                iterationStack
             });
 
             // Send step output if available
@@ -13652,7 +13655,8 @@ namespace SSH_Helper
                 {
                     type = "step-output",
                     stepId = nodeId,
-                    output = e.Output
+                    output = e.Output,
+                    iterationStack
                 });
             }
         }
