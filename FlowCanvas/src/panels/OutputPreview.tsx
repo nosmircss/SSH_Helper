@@ -27,6 +27,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
   const outputTab = useFlowStore((s) => s.outputTab);
   const setOutputTab = useFlowStore((s) => s.setOutputTab);
   const runOutputUnread = useFlowStore((s) => s.runOutputUnread);
+  const poppedOut = useFlowStore((s) => s.runOutputPoppedOut);
   const [historyIndex, setHistoryIndex] = useState(-1); // -1 = latest
   const [height, setHeight] = useState(storeHeight);
   const heightRef = useRef(height);
@@ -206,7 +207,9 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
           </pre>
         </>
       ) : (
-        <RunOutputView />
+        poppedOut
+          ? <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fc-text-muted)', fontSize: 11 }}>Run Output is popped out</div>
+          : <RunOutputView />
       )}
     </div>
   );

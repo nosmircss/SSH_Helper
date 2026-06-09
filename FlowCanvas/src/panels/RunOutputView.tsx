@@ -22,6 +22,7 @@ export default function RunOutputView() {
   const toggleColor = useFlowStore((s) => s.toggleRunOutputColor);
   const toggleWrap = useFlowStore((s) => s.toggleRunOutputWrap);
   const toggleFollow = useFlowStore((s) => s.toggleRunOutputFollow);
+  const togglePoppedOut = useFlowStore((s) => s.toggleRunOutputPoppedOut);
 
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
@@ -79,6 +80,7 @@ export default function RunOutputView() {
         <ToolbarButton testid="run-output-btn-wrap" active={wrap} onClick={toggleWrap} title="Word wrap">↵ Wrap</ToolbarButton>
         <ToolbarButton testid="run-output-btn-color" active={color} onClick={toggleColor} title="Colorize output">🎨 Color</ToolbarButton>
         <ToolbarButton testid="run-output-btn-copy" active={false} onClick={() => navigator.clipboard.writeText(runOutput)} title="Copy all">⧉ Copy</ToolbarButton>
+        <ToolbarButton testid="run-output-btn-popout" active={false} onClick={togglePoppedOut} title="Pop out / dock">⤢ Pop out</ToolbarButton>
       </div>
 
       {findOpen && (
