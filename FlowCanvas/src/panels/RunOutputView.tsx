@@ -3,7 +3,7 @@
  * Renders the executionSlice.runOutput buffer with optional light styling
  * (teal banners, red error lines) gated behind the Color toggle.
  */
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
 import { classifyRunOutputLine } from '../utils/runOutputClassify';
 
@@ -22,6 +22,18 @@ export default function RunOutputView() {
   const toggleColor = useFlowStore((s) => s.toggleRunOutputColor);
   const toggleWrap = useFlowStore((s) => s.toggleRunOutputWrap);
   const toggleFollow = useFlowStore((s) => s.toggleRunOutputFollow);
+
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+
+  const matchCount = useMemo(() => {
+    if (!findQuery) return 0;
+    const q = findQuery.toLowerCase();
+    let count = 0, idx = 0;
+    const hay = runOutput.toLowerCase();
+    while ((idx = hay.indexOf(q, idx)) !== -1) { count++; idx += q.length; }
+    return count;
+  }, [findQuery, runOutput]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -62,11 +74,35 @@ export default function RunOutputView() {
           </span>
         )}
         <div style={{ flex: 1 }} />
+        <ToolbarButton testid="run-output-btn-find" active={findOpen} onClick={() => setFindOpen((v) => !v)} title="Find">⌕ Find</ToolbarButton>
         <ToolbarButton testid="run-output-btn-follow" active={follow} onClick={toggleFollow} title="Stick to bottom">⤓ Follow</ToolbarButton>
         <ToolbarButton testid="run-output-btn-wrap" active={wrap} onClick={toggleWrap} title="Word wrap">↵ Wrap</ToolbarButton>
         <ToolbarButton testid="run-output-btn-color" active={color} onClick={toggleColor} title="Colorize output">🎨 Color</ToolbarButton>
         <ToolbarButton testid="run-output-btn-copy" active={false} onClick={() => navigator.clipboard.writeText(runOutput)} title="Copy all">⧉ Copy</ToolbarButton>
       </div>
+
+      {findOpen && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', flexShrink: 0,
+          background: 'var(--fc-term-surface)', borderBottom: '1px solid var(--fc-border)',
+        }}>
+          <input
+            data-testid="run-output-find-input"
+            autoFocus
+            value={findQuery}
+            onChange={(e) => setFindQuery(e.target.value)}
+            placeholder="Find in output…"
+            style={{
+              flex: 1, background: 'var(--fc-term-bg)', color: 'var(--fc-term-text)',
+              border: '1px solid var(--fc-border)', borderRadius: 4, padding: '3px 6px',
+              fontFamily: 'var(--fc-font-mono)', fontSize: 11,
+            }}
+          />
+          <span data-testid="run-output-find-count" style={{ fontSize: 10, color: 'var(--fc-text-muted)' }}>
+            {findQuery ? `${matchCount} match${matchCount === 1 ? '' : 'es'}` : ''}
+          </span>
+        </div>
+      )}
 
       {/* Body */}
       <div
@@ -83,7 +119,7 @@ export default function RunOutputView() {
               const kind = classifyRunOutputLine(line);
               return (
                 <div key={i} data-testid="run-output-line" data-kind={kind} style={{ color: KIND_COLOR[kind], whiteSpace }}>
-                  {line || ' '}
+                  {highlight(line, findQuery)}
                 </div>
               );
             })}
@@ -116,4 +152,19 @@ function ToolbarButton({ testid, active, onClick, title, children }: {
       {children}
     </button>
   );
+}
+
+function highlight(line: string, query: string): ReactNode {
+  if (!query) return line || ' ';
+  const q = query.toLowerCase();
+  const lower = line.toLowerCase();
+  const parts: ReactNode[] = [];
+  let i = 0, key = 0, idx;
+  while ((idx = lower.indexOf(q, i)) !== -1) {
+    if (idx > i) parts.push(line.slice(i, idx));
+    parts.push(<mark key={key++} style={{ background: 'var(--fc-accent)', color: 'var(--fc-term-bg)' }}>{line.slice(idx, idx + q.length)}</mark>);
+    i = idx + q.length;
+  }
+  if (i < line.length) parts.push(line.slice(i));
+  return parts.length ? parts : (line || ' ');
 }
