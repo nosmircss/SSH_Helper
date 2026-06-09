@@ -310,6 +310,19 @@ namespace SSH_Helper.UI
             SendMessage(new { type = "set-target-host", host = hostData });
         }
 
+        /// <summary>Appends a raw chunk of the main-form run output to the canvas's Run Output tab.</summary>
+        public void SendRunOutputAppend(string chunk)
+        {
+            if (string.IsNullOrEmpty(chunk)) return;
+            SendMessage(new { type = "run-output", chunk });
+        }
+
+        /// <summary>Clears the canvas's Run Output buffer (mirrors Form1.ClearOutput).</summary>
+        public void SendRunOutputClear()
+        {
+            SendMessage(new { type = "run-output-clear" });
+        }
+
         /// <summary>
         /// Sends a JSON message to the React app. Queues if React isn't ready yet.
         /// </summary>
