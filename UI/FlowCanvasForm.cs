@@ -423,6 +423,9 @@ namespace SSH_Helper.UI
                 branchBandsEnabled = ws.FlowCanvasBranchBands,
                 compactCommentsEnabled = ws.FlowCanvasCompactComments,
                 defaultLayoutMode = (ws.FlowCanvasDefaultLayoutMode ?? Models.LayoutMode.AutoFlow) == Models.LayoutMode.Manual ? "manual" : "auto",
+                runOutputColor = ws.FlowCanvasRunOutputColor,
+                runOutputWrap = ws.FlowCanvasRunOutputWrap,
+                runOutputFollow = ws.FlowCanvasRunOutputFollow,
             });
 
             var rm = ws.FlowCanvasReducedMotion;
@@ -446,10 +449,14 @@ namespace SSH_Helper.UI
             var bands = msg["branchBandsEnabled"]?.Value<bool>();
             var compact = msg["compactCommentsEnabled"]?.Value<bool>();
             var defaultLayoutMode = msg["defaultLayoutMode"]?.ToString();
+            var runOutputColor = msg["runOutputColor"]?.Value<bool>();
+            var runOutputWrap = msg["runOutputWrap"]?.Value<bool>();
+            var runOutputFollow = msg["runOutputFollow"]?.Value<bool>();
 
             if (rightWidth == null && outputHeight == null && heatmap == null && blockWidth == null
                 && textScale == null && density == null && defaultExpanded == null && snap == null && bands == null
-                && compact == null && defaultLayoutMode == null)
+                && compact == null && defaultLayoutMode == null
+                && runOutputColor == null && runOutputWrap == null && runOutputFollow == null)
                 return;
 
             _configService.Update(c =>
@@ -468,6 +475,9 @@ namespace SSH_Helper.UI
                 if (defaultLayoutMode == "auto" || defaultLayoutMode == "manual")
                     c.WindowState.FlowCanvasDefaultLayoutMode =
                         defaultLayoutMode == "manual" ? Models.LayoutMode.Manual : Models.LayoutMode.AutoFlow;
+                if (runOutputColor.HasValue) c.WindowState.FlowCanvasRunOutputColor = runOutputColor.Value;
+                if (runOutputWrap.HasValue) c.WindowState.FlowCanvasRunOutputWrap = runOutputWrap.Value;
+                if (runOutputFollow.HasValue) c.WindowState.FlowCanvasRunOutputFollow = runOutputFollow.Value;
             });
         }
 
