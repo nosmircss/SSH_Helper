@@ -38,4 +38,19 @@ describe('RunOutputPopOut', () => {
     fireEvent.click(screen.getByTestId('run-output-popout-dock'));
     expect(mock.state.toggleRunOutputPoppedOut).toHaveBeenCalled();
   });
+
+  it('removes drag listeners when docked mid-drag (no leak)', () => {
+    const removeSpy = vi.spyOn(window, 'removeEventListener');
+    mock.state.runOutputPoppedOut = true;
+    const { rerender } = render(<RunOutputPopOut />);
+    // Start a drag — registers window mousemove/mouseup listeners.
+    fireEvent.mouseDown(screen.getByTestId('run-output-popout-drag'), { clientX: 300, clientY: 120 });
+    // Dock mid-drag: poppedOut -> false. The effect cleanup must tear the listeners down
+    // even though the mouse was never released.
+    mock.state.runOutputPoppedOut = false;
+    rerender(<RunOutputPopOut />);
+    expect(removeSpy).toHaveBeenCalledWith('mousemove', expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith('mouseup', expect.any(Function));
+    removeSpy.mockRestore();
+  });
 });
