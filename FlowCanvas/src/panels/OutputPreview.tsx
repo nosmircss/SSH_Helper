@@ -5,7 +5,7 @@
  * Can be pinned open (default) — shows empty state when no block is selected.
  * Tab strip selects between block output and the full run output console.
  */
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
 import RunOutputView from './RunOutputView';
 
@@ -216,7 +216,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
 }
 
 function TabButton({ testid, active, onClick, children }: {
-  testid: string; active: boolean; onClick: () => void; children: React.ReactNode;
+  testid: string; active: boolean; onClick: () => void; children: ReactNode;
 }) {
   return (
     <button
