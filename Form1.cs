@@ -6654,6 +6654,14 @@ namespace SSH_Helper
                 return;
             }
 
+            // Opening a FRESH canvas (the previous one was closed): a fresh React store defaults to
+            // docked, so close any orphaned popped-out window — the reopened canvas starts docked
+            // and we avoid showing the same output in both the dock and a stray window.
+            if (_runOutputWindow != null && !_runOutputWindow.IsDisposed)
+            {
+                _runOutputWindow.Close();
+            }
+
             var config = _configService.GetCurrent();
             _flowCanvasForm = new FlowCanvasForm(config.DarkMode, _configService);
             _flowCanvasForm.FormClosed += (_, _) => _flowCanvasForm = null;
