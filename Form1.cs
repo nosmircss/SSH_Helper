@@ -13918,8 +13918,30 @@ namespace SSH_Helper
                 return;
             }
 
-            txtOutput.AppendText(output);
+            txtOutput.AppendText(NormalizeNewlinesForDisplay(output));
             ScrollOutputToEnd();
+        }
+
+        /// <summary>
+        /// Converts lone LF (\n) to CRLF so multiline output renders line breaks in the
+        /// WinForms TextBox, which only treats \r\n as a break (a bare \n is swallowed).
+        /// Existing CRLF and lone CR are left untouched. Display-only: the raw output
+        /// buffer keeps original line endings so script data (${_output}, extract) is unaffected.
+        /// </summary>
+        internal static string NormalizeNewlinesForDisplay(string text)
+        {
+            if (string.IsNullOrEmpty(text) || !text.Contains('\n'))
+                return text;
+
+            var sb = new System.Text.StringBuilder(text.Length + 16);
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (c == '\n' && (i == 0 || text[i - 1] != '\r'))
+                    sb.Append('\r');
+                sb.Append(c);
+            }
+            return sb.ToString();
         }
 
         private void SetOutputText(string text)
@@ -13944,7 +13966,7 @@ namespace SSH_Helper
                     ShrinkOutputBufferCapacityIfNeeded_NoLock();
                 }
 
-                txtOutput.Text = sourceText;
+                txtOutput.Text = NormalizeNewlinesForDisplay(sourceText);
                 txtOutput.ClearUndo();
             }
             finally
