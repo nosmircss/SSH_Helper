@@ -61,4 +61,11 @@ describe('uiSlice run-output view prefs', () => {
     s = useFlowStore.getState();
     expect([s.runOutputColor, s.runOutputWrap, s.runOutputFollow]).toEqual([false, false, true]);
   });
+
+  it('setRunOutputPoppedOut sets the flag directly', () => {
+    useFlowStore.getState().setRunOutputPoppedOut(true);
+    expect(useFlowStore.getState().runOutputPoppedOut).toBe(true);
+    useFlowStore.getState().setRunOutputPoppedOut(false);
+    expect(useFlowStore.getState().runOutputPoppedOut).toBe(false);
+  });
 });
