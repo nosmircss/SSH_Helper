@@ -323,11 +323,13 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
 
   openRunOutputWindow: () => {
     messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.openRunOutputWindow });
-    set({ runOutputPoppedOut: true, outputTab: 'block' });
+    // The output is now visible in the separate window, so any pending unread dot is moot.
+    set({ runOutputPoppedOut: true, outputTab: 'block', runOutputUnread: false });
   },
   closeRunOutputWindow: () => {
     messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.closeRunOutputWindow });
-    set({ runOutputPoppedOut: false, outputTab: 'run' });
+    // Docking back to the Run tab; clear unread like setOutputTab('run') would.
+    set({ runOutputPoppedOut: false, outputTab: 'run', runOutputUnread: false });
   },
   setRunOutputPoppedOut: (v) => set({ runOutputPoppedOut: v }),
 

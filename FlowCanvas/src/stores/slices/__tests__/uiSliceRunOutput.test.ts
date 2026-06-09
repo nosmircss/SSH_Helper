@@ -53,6 +53,15 @@ describe('uiSlice run-output view prefs', () => {
     expect(useFlowStore.getState().outputTab).toBe('run');
   });
 
+  it('open/closeRunOutputWindow clear the unread dot (no spurious indicator after docking)', () => {
+    useFlowStore.setState({ runOutputUnread: true });
+    useFlowStore.getState().openRunOutputWindow();
+    expect(useFlowStore.getState().runOutputUnread).toBe(false);
+    useFlowStore.setState({ runOutputUnread: true });
+    useFlowStore.getState().closeRunOutputWindow();
+    expect(useFlowStore.getState().runOutputUnread).toBe(false);
+  });
+
   it('restore setters apply without echo', () => {
     useFlowStore.getState().restoreRunOutputPrefs({ runOutputColor: false, runOutputWrap: true, runOutputFollow: false });
     const s = useFlowStore.getState();
