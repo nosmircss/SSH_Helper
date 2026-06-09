@@ -3,7 +3,7 @@
  * Renders the executionSlice.runOutput buffer with optional light styling
  * (teal banners, red error lines) gated behind the Color toggle.
  */
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
 import { classifyRunOutputLine } from '../utils/runOutputClassify';
 
@@ -98,7 +98,7 @@ export default function RunOutputView() {
 }
 
 function ToolbarButton({ testid, active, onClick, title, children }: {
-  testid: string; active: boolean; onClick: () => void; title: string; children: React.ReactNode;
+  testid: string; active: boolean; onClick: () => void; title: string; children: ReactNode;
 }) {
   return (
     <button
