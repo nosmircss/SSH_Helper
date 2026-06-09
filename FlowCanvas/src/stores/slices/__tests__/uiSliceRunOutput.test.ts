@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 vi.mock('../../../utils/layoutAutosave', () => ({ sendLayoutAutosave: vi.fn(), flushLayoutAutosave: vi.fn() }));
 vi.mock('../../../MessageBus', () => ({
   messageBus: { send: vi.fn() },
-  CANVAS_HOST_MESSAGES: { outgoing: { layoutSave: 'layout-save', prefSave: 'pref-save', setLayoutMode: 'set-layout-mode' } },
+  CANVAS_HOST_MESSAGES: { outgoing: { layoutSave: 'layout-save', prefSave: 'pref-save', setLayoutMode: 'set-layout-mode', openRunOutputWindow: 'open-run-output-window', closeRunOutputWindow: 'close-run-output-window' } },
 }));
 import { useFlowStore } from '../../useFlowStore';
 import { messageBus } from '../../../MessageBus';
@@ -38,10 +38,19 @@ describe('uiSlice run-output view prefs', () => {
     expect(messageBus.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'layout-save', runOutputFollow: false }));
   });
 
-  it('toggleRunOutputPoppedOut flips the floating-overlay flag', () => {
-    expect(useFlowStore.getState().runOutputPoppedOut).toBe(false);
-    useFlowStore.getState().toggleRunOutputPoppedOut();
+  it('openRunOutputWindow sends open + sets popped-out and the Block tab', () => {
+    useFlowStore.getState().openRunOutputWindow();
+    expect(messageBus.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'open-run-output-window' }));
     expect(useFlowStore.getState().runOutputPoppedOut).toBe(true);
+    expect(useFlowStore.getState().outputTab).toBe('block');
+  });
+
+  it('closeRunOutputWindow sends close + clears popped-out and shows the Run tab', () => {
+    useFlowStore.setState({ runOutputPoppedOut: true, outputTab: 'block' });
+    useFlowStore.getState().closeRunOutputWindow();
+    expect(messageBus.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'close-run-output-window' }));
+    expect(useFlowStore.getState().runOutputPoppedOut).toBe(false);
+    expect(useFlowStore.getState().outputTab).toBe('run');
   });
 
   it('restore setters apply without echo', () => {
