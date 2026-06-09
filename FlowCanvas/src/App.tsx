@@ -32,7 +32,6 @@ import HostBar from './panels/HostBar';
 import VariableInspector from './panels/VariableInspector';
 import OutputPreview from './panels/OutputPreview';
 import DebugPanel from './panels/DebugPanel';
-import RunOutputPopOut from './panels/RunOutputPopOut';
 import ProblemsPanel from './panels/ProblemsPanel';
 import ConnectionNotice from './panels/ConnectionNotice';
 import SearchOverlay from './panels/SearchOverlay';
@@ -412,7 +411,6 @@ function FlowCanvasInner() {
           {panelsVisible.timeline && <TimelinePanel />}
         </RightPanel>
         <DebugPanel />
-        <RunOutputPopOut />
         <ProblemsPanel />
       </div>
     </div>
