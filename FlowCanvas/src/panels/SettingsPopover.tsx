@@ -137,7 +137,7 @@ export default function SettingsPopover() {
   const widthOptions: readonly { label: string; v: number }[] = WIDTH_PRESETS.map((p) => ({ label: p.label, v: p.px as number }));
   const textOptions: readonly { label: string; v: number }[] = TEXT_SCALES.map((p) => ({ label: p.label, v: p.v as number }));
   const densityOptions: readonly { label: string; v: number }[] = DENSITIES.map((p) => ({ label: p.label, v: p.v as number }));
-  const newBlocksOptions: readonly { label: string; v: number }[] = [{ label: 'Collapsed', v: 0 }, { label: 'Expanded', v: 1 }];
+  const blockStateOptions: readonly { label: string; v: number }[] = [{ label: 'Collapsed', v: 0 }, { label: 'Expanded', v: 1 }];
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -177,10 +177,12 @@ export default function SettingsPopover() {
             max={100000}
             onCommit={setIterationHistoryCap}
           />
+          {/* Applies everywhere: the open graph (immediately), every preset load, and new
+              palette blocks. Expanded forces blocks open regardless of per-preset saved state. */}
           <Segmented
-            label="New blocks"
+            label="Default block state"
             value={defaultBlockExpanded ? 1 : 0}
-            options={newBlocksOptions}
+            options={blockStateOptions}
             onChange={(v) => setDefaultBlockExpanded(v === 1)}
           />
 

@@ -118,7 +118,6 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const branchTakenKey = iterScope ? scopedEntry?.branchTaken : branchTakenAggregate;
   const isExpanded = useFlowStore((s) => s.isExpanded(id));
   const toggleExpanded = useFlowStore((s) => s.toggleExpanded);
-  const selectNode = useFlowStore((s) => s.selectNode);
   const blockWidth = useFlowStore((s) => s.blockWidth);
   const textScale = useFlowStore((s) => s.textScale);
   const updateNodeData = useFlowStore((s) => s.updateNodeData);
@@ -399,7 +398,9 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         <div data-testid="block-summary" style={{ background: 'var(--fc-surface-0)', padding: '8px 9px 6px' }}>
           {summary.rows.map((r) => (
             <div key={r.key} style={{ display: 'flex', gap: 10, padding: '3px 0', alignItems: 'baseline' }}>
-              <span style={{ flex: 'none', width: 96, fontSize: 10.5 * textScale, fontWeight: 600, color: 'var(--fc-text-secondary)' }}>{r.label}</span>
+              {/* Label column scales with the text so a label that fits at 1× never wraps at XL/XXL
+                  (wrapped rows are taller than the layout's height estimate). */}
+              <span style={{ flex: 'none', width: 96 * textScale, fontSize: 10.5 * textScale, fontWeight: 600, color: 'var(--fc-text-secondary)' }}>{r.label}</span>
               <span style={{
                 flex: 1, fontSize: 11.5 * textScale, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 fontFamily: r.isCode ? 'var(--fc-font-mono)' : undefined,
@@ -407,15 +408,11 @@ function BaseBlock({ data, selected, id }: NodeProps) {
               }}>{r.value}</span>
             </div>
           ))}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, paddingTop: 6,
+          <div style={{ marginTop: 5, paddingTop: 6,
                         borderTop: '1px solid var(--fc-border)', fontSize: 10 * textScale }}>
             <span style={{ color: 'var(--fc-text-faint)' }}>
               {summary.hiddenCount} fields at default
             </span>
-            <span
-              onClick={(e) => { e.stopPropagation(); selectNode(id); }}
-              style={{ color: 'var(--fc-accent)', cursor: 'pointer' }}
-            >Edit in Properties</span>
           </div>
         </div>
       ) : previewText ? (

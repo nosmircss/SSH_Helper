@@ -2,15 +2,11 @@
 // Round-trip-safe branch-band derivation. Reads ONLY existing transient metadata
 // (_isChildOf, _stepPath, _branchLabel) + node.position; writes nothing to node.data.
 import type { Node } from '@xyflow/react';
-import { CHILD_WIDTH, COLLAPSED_HEIGHT, estimateNodeHeight, BAND_PAD, BAND_LABEL_HEADROOM } from './nodeSize';
+import { CHILD_WIDTH, estimateNodeHeight, BAND_PAD, BAND_LABEL_HEADROOM } from './nodeSize';
 import { branchScopeFromStepPath } from './layout/branchScope';
 
 // Re-exported for back-compat: BAND_PAD now lives in nodeSize (shared with the layout engine).
 export { BAND_PAD };
-
-/** Per-depth-level inward inset for nested bands, so each nesting level steps clear of its
- *  parent's left accent. Capped at BAND_PAD - 4 in computeBranchBands to keep children wrapped. */
-const NESTED_BAND_INSET = 10;
 
 export interface BranchBand {
   id: string;
@@ -101,10 +97,16 @@ function branchSubtreePrefix(stepPath: string | undefined): string | undefined {
   return undefined;
 }
 
-export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WIDTH): BranchBand[] {
+export function computeBranchBands(
+  nodes: Node[],
+  childWidth: number = CHILD_WIDTH,
+  textScale: number = 1,
+): BranchBand[] {
+  // Heights MUST use the same textScale the layout used (blocks really are taller at XL/XXL);
+  // an unscaled estimate lets the last block in a lane cross the band's bottom border.
   const boxOf = (n: Node): { w: number; h: number } => {
     const data = (n.data ?? {}) as { blockType?: string; expanded?: boolean; props?: Record<string, unknown> };
-    const h = data.expanded ? estimateNodeHeight(data.blockType ?? '', data.props ?? {}, true) : COLLAPSED_HEIGHT;
+    const h = estimateNodeHeight(data.blockType ?? '', data.props ?? {}, !!data.expanded, textScale);
     return { w: childWidth, h };
   };
 
@@ -173,7 +175,6 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
     parentId: string;
     branchKey: string;
     depth: number;
-    leftInset: number;
     memberIds: string[];
     memberSet: Set<string>;
     nMinX: number; nMinY: number; nMaxX: number; nMaxY: number;
@@ -204,11 +205,9 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
     }
     const firstProps = (g.nodes[0]?.data as { props?: Record<string, unknown> } | undefined)?.props;
     const depth = branchDepth(firstProps?.['_stepPath'] as string | undefined);
-    // Pull nested bands inward by depth on the LEFT ONLY, so a band that shares its parent's left
-    // edge (e.g. a multi-branch first arm sitting at the container's own X) doesn't paint over the
-    // parent's left accent — without that inset the nesting reads as one band changing color.
-    // Capped at BAND_PAD - 4 so the band still clears its leftmost child.
-    const leftInset = Math.min(depth * NESTED_BAND_INSET, BAND_PAD - 4);
+    // No per-depth left inset: padding is uniform (BAND_PAD) on left/right/bottom at every
+    // nesting level. The parent-accent concern the old inset addressed is already covered by
+    // pass 2 below — a parent band always wraps a nested band's rect with a full BAND_PAD.
     const memberIds = boxNodes.map((n) => n.id);
     // Include comments anchored to any member so "drag the band" moves them too (keeps them aligned
     // above their block; a left-behind leading comment would otherwise balloon the band's width).
@@ -217,7 +216,7 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
       if (cids) memberIds.push(...cids);
     }
     prelims.push({
-      id: groupId, parentId: g.parentId, branchKey: g.branchKey, depth, leftInset,
+      id: groupId, parentId: g.parentId, branchKey: g.branchKey, depth,
       memberIds, memberSet: new Set(memberIds),
       nMinX: minX, nMinY: minY, nMaxX: maxX, nMaxY: maxY,
     });
@@ -236,13 +235,13 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
   // and top label headroom — before adding BAND_PAD all round. Nesting runs several levels deep, so
   // relax until nothing changes (rects only ever grow; the cap is a safety net, not the exit).
   const rect = new Map<string, { x: number; y: number; w: number; h: number }>();
-  const sizeFrom = (p: Prelim, minX: number, minY: number, maxX: number, maxY: number) => ({
-    x: minX - BAND_PAD + p.leftInset,
+  const sizeFrom = (minX: number, minY: number, maxX: number, maxY: number) => ({
+    x: minX - BAND_PAD,
     y: minY - BAND_PAD - BAND_LABEL_HEADROOM,
-    w: (maxX - minX) + BAND_PAD * 2 - p.leftInset,
+    w: (maxX - minX) + BAND_PAD * 2,
     h: (maxY - minY) + BAND_PAD * 2 + BAND_LABEL_HEADROOM,
   });
-  for (const p of prelims) rect.set(p.id, sizeFrom(p, p.nMinX, p.nMinY, p.nMaxX, p.nMaxY));
+  for (const p of prelims) rect.set(p.id, sizeFrom(p.nMinX, p.nMinY, p.nMaxX, p.nMaxY));
   for (let pass = 0; pass <= prelims.length; pass++) {
     let changed = false;
     for (const p of prelims) {
@@ -254,7 +253,7 @@ export function computeBranchBands(nodes: Node[], childWidth: number = CHILD_WID
         maxX = Math.max(maxX, r.x + r.w);
         maxY = Math.max(maxY, r.y + r.h);
       }
-      const next = sizeFrom(p, minX, minY, maxX, maxY);
+      const next = sizeFrom(minX, minY, maxX, maxY);
       const cur = rect.get(p.id)!;
       if (next.x !== cur.x || next.y !== cur.y || next.w !== cur.w || next.h !== cur.h) {
         rect.set(p.id, next);

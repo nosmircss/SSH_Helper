@@ -70,6 +70,10 @@ export const createSettingsSlice: StateCreator<FlowStore, [], [], SettingsSlice>
     setDefaultBlockExpanded: (v) => {
       set({ defaultBlockExpanded: v });
       messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, defaultBlockExpanded: v });
+      // The control reads as the blocks' default presentation, so apply it to the open graph
+      // immediately (setAllExpanded stamps carrier flags, reflows, and autosaves) — load-graph
+      // and restoreCanvasSettings enforce it for future loads.
+      if (get().nodes.length > 0) get().setAllExpanded(v);
     },
     resetCanvasSettings: () => {
       set({ ...SETTINGS_DEFAULTS });
@@ -79,7 +83,14 @@ export const createSettingsSlice: StateCreator<FlowStore, [], [], SettingsSlice>
     // restore that arrives AFTER load-graph still re-lays-out at the saved sizing. No echo.
     restoreCanvasSettings: (s) => {
       set({ ...s });
-      if (get().nodes.length > 0) reflowLayout(get);
+      if (get().nodes.length > 0) {
+        // Fresh-open ordering: load-graph lands before this restore, so a restored
+        // "Default block state: Expanded" must be applied to the already-loaded graph here
+        // (setAllExpanded stamps flags + reflows). Restoring OFF must NOT collapse anything —
+        // the preset's own saved expansion governs — so it just reflows at the new sizing.
+        if (s.defaultBlockExpanded === true) get().setAllExpanded(true, { autosave: false });
+        else reflowLayout(get);
+      }
     },
   };
 };

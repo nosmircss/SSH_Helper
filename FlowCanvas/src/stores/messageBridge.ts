@@ -129,7 +129,15 @@ export function initMessageBridge(): () => void {
     // Load graph from C# (YAML → graph conversion result)
     messageBus.on('load-graph', (msg) => {
       if (msg.nodes && msg.edges) {
-        store.getState().setNodes(msg.nodes as Node[]);
+        // "Default block state: Expanded" forces every loaded block open regardless of the
+        // preset's saved expansion. Stamp the carrier flag BEFORE setNodes so the layout below
+        // estimates expanded heights and the expanded-restore scan picks every block up.
+        let loadNodes = msg.nodes as Node[];
+        if (store.getState().defaultBlockExpanded) {
+          loadNodes = loadNodes.map((n) =>
+            n.type === 'block' ? { ...n, data: { ...(n.data ?? {}), expanded: true } } : n);
+        }
+        store.getState().setNodes(loadNodes);
         store.getState().setEdges(msg.edges as Edge[]);
         ensureStartNodeExists(store);
 
@@ -153,7 +161,11 @@ export function initMessageBridge(): () => void {
 
         resetGraphSessionState(store);
 
-        // Restore disabled block state from loaded node data
+        // Restore disabled/expanded block state from the loaded node data. ALWAYS restore —
+        // even with empty lists — so the previous preset's sets can't leak onto the new graph:
+        // preset node ids collide (node-1, node-2, …), and a stale expandedNodes set makes
+        // blocks RENDER expanded while the layout above estimated them collapsed → overlap
+        // when switching presets in an open canvas (fresh opens start with empty sets).
         const state = store.getState();
         const disabledIds: string[] = [];
         for (const node of state.nodes) {
@@ -162,15 +174,13 @@ export function initMessageBridge(): () => void {
             disabledIds.push(node.id);
           }
         }
-        if (disabledIds.length > 0) {
-          state.restoreDisabledBlocks(disabledIds);
-        }
+        state.restoreDisabledBlocks(disabledIds);
         const expandedIds: string[] = [];
         for (const node of state.nodes) {
           const data = node.data as Record<string, unknown> | undefined;
           if (data?.expanded === true) expandedIds.push(node.id);
         }
-        if (expandedIds.length > 0) state.restoreExpandedNodes(expandedIds);
+        state.restoreExpandedNodes(expandedIds);
       }
     }),
 

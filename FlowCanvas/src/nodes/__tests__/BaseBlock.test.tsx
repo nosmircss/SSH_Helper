@@ -72,7 +72,10 @@ describe('BaseBlock', () => {
     // store stub returns isExpanded=true
     renderNode({ data: { blockType: 'send', label: 'Send', props: { command: 'show ver', capture: 'out' } } as any });
     expect(screen.getByTestId('block-summary')).toBeInTheDocument();
-    expect(screen.getByText('Edit in Properties')).toBeInTheDocument();
+    // The footer keeps the defaults hint only — the "Edit in Properties" link was removed
+    // (clicking the block already selects it and opens Properties).
+    expect(screen.queryByText('Edit in Properties')).toBeNull();
+    expect(screen.getByText(/fields at default/)).toBeInTheDocument();
   });
 
   it('block width follows the store blockWidth setting', () => {

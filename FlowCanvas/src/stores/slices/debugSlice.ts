@@ -22,7 +22,9 @@ export interface DebugSlice {
   isDisabled: (nodeId: string) => boolean;
   hasBreakpoint: (nodeId: string) => boolean;
   toggleExpanded: (nodeId: string) => void;
-  setAllExpanded: (expanded: boolean) => void;
+  /** opts.autosave=false for host-driven paths (settings restore on open) — merely opening a
+   *  preset must not rewrite its saved layout. User-initiated calls autosave (the default). */
+  setAllExpanded: (expanded: boolean, opts?: { autosave?: boolean }) => void;
   restoreExpandedNodes: (nodeIds: string[]) => void;
   isExpanded: (nodeId: string) => boolean;
 }
@@ -87,7 +89,7 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
     reflowLayout(get);
     sendLayoutAutosave();
   },
-  setAllExpanded: (expanded) => {
+  setAllExpanded: (expanded, opts) => {
     const st = get();
     const blockIds = st.nodes.filter((n) => n.type === 'block').map((n) => n.id);
     set({ expandedNodes: expanded ? new Set(blockIds) : new Set<string>() });
@@ -99,7 +101,7 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
     );
     st.setNodes(withFlag);
     reflowLayout(get); // gated by the Auto-layout setting; keepOrphans inside reflowLayout
-    sendLayoutAutosave();
+    if (opts?.autosave !== false) sendLayoutAutosave();
   },
   restoreExpandedNodes: (nodeIds) => {
     set({ expandedNodes: new Set(nodeIds) });
