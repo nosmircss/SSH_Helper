@@ -37,21 +37,25 @@ const loopGraph = () => ({
   ],
 });
 
-/** 3 iterations: A runs in all three; B runs in 0 and 2 only; A errors in iteration 1. */
+/** 3 iterations: A runs in all three; B runs in 0 and 2 only; A errors in iteration 1.
+ *  Completion events carry per-iteration `variables` (so the Variables panel time-travels),
+ *  and B emits step-output in the iterations it ran (so per-block output honesty is testable). */
 async function simulateRun(page: Page) {
   await postHostMessage(page, { type: 'execution-started' });
   for (let i = 0; i < 3; i++) {
     const stack = [frame('F', i, `host${i}`)];
+    const vars = { host: `host${i}`, disk_pct: 40 + i };
     await postHostMessage(page, { type: 'execution-update', stepId: 'A', state: 'running', iterationStack: stack });
     const aState = i === 1 ? 'error' : 'success';
-    await postHostMessage(page, { type: 'execution-update', stepId: 'A', state: aState, duration: 10 + i, iterationStack: stack });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'A', state: aState, duration: 10 + i, iterationStack: stack, variables: vars });
     await postHostMessage(page, { type: 'step-output', stepId: 'A', output: `disk output ${i}`, iterationStack: stack });
     if (i !== 1) {
       await postHostMessage(page, { type: 'execution-update', stepId: 'B', state: 'running', iterationStack: stack });
-      await postHostMessage(page, { type: 'execution-update', stepId: 'B', state: 'success', duration: 5, iterationStack: stack });
+      await postHostMessage(page, { type: 'execution-update', stepId: 'B', state: 'success', duration: 5, iterationStack: stack, variables: vars });
+      await postHostMessage(page, { type: 'step-output', stepId: 'B', output: `report ${i}`, iterationStack: stack });
     }
   }
-  await postHostMessage(page, { type: 'execution-update', stepId: 'F', state: 'success', duration: 60, iterationCount: 3 });
+  await postHostMessage(page, { type: 'execution-update', stepId: 'F', state: 'success', duration: 60, iterationCount: 3, variables: { host: 'final', disk_pct: 99 } });
   await postHostMessage(page, { type: 'execution-finished' });
 }
 
@@ -111,6 +115,43 @@ test.describe('Flow Canvas Iteration Stepper', () => {
 
     await page.getByTestId('iter-next').click();
     await expect(page.getByText('(2/3)')).toBeVisible();
+  });
+
+  test('variables panel time-travels with the iteration selection', async ({ page }) => {
+    // The Variables panel is visible by default (panelsVisible.variables === true), no toggle needed.
+    await page.getByTestId('iter-next').click(); // iteration 1 (i=0)
+    const banner = page.getByTestId('iter-vars-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('1/3');
+    await expect(banner).toContainText('host0'); // foreach label
+    await expect(page.getByText('"host0"')).toBeVisible(); // snapshot value for `host`
+
+    await page.getByTestId('iter-vars-live').click();
+    await expect(page.getByTestId('iter-vars-banner')).toHaveCount(0);
+  });
+
+  test('block output is honest about empty iterations', async ({ page }) => {
+    await page.locator('.react-flow__node[data-id="B"]').click(); // select B + Block tab
+
+    // Iteration 2 (i=1): B never ran → the panel is still iteration-scoped (chip shows) but
+    // there is no entry, so it must say so rather than fall back to the latest output.
+    await page.getByTestId('iter-next').click();
+    await page.getByTestId('iter-next').click();
+    await expect(page.getByTestId('iter-counter')).toHaveText('2/3');
+    await expect(page.getByTestId('iter-output-empty')).toBeVisible();
+    await expect(page.getByTestId('iter-output-chip')).toBeVisible();
+
+    // Iteration 1 (i=0): B succeeded and emitted `report 0`.
+    await page.getByTestId('iter-prev').click();
+    await expect(page.getByTestId('iter-counter')).toHaveText('1/3');
+    await expect(page.getByText('report 0')).toBeVisible();
+    await expect(page.getByTestId('iter-output-empty')).toHaveCount(0);
+  });
+
+  test('loop node selected shows the guidance hint', async ({ page }) => {
+    await page.locator('.react-flow__node[data-id="F"]').click(); // select the foreach container
+    await page.getByTestId('iter-next').click(); // pin an iteration so the loop has a selection
+    await expect(page.getByTestId('iter-output-loophint')).toBeVisible();
   });
 
   test('a new run clears the cluster', async ({ page }) => {
