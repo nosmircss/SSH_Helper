@@ -73,6 +73,9 @@ export interface ExecutionUpdateMessage {
   iterationCount?: number | null;
   /** Taken branch scope-key (if/switch), e.g. 'else', 'cases/2/do', 'elif/0/then'. */
   branchTaken?: string | null;
+  /** Step failed but the error was suppressed via on_error: continue — reported as success
+   *  for control flow, flagged here so the iteration stepper's failure markers can find it. */
+  suppressedError?: boolean | null;
   /** Live loop-iteration stack for this step event (outermost first); absent outside loops. */
   iterationStack?: IterationFrameMsg[] | null;
 }

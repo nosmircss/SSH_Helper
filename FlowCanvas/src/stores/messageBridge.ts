@@ -293,6 +293,7 @@ export function initMessageBridge(): () => void {
               typeof msg.branchTaken === 'string' && msg.branchTaken.trim().length > 0
                 ? msg.branchTaken.trim()
                 : undefined,
+            suppressed: msg.suppressedError === true ? true : undefined,
           },
           isCompletion && msg.variables && typeof msg.variables === 'object'
             ? (msg.variables as Record<string, unknown>)

@@ -138,7 +138,7 @@ test.describe('Flow Canvas Iteration Stepper', () => {
     await page.getByTestId('iter-next').click();
     await page.getByTestId('iter-next').click();
     await expect(page.getByTestId('iter-counter')).toHaveText('2/3');
-    await expect(page.getByTestId('iter-output-empty')).toBeVisible();
+    await expect(page.getByTestId('iter-output-empty')).toHaveText('(not reached in this iteration)');
     await expect(page.getByTestId('iter-output-chip')).toBeVisible();
 
     // Iteration 1 (i=0): B succeeded and emitted `report 0`.

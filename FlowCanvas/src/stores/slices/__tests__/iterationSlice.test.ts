@@ -142,6 +142,22 @@ describe('iterationSlice — recordIterationEvent', () => {
     expect((vars.note as string).length).toBe(2000 + 13);
   });
 
+  it('size-gates oversized collections to a truncated JSON string but keeps small objects live', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    const bigArray = Array.from({ length: 500 }, () => 'abcdefghij'); // JSON well over 2000 chars
+    rec('A', [F('L', 0)], { state: 'success' }, {
+      big: bigArray,
+      small: { a: 1 },
+    });
+
+    const vars = useFlowStore.getState().iterationLog.get('L')![0].variables!;
+    expect(typeof vars.big).toBe('string');
+    expect((vars.big as string).endsWith('… [truncated]')).toBe(true);
+    expect((vars.big as string).length).toBe(2000 + 13);
+    // Small objects stay as live references for nice display.
+    expect(vars.small).toEqual({ a: 1 });
+  });
+
   it('last completion wins and ancestors inherit the end-of-outer-iteration snapshot', () => {
     const rec = useFlowStore.getState().recordIterationEvent;
     rec('X', [F('OUT', 0), F('IN', 0)], { state: 'success' }, { v: 1 });
@@ -152,6 +168,26 @@ describe('iterationSlice — recordIterationEvent', () => {
     expect(inner[0].variables).toEqual({ v: 1 });
     expect(inner[1].variables).toEqual({ v: 2 });
     expect(outer[0].variables).toEqual({ v: 2 });
+  });
+
+  it('suppressed errors mark the iteration failed', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    // on_error: continue → host reports success but flags suppressed; the iteration must still
+    // count as failed so the ⚠ markers surface it, while the node entry stays success.
+    rec('A', [F('L', 0)], { state: 'success', suppressed: true });
+
+    const records = useFlowStore.getState().iterationLog.get('L')!;
+    expect(records).toHaveLength(1);
+    expect(records[0].failed).toBe(true);
+    expect(records[0].nodes.get('A')).toMatchObject({ state: 'success', suppressed: true });
+  });
+
+  it('suppressed errors flag ancestor iterations too', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    rec('X', [F('OUT', 0), F('IN', 0)], { state: 'success', suppressed: true });
+
+    expect(useFlowStore.getState().iterationLog.get('IN')![0].failed).toBe(true);
+    expect(useFlowStore.getState().iterationLog.get('OUT')![0].failed).toBe(true);
   });
 
   it('events without variables preserve the existing snapshot', () => {

@@ -13644,6 +13644,7 @@ namespace SSH_Helper
                 duration = e.DurationMs,
                 iterationCount = e.IterationCount,
                 branchTaken = e.BranchTaken,
+                suppressedError = e.SuppressedError ? (bool?)true : null,
                 variables,
                 iterationStack
             });

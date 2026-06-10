@@ -301,6 +301,43 @@ public class IterationStackEventTests
     }
 
     [Fact]
+    public async Task SuppressedError_IsFlaggedOnCompletionEvents()
+    {
+        // A body step that fails under on_error: continue runs as success for control flow
+        // (the loop keeps iterating), but its completion events must carry SuppressedError so
+        // the canvas iteration stepper's failure markers can still find the problem.
+        // Dns with no host fails synchronously and offline; on_error: continue suppresses it.
+        var context = new ScriptContext();
+        context.SetVariable("items", "[\"alpha\",\"beta\"]");
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Foreach = "x in items",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new()
+                        {
+                            Dns = new DnsOptions(),
+                            OnError = "continue",
+                            StepPath = "steps/0/do/0"
+                        }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var bodyEvents = events.Where(e => e.StepPath == "steps/0/do/0").ToList();
+        bodyEvents.Should().HaveCount(2, "both iterations ran — the suppressed failure did not abort the loop");
+        bodyEvents.Should().OnlyContain(e => e.Success == true && e.SuppressedError);
+    }
+
+    [Fact]
     public async Task ParallelArms_WithLoops_DoNotCrossContaminateStacks()
     {
         // Two parallel arms, each a foreach over 3 items, sharing one ScriptContext —

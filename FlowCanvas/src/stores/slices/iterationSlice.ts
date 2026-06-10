@@ -16,9 +16,17 @@ function sanitizeSnapshot(vars: Record<string, unknown>): Record<string, unknown
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(vars)) {
     if (HEAVY_VARIABLE_KEYS.has(k.toLowerCase())) continue;
-    out[k] = typeof v === 'string' && v.length > MAX_SNAPSHOT_STRING
-      ? v.slice(0, MAX_SNAPSHOT_STRING) + '… [truncated]'
-      : v;
+    if (typeof v === 'string') {
+      out[k] = v.length > MAX_SNAPSHOT_STRING ? v.slice(0, MAX_SNAPSHOT_STRING) + '… [truncated]' : v;
+    } else if (v !== null && typeof v === 'object') {
+      // Bound collections the same way strings are bounded: oversized ones are kept as a
+      // truncated JSON preview rather than a live reference into unbounded data.
+      let json: string;
+      try { json = JSON.stringify(v) ?? String(v); } catch { json = '[unserializable]'; }
+      out[k] = json.length > MAX_SNAPSHOT_STRING ? json.slice(0, MAX_SNAPSHOT_STRING) + '… [truncated]' : v;
+    } else {
+      out[k] = v;
+    }
   }
   return out;
 }
@@ -29,6 +37,10 @@ export interface IterationNodeEntry {
   duration?: number;
   /** Index into executionSlice.blockOutputs[nodeId] for this iteration's output. */
   outputIdx?: number;
+  /** Step failed but was suppressed via on_error: continue. The entry's state stays
+   *  'success' (matching app-wide on_error semantics); this only flags the iteration as
+   *  failed so the stepper's ⚠ markers can still surface the problem. */
+  suppressed?: boolean;
 }
 
 export interface IterationRecord {
@@ -94,7 +106,7 @@ export const createIterationSlice: StateCreator<FlowStore, [], [], IterationSlic
     const log = new Map(s.iterationLog);
     const totals = new Map(s.totalIterations);
     let nextSeq = s.iterationSeq;
-    const eventFailed = patch.state === 'error';
+    const eventFailed = patch.state === 'error' || patch.suppressed === true;
     const sanitized = variables ? sanitizeSnapshot(variables) : undefined;
     let parentRef: { loopId: string; seq: number } | null = null;
 
@@ -137,6 +149,7 @@ export const createIterationSlice: StateCreator<FlowStore, [], [], IterationSlic
         branchTaken: patch.branchTaken ?? prev?.branchTaken,
         duration: patch.duration ?? prev?.duration,
         outputIdx: patch.outputIdx ?? prev?.outputIdx,
+        suppressed: patch.suppressed ?? prev?.suppressed,
       });
       if (eventFailed) rec.failed = true;
       // End-of-iteration snapshot: last completion wins. The matched branch shallow-copied

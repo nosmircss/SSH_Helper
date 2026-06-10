@@ -62,6 +62,9 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
   // rather than silently falling back to the latest output.
   const scopedEntry = nodeId && iterScope ? iterScope.nodes.get(nodeId) : undefined;
   const scopedNoOutput = !!iterScope && !!nodeId && scopedEntry?.outputIdx == null;
+  // No entry for this node in the governing iteration = the block was never reached that
+  // iteration (vs. reached but produced no output) — distinguished in the empty note.
+  const scopedUnreached = !!iterScope && !!nodeId && scopedEntry === undefined;
 
   // The selected node's own block type — used for the loop-container affordance.
   const selectedBlockType = nodeId
@@ -270,6 +273,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
               displayOutput,
               nodeId,
               scopedNoOutput,
+              scopedUnreached,
               loopHintActive: isLoopNodeSelected && loopHasSelection && !displayOutput,
             })}
           </pre>
@@ -283,11 +287,12 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
 
 /** Block-tab body content with the iteration-scoped precedence rules:
  *  loop-container hint > scoped-empty note > actual output > generic empty state. */
-function renderBlockBody({ hasOutput, displayOutput, nodeId, scopedNoOutput, loopHintActive }: {
+function renderBlockBody({ hasOutput, displayOutput, nodeId, scopedNoOutput, scopedUnreached, loopHintActive }: {
   hasOutput: boolean;
   displayOutput: string;
   nodeId?: string;
   scopedNoOutput: boolean;
+  scopedUnreached: boolean;
   loopHintActive: boolean;
 }): ReactNode {
   if (loopHintActive) {
@@ -298,7 +303,13 @@ function renderBlockBody({ hasOutput, displayOutput, nodeId, scopedNoOutput, loo
     );
   }
   if (scopedNoOutput) {
-    return <span data-testid="iter-output-empty">(no output in this iteration)</span>;
+    // Unreached (no entry) vs. reached-but-silent (entry without output) read very
+    // differently to a user staring at a blank panel — say which one it is.
+    return (
+      <span data-testid="iter-output-empty">
+        {scopedUnreached ? '(not reached in this iteration)' : '(no output in this iteration)'}
+      </span>
+    );
   }
   if (hasOutput) return displayOutput;
   return nodeId ? '(no output)' : 'Select a block to view its output';

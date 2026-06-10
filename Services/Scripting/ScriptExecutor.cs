@@ -52,6 +52,11 @@ namespace SSH_Helper.Services.Scripting
         /// its frame is popped, so a loop's events carry only its ancestors' frames.
         /// </summary>
         public IReadOnlyList<IterationFrame>? IterationStack { get; init; }
+
+        /// <summary>True when the step failed but the error was suppressed (on_error: continue) —
+        /// reported as success for control flow, but flagged so debugging surfaces (the canvas
+        /// iteration stepper's failure markers) can still find it.</summary>
+        public bool SuppressedError { get; init; }
     }
 
     /// <summary>
@@ -400,6 +405,7 @@ namespace SSH_Helper.Services.Scripting
                         DurationMs = sw.ElapsedMilliseconds,
                         IterationCount = result.IterationCount,
                         BranchTaken = result.BranchTaken,
+                        SuppressedError = result.SuppressedError,
                         IterationStack = context.IterationStack
                     });
 
