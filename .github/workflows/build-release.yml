@@ -18,17 +18,17 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@v5
       with:
         dotnet-version: '8.0.x'
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
-        node-version: 20
+        node-version: 24
 
     - name: Install FlowCanvas dependencies
       working-directory: ./FlowCanvas
@@ -44,7 +44,7 @@ jobs:
 
     - name: Upload Playwright artifacts
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: FlowCanvas-Playwright
         path: |
@@ -61,17 +61,17 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@v5
       with:
         dotnet-version: 8.0.x
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
-        node-version: 20
+        node-version: 24
 
     - name: Install FlowCanvas dependencies
       working-directory: ./FlowCanvas
@@ -87,7 +87,7 @@ jobs:
       run: dotnet publish ./SSH_Helper.csproj -c Release -o ./publish/portable --no-restore -p:PortableBuild=true
 
     - name: Upload build artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: SSH_Helper_Builds
         path: ./publish/
@@ -99,10 +99,10 @@ jobs:
     
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Download artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: SSH_Helper_Builds
         path: ./release
@@ -124,7 +124,7 @@ jobs:
         sha256sum SSH_Helper_Portable.exe > SSH_Helper_Portable.exe.sha256
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v3
       with:
         files: |
           release/SSH_Helper.exe
