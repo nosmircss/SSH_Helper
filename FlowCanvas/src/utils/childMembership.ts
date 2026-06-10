@@ -28,8 +28,9 @@ export interface ChildMembership {
   /** Present when the target carried prior (orphaned) membership: it is MOVING, not just joining.
    *  `fromParentId` is the container it vacated (undefined when the stale path was top-level).
    *  applyChildMembership flags that container's chain for re-export (its stale snippet still nests
-   *  the moved block) and strips the target's stale band cosmetics; the caller must renumber so the
-   *  vacated branch's survivors stay contiguous. */
+   *  the moved block), strips the target's stale band cosmetics, and carries the target's SUBTREE
+   *  to the new path prefix (a moved container's descendants ride along); the caller must renumber
+   *  so the vacated branch's survivors stay contiguous. */
   rehome?: { fromParentId?: string };
 }
 
@@ -161,6 +162,19 @@ export function applyChildMembership(nodes: Node[], membership: ChildMembership)
   walkChain(props['_isChildOf']);
   if (rehome) walkChain(rehome.fromParentId);
 
+  // A re-homed CONTAINER carries its subtree: every descendant's path still starts with the
+  // target's OLD path, so rewrite that prefix to the new one in this same pass. renumberStepPaths
+  // can't recover them later — it matches a container's children against the container's CURRENT
+  // path (already the new one), so stale descendants fail the startsWith and would stay stranded on
+  // the vacated branch's prefix, desyncing the runtime step↔node map and colliding with that
+  // branch's renumbered survivors.
+  const oldTargetPath = rehome ? propsOf(nodes.find((n) => n.id === targetId))['_stepPath'] : undefined;
+  const newTargetPath = props['_stepPath'];
+  const subtreeHead =
+    typeof oldTargetPath === 'string' && typeof newTargetPath === 'string' && oldTargetPath !== newTargetPath
+      ? `${oldTargetPath}/`
+      : undefined;
+
   return nodes.map((n) => {
     const data = (n.data as Record<string, unknown>) ?? {};
     const existing = (data.props as Record<string, unknown> | undefined) ?? {};
@@ -180,8 +194,13 @@ export function applyChildMembership(nodes: Node[], membership: ChildMembership)
     let nextProps = existing;
     const sp = existing['_stepPath'];
     if (typeof sp === 'string') {
-      const bumped = bumpStepPath(sp, renumber.prefix, renumber.fromIndex);
-      if (bumped !== sp) nextProps = { ...nextProps, _stepPath: bumped };
+      // Descendants of a re-homed container follow it to the new prefix; everyone else gets the
+      // ordinary sibling bump at the insertion point. Mutually exclusive: the old subtree lives in
+      // the vacated branch, the bump applies to the destination branch.
+      const next = subtreeHead && sp.startsWith(subtreeHead)
+        ? `${newTargetPath as string}/${sp.slice(subtreeHead.length)}`
+        : bumpStepPath(sp, renumber.prefix, renumber.fromIndex);
+      if (next !== sp) nextProps = { ...nextProps, _stepPath: next };
     }
     if (ancestors.has(n.id)) {
       nextProps = { ...nextProps, _forceGraphExport: true };

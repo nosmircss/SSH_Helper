@@ -229,4 +229,60 @@ describe('rewiring a fresh block into a nested imported branch confers band memb
     // and y (bumped to then/1 by the insert) compacts back to then/0 on the release
     expect(propsOf(useFlowStore.getState().nodes.find((n) => n.id === 'y'))._stepPath).toBe('steps/1/then/0');
   });
+
+  // Moving a CONTAINER between bands must carry its whole subtree. renumberStepPaths alone can't fix
+  // the descendants: it matches a container's children via the container's CURRENT path (already the
+  // new one), so a child still on the band-A prefix fails the startsWith and is left stranded —
+  // desyncing the runtime step↔node map for the moved subtree AND colliding with band-A survivors
+  // that renumber onto the stale prefix (stealing their step events). The prefix rewrite must happen
+  // inside applyChildMembership, before the renumber pass.
+  it('band-to-band move of a CONTAINER carries its subtree to the new branch prefix', () => {
+    // IF-A.then = [IF-C (whose then holds k), s2]; IF-B.then = [y]. Faithful imported edges: C's
+    // continuation to its next sibling s2 leaves C's `continue` handle (nested-container shape).
+    const nodes: Node[] = [
+      node('__start__', '_start', {}),
+      node('IF-A', 'if', { _stepPath: 'steps/0' }),
+      node('C', 'if', { _isChildOf: 'IF-A', _stepPath: 'steps/0/then/0', _branchLabel: 'then', _depth: 1 }),
+      node('k', 'send', { _isChildOf: 'C', _stepPath: 'steps/0/then/0/then/0', _branchLabel: 'then', _depth: 2 }),
+      node('s2', 'send', { _isChildOf: 'IF-A', _stepPath: 'steps/0/then/1', _branchLabel: 'then', _depth: 1 }),
+      node('IF-B', 'if', { _stepPath: 'steps/1' }),
+      node('y', 'send', { _isChildOf: 'IF-B', _stepPath: 'steps/1/then/0', _branchLabel: 'then', _depth: 1 }),
+    ];
+    const edges: Edge[] = [
+      importedEdge('e-start', '__start__', 'IF-A'),
+      importedEdge('e-a-c', 'IF-A', 'C', { label: 'then' }),
+      importedEdge('e-c-k', 'C', 'k', { label: 'then' }),
+      importedEdge('e-c-s2', 'C', 's2', { sourceHandle: 'continue', label: 'next' }),
+      importedEdge('e-a-cont', 'IF-A', 'IF-B', { sourceHandle: 'continue', label: 'next' }),
+      importedEdge('e-b-then', 'IF-B', 'y', { label: 'then' }),
+    ];
+    useFlowStore.setState({ nodes: [], edges: [], selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
+    useFlowStore.getState().setNodes(nodes);
+    useFlowStore.getState().setEdges(edges);
+
+    // Unwire C (entry + its continuation; C→k stays — the subtree moves together), then wire it
+    // into band B above y.
+    useFlowStore.getState().removeEdges(['e-a-c', 'e-c-s2']);
+    const v = useFlowStore.getState();
+    expect(isConnectionAllowed(thenConn('IF-B', 'C'), v.nodes, v.edges).ok).toBe(true);
+    useFlowStore.getState().onConnect(thenConn('IF-B', 'C'));
+
+    const st = useFlowStore.getState();
+    // the container re-homed…
+    expect(propsOf(st.nodes.find((n) => n.id === 'C'))._isChildOf).toBe('IF-B');
+    expect(propsOf(st.nodes.find((n) => n.id === 'C'))._stepPath).toBe('steps/1/then/0');
+    // …AND its child rode along onto the new prefix (the stranding bug)
+    expect(propsOf(st.nodes.find((n) => n.id === 'k'))._isChildOf).toBe('C');
+    expect(propsOf(st.nodes.find((n) => n.id === 'k'))._stepPath).toBe('steps/1/then/0/then/0');
+    // band B's existing child shifted down; band A's survivor compacted
+    expect(propsOf(st.nodes.find((n) => n.id === 'y'))._stepPath).toBe('steps/1/then/1');
+    expect(propsOf(st.nodes.find((n) => n.id === 's2'))._stepPath).toBe('steps/0/then/0');
+    // both containers regenerate on export
+    expect(propsOf(st.nodes.find((n) => n.id === 'IF-A'))._forceGraphExport).toBe(true);
+    expect(propsOf(st.nodes.find((n) => n.id === 'IF-B'))._forceGraphExport).toBe(true);
+    // band geometry: the moved subtree lives in band B now, nothing of it remains in band A
+    expect(bandMembersOf('IF-B::then')).toEqual(expect.arrayContaining(['C', 'k', 'y']));
+    expect(bandMembersOf('IF-A::then')).toEqual(['s2']);
+    expect(bandMembersOf('C::then')).toEqual(['k']);
+  });
 });
