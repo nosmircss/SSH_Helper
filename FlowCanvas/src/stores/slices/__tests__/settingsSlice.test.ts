@@ -47,6 +47,30 @@ describe('settingsSlice', () => {
     expect(messageBus.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'layout-save', blockWidth: 700 }));
   });
 
+  it('setBlockWidth with persist:false reflows for preview but does not persist (live slider drag)', () => {
+    chain();
+    vi.clearAllMocks();
+    useFlowStore.getState().setBlockWidth(900, { persist: false });
+    expect(useFlowStore.getState().blockWidth).toBe(900);
+    expect(messageBus.send).not.toHaveBeenCalled();
+    expect(sendLayoutAutosave).not.toHaveBeenCalled();
+  });
+
+  it('setTextScale with persist:false reflows for preview but does not persist (live slider drag)', () => {
+    chain();
+    vi.clearAllMocks();
+    useFlowStore.getState().setTextScale(2.5, { persist: false });
+    expect(useFlowStore.getState().textScale).toBe(2.5);
+    expect(messageBus.send).not.toHaveBeenCalled();
+    expect(sendLayoutAutosave).not.toHaveBeenCalled();
+  });
+
+  it('setTextScale commit persists via layout-save', () => {
+    chain();
+    useFlowStore.getState().setTextScale(2.5);
+    expect(messageBus.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'layout-save', textScale: 2.5 }));
+  });
+
   it('setDensity roomy pushes B lower', () => {
     chain();
     const y0 = useFlowStore.getState().nodes.find((n) => n.id === 'B')!.position.y;

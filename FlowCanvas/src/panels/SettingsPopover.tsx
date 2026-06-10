@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
-import { WIDTH_PRESETS, TEXT_SCALES, DENSITIES } from '../stores/slices/settingsSlice';
+import { BLOCK_WIDTH_MIN, BLOCK_WIDTH_MAX, TEXT_SCALE_MIN, TEXT_SCALE_MAX, DENSITIES } from '../stores/slices/settingsSlice';
 import { mix } from '../utils/tokens';
 
 // Label on its own line above a FULL-WIDTH segmented row whose chips share the width equally
@@ -29,6 +29,44 @@ function Segmented<T extends string | number>(props: {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Live-preview slider: every drag tick calls onPreview (apply + reflow, no persistence);
+// release/blur calls onCommit, which persists once. Keyboard arrows preview via onChange and
+// commit on blur. The value readout follows the live store value (controlled input).
+function SliderRow(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onPreview: (v: number) => void;
+  onCommit: (v: number) => void;
+  /** Value readout next to the label; defaults to px. */
+  format?: (v: number) => string;
+}) {
+  return (
+    <div style={{ padding: '5px 0' }} data-testid={`setting-${props.label.toLowerCase().replace(/\s+/g, '-')}`}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+        <span style={labStyle}>{props.label}</span>
+        <span style={{ fontSize: 11, color: 'var(--fc-text)', fontVariantNumeric: 'tabular-nums' }}>
+          {props.format ? props.format(props.value) : `${props.value}px`}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={props.min}
+        max={props.max}
+        step={props.step}
+        value={props.value}
+        aria-label={props.label}
+        onChange={(e) => props.onPreview(Number(e.target.value))}
+        onPointerUp={(e) => props.onCommit(Number((e.target as HTMLInputElement).value))}
+        onBlur={(e) => props.onCommit(Number(e.target.value))}
+        style={{ width: '100%', margin: 0, accentColor: 'var(--fc-accent)', cursor: 'pointer' }}
+      />
     </div>
   );
 }
@@ -134,8 +172,6 @@ export default function SettingsPopover() {
   }, [open]);
 
   // Widen literal-typed preset arrays to the plain primitive type that the generic Segmented expects.
-  const widthOptions: readonly { label: string; v: number }[] = WIDTH_PRESETS.map((p) => ({ label: p.label, v: p.px as number }));
-  const textOptions: readonly { label: string; v: number }[] = TEXT_SCALES.map((p) => ({ label: p.label, v: p.v as number }));
   const densityOptions: readonly { label: string; v: number }[] = DENSITIES.map((p) => ({ label: p.label, v: p.v as number }));
   const blockStateOptions: readonly { label: string; v: number }[] = [{ label: 'Collapsed', v: 0 }, { label: 'Expanded', v: 1 }];
 
@@ -167,8 +203,25 @@ export default function SettingsPopover() {
           </div>
 
           <div style={groupStyle}>Sizing</div>
-          <Segmented label="Block width" value={blockWidth} options={widthOptions} onChange={setBlockWidth} />
-          <Segmented label="Text size" value={textScale} options={textOptions} onChange={setTextScale} />
+          <SliderRow
+            label="Block width"
+            value={blockWidth}
+            min={BLOCK_WIDTH_MIN}
+            max={BLOCK_WIDTH_MAX}
+            step={10}
+            onPreview={(v) => setBlockWidth(v, { persist: false })}
+            onCommit={(v) => setBlockWidth(v)}
+          />
+          <SliderRow
+            label="Text size"
+            value={textScale}
+            min={TEXT_SCALE_MIN}
+            max={TEXT_SCALE_MAX}
+            step={0.05}
+            format={(v) => `${Math.round(v * 100)}%`}
+            onPreview={(v) => setTextScale(v, { persist: false })}
+            onCommit={(v) => setTextScale(v)}
+          />
           <Segmented label="Canvas density" value={density} options={densityOptions} onChange={setDensity} />
           <NumberField
             label="Loop history (iterations kept per loop)"

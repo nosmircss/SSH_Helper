@@ -33,6 +33,7 @@ describe('estimateNodeHeight textScale', () => {
     expect(estimateNodeHeight('print', { message: 'x' }, false, 1.15)).toBe(52 + 4);  // L (30×0.1499… rounds down)
     expect(estimateNodeHeight('print', { message: 'x' }, false, 1.35)).toBe(52 + 11); // XL
     expect(estimateNodeHeight('print', { message: 'x' }, false, 1.6)).toBe(52 + 18);  // XXL
+    expect(estimateNodeHeight('print', { message: 'x' }, false, 2.5)).toBe(52 + 45);  // slider max
   });
   it('expanded height grows with textScale', () => {
     const base = estimateNodeHeight('send', { command: 'a', capture: 'b' }, true, 1);

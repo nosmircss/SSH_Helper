@@ -106,12 +106,12 @@ function nestedBranchFixture(): { nodes: Node[]; edges: Edge[] } {
   return { nodes, edges };
 }
 
-describe('no block overlap at max blockWidth (700) — invariant guard', () => {
+describe('no block overlap at wide blockWidths — invariant guard', () => {
   const MAX_WIDTH = 700;
 
-  const rectOf = (n: Node) => {
+  const rectOf = (n: Node, width: number) => {
     const isChild = !!(n.data as Record<string, unknown> & { props?: Record<string, unknown> })?.props?.['_isChildOf'];
-    const w = isChild ? MAX_WIDTH - BLOCK_WIDTH_INSET : MAX_WIDTH;
+    const w = isChild ? width - BLOCK_WIDTH_INSET : width;
     return { x: n.position.x, y: n.position.y, w, h: COLLAPSED_HEIGHT };
   };
 
@@ -120,9 +120,10 @@ describe('no block overlap at max blockWidth (700) — invariant guard', () => {
     b: { x: number; y: number; w: number; h: number },
   ) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
-  it('no two block/start nodes overlap after layout at blockWidth 700', () => {
+  // 700 = the old "Max" preset; 2000 = the width slider's upper bound (BLOCK_WIDTH_MAX).
+  it.each([700, 2000])('no two block/start nodes overlap after layout at blockWidth %i', (width) => {
     const { nodes, edges } = nestedBranchFixture();
-    const placed = computeHierarchicalLayout(nodes, edges, { blockWidth: MAX_WIDTH, density: 1, textScale: 1 });
+    const placed = computeHierarchicalLayout(nodes, edges, { blockWidth: width, density: 1, textScale: 1 });
 
     const layouted = placed.filter((n) => n.type === 'block' || n.type === 'start');
 
@@ -130,8 +131,8 @@ describe('no block overlap at max blockWidth (700) — invariant guard', () => {
       for (let j = i + 1; j < layouted.length; j++) {
         const p = layouted[i];
         const q = layouted[j];
-        const rp = rectOf(p);
-        const rq = rectOf(q);
+        const rp = rectOf(p, width);
+        const rq = rectOf(q, width);
         expect(
           overlaps(rp, rq),
           `Nodes "${p.id}" (x=${rp.x} y=${rp.y} w=${rp.w} h=${rp.h}) and ` +
