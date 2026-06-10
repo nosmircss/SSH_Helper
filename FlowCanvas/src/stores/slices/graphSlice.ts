@@ -386,7 +386,13 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       // target that reaches here necessarily lost its entry edge.
       const targetIsOrphaned = !state.edges.some((e) => e.target === connection.target);
       const membership = deriveChildMembership(state.nodes, connection, { sourceIsContainer: isContainer, branchMetadata, targetIsOrphaned });
-      if (membership) nextNodes = applyChildMembership(state.nodes, membership);
+      if (membership) {
+        nextNodes = applyChildMembership(state.nodes, membership);
+        // A re-home is a band-to-band MOVE: the target vacated a slot in its old branch, so the
+        // survivors there must renumber down (same contiguity invariant the removal paths keep —
+        // the executor assigns sequential paths, and any gap kills step events from there on).
+        if (membership.rehome) nextNodes = renumberStepPaths(nextNodes);
+      }
 
       if (isContinuation) {
         // Continuation edges get explicit styling — bypass getBranchVisual

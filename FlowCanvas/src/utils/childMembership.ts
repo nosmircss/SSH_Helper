@@ -25,6 +25,12 @@ export interface ChildMembership {
   props: Record<string, unknown>;
   /** Later siblings in this branch (and their subtrees) shift up by one to make room. */
   renumber: { prefix: string; fromIndex: number };
+  /** Present when the target carried prior (orphaned) membership: it is MOVING, not just joining.
+   *  `fromParentId` is the container it vacated (undefined when the stale path was top-level).
+   *  applyChildMembership flags that container's chain for re-export (its stale snippet still nests
+   *  the moved block) and strips the target's stale band cosmetics; the caller must renumber so the
+   *  vacated branch's survivors stay contiguous. */
+  rehome?: { fromParentId?: string };
 }
 
 const TRAILING_INDEX = /\/(\d+)$/;
@@ -66,6 +72,12 @@ export function deriveChildMembership(
   // Keep a still-anchored member where it is (don't clobber). An orphaned member — its branch-entry
   // edge was deleted — is fair game to re-home into the branch the user is now wiring it into.
   if (hasMembership && !opts.targetIsOrphaned) return null;
+  // A re-home is a MOVE between bands: record the vacated parent so the old container re-exports
+  // and the caller can renumber its branch's survivors.
+  const rehome: ChildMembership['rehome'] | undefined = hasMembership
+    ? { ...(typeof tProps['_isChildOf'] === 'string' && tProps['_isChildOf'].length > 0
+        ? { fromParentId: tProps['_isChildOf'] as string } : {}) }
+    : undefined;
 
   const sProps = propsOf(source);
   const sPath = sProps['_stepPath'];
@@ -84,7 +96,7 @@ export function deriveChildMembership(
       _stepPath: `${prefix}/0`,
       [MEMBERSHIP_MARKER]: true,
     };
-    return { targetId: target.id, props, renumber: { prefix, fromIndex: 0 } };
+    return { targetId: target.id, props, renumber: { prefix, fromIndex: 0 }, ...(rehome ? { rehome } : {}) };
   }
 
   // Gestures 1 & 2 — a container's `continue` handle, or a leaf's bottom handle: the new block is
@@ -107,7 +119,7 @@ export function deriveChildMembership(
   for (const key of COSMETIC_KEYS) {
     if (sProps[key] !== undefined) props[key] = sProps[key];
   }
-  return { targetId: target.id, props, renumber: { prefix: branchPrefix, fromIndex: insertIndex } };
+  return { targetId: target.id, props, renumber: { prefix: branchPrefix, fromIndex: insertIndex }, ...(rehome ? { rehome } : {}) };
 }
 
 /** Shift a single index segment of a stepPath up by one when it sits at/after the insertion point.
@@ -132,23 +144,37 @@ function bumpStepPath(stepPath: string, prefix: string, fromIndex: number): stri
  * graph re-export so the change survives a YAML round-trip. Pure — returns a new array.
  */
 export function applyChildMembership(nodes: Node[], membership: ChildMembership): Node[] {
-  const { targetId, props, renumber } = membership;
+  const { targetId, props, renumber, rehome } = membership;
 
   // Ancestor containers = the _isChildOf chain above the new parent. Every link is a container
   // (only containers own children), so flag each so export regenerates them from the graph.
+  // On a re-home (band-to-band move) the VACATED parent's chain is flagged too — its stale snippet
+  // still nests the moved block, so it must regenerate from the graph as well.
   const ancestors = new Set<string>();
-  let cursor = props['_isChildOf'];
-  while (typeof cursor === 'string' && cursor.length > 0 && !ancestors.has(cursor)) {
-    ancestors.add(cursor);
-    cursor = propsOf(nodes.find((n) => n.id === cursor))['_isChildOf'];
-  }
+  const walkChain = (start: unknown): void => {
+    let cursor = start;
+    while (typeof cursor === 'string' && cursor.length > 0 && !ancestors.has(cursor)) {
+      ancestors.add(cursor);
+      cursor = propsOf(nodes.find((n) => n.id === cursor))['_isChildOf'];
+    }
+  };
+  walkChain(props['_isChildOf']);
+  if (rehome) walkChain(rehome.fromParentId);
 
   return nodes.map((n) => {
     const data = (n.data as Record<string, unknown>) ?? {};
     const existing = (data.props as Record<string, unknown> | undefined) ?? {};
 
     if (n.id === targetId) {
-      return { ...n, data: { ...data, props: { ...existing, ...props } } };
+      let base = existing;
+      if (rehome) {
+        // Moving bands: drop the OLD branch's cosmetics so nothing keeps pointing at the vacated
+        // lane. The gesture's own props re-add fresh values where applicable (gesture 1/2 copies
+        // them from the new sibling; gesture 3 leaves them unset like any fresh first child).
+        base = { ...existing };
+        for (const key of COSMETIC_KEYS) delete base[key];
+      }
+      return { ...n, data: { ...data, props: { ...base, ...props } } };
     }
 
     let nextProps = existing;

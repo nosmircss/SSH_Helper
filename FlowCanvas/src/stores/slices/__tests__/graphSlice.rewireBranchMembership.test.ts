@@ -4,6 +4,7 @@ vi.mock('../../../MessageBus', () => ({ messageBus: { send: vi.fn() }, CANVAS_HO
 import type { Connection, Edge, Node } from '@xyflow/react';
 import { useFlowStore } from '../../useFlowStore';
 import { isConnectionAllowed } from '../../../utils/connectionRules';
+import { MEMBERSHIP_MARKER } from '../../../utils/childMembership';
 import { computeBranchBands } from '../../../utils/branchBands';
 import { computeHierarchicalLayout, DEFAULT_BLOCK_SIZING } from '../../../utils/layout/hierarchicalLayout';
 
@@ -67,6 +68,31 @@ function setupImported(): void {
     importedEdge('e-oif-then', 'OIF', 'd0', { label: 'then' }),
     importedEdge('e-d0-if', 'd0', 'IF'),
     importedEdge('e-then', 'IF', 'y', { label: 'then' }), // THEN entry: sourceHandle null, label "then"
+  ];
+  useFlowStore.setState({ nodes: [], edges: [], selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
+  useFlowStore.getState().setNodes(nodes);
+  useFlowStore.getState().setEdges(edges);
+}
+
+// Band-to-band fixture (the user's clarified sequence): TWO top-level imported IFs. `end` is an
+// imported member of IF-A's then band (with a sibling s2 AFTER it); `y` is the imported only child
+// of IF-B's then band. Faithful imported edges: then entries are sourceHandle:null + label "then"
+// (no data.branchPath); IF-A's continuation to IF-B leaves the `continue` handle labelled "next".
+function setupTwoBands(): void {
+  const nodes: Node[] = [
+    node('__start__', '_start', {}),
+    node('IF-A', 'if', { _stepPath: 'steps/0' }),
+    node('end', 'send', { _isChildOf: 'IF-A', _stepPath: 'steps/0/then/0', _branchLabel: 'then', _branchColor: '#abc', _depth: 1 }),
+    node('s2', 'send', { _isChildOf: 'IF-A', _stepPath: 'steps/0/then/1', _branchLabel: 'then', _branchColor: '#abc', _depth: 1 }),
+    node('IF-B', 'if', { _stepPath: 'steps/1' }),
+    node('y', 'send', { _isChildOf: 'IF-B', _stepPath: 'steps/1/then/0', _branchLabel: 'then', _branchColor: '#abc', _depth: 1 }),
+  ];
+  const edges: Edge[] = [
+    importedEdge('e-start', '__start__', 'IF-A'),
+    importedEdge('e-a-end', 'IF-A', 'end', { label: 'then' }),
+    importedEdge('e-end-s2', 'end', 's2'),
+    importedEdge('e-a-cont', 'IF-A', 'IF-B', { sourceHandle: 'continue', label: 'next' }),
+    importedEdge('e-b-then', 'IF-B', 'y', { label: 'then' }),
   ];
   useFlowStore.setState({ nodes: [], edges: [], selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
   useFlowStore.getState().setNodes(nodes);
@@ -140,5 +166,67 @@ describe('rewiring a fresh block into a nested imported branch confers band memb
       expect(propsOf(st.nodes.find((n) => n.id === 'y'))._stepPath, order).toBe('steps/1/do/1/then/1/then/1');
       expect(bandMembersOf('IF::then')).toEqual(expect.arrayContaining(['y', 'end']));
     }
+  });
+
+  // The user's clarified real-world sequence: `end` was an IMPORTED member of then-band-A, they
+  // unplugged all its wires (imported membership survives by design), then wired it into a DIFFERENT
+  // then-band-B (gesture 3) above B's existing imported child y. The move must be complete on both
+  // sides: end fully re-homed into B (y bumped), AND the vacated branch A renumbered (s2 compacts to
+  // then/0 — a gap at 0 would desync the runtime step↔node map) with IF-A flagged for graph
+  // re-export (its stale snippet still nests `end` inside then-A otherwise).
+  it('band-to-band move: end re-homes into then-B, vacated then-A renumbers and re-exports', () => {
+    setupTwoBands();
+    // The user unplugged end completely (entry + successor) and cleared IF-B's then entry — fan-in
+    // would reject end→y while IF-B→y still exists.
+    useFlowStore.getState().removeEdges(['e-a-end', 'e-end-s2', 'e-b-then']);
+    // imported membership survives wire deletion by design — end still claims band A here
+    expect(propsOf(useFlowStore.getState().nodes.find((n) => n.id === 'end'))._isChildOf).toBe('IF-A');
+
+    useFlowStore.getState().onConnect(thenConn('IF-B', 'end')); // gesture 3 into band B
+    useFlowStore.getState().onConnect(thenConn('end', 'y'));
+
+    const st = useFlowStore.getState();
+    const end = propsOf(st.nodes.find((n) => n.id === 'end'));
+    // fully re-homed into band B
+    expect(end._isChildOf).toBe('IF-B');
+    expect(end._stepPath).toBe('steps/1/then/0');
+    // no stale band-A cosmetics left behind
+    expect(end._branchLabel).toBeUndefined();
+    expect(end._branchColor).toBeUndefined();
+    expect(end._depth).toBeUndefined();
+    // y shifted down to make room for end
+    expect(propsOf(st.nodes.find((n) => n.id === 'y'))._stepPath).toBe('steps/1/then/1');
+    // CRITICAL — vacated-branch contiguity: s2 compacts to then/0, no gap where end used to be
+    expect(propsOf(st.nodes.find((n) => n.id === 's2'))._stepPath).toBe('steps/0/then/0');
+    // BOTH containers must regenerate on export: B gained a child, A lost one
+    expect(propsOf(st.nodes.find((n) => n.id === 'IF-A'))._forceGraphExport).toBe(true);
+    expect(propsOf(st.nodes.find((n) => n.id === 'IF-B'))._forceGraphExport).toBe(true);
+    // band geometry agrees with the metadata
+    expect(bandMembersOf('IF-B::then')).toEqual(expect.arrayContaining(['end', 'y']));
+    expect(bandMembersOf('IF-A::then')).toEqual(['s2']);
+  });
+
+  // Gesture-3 re-home sanity: stale membership is FULLY overwritten (not merged around), and the
+  // result is wire-authored (MEMBERSHIP_MARKER) so deleting the conferring wire releases the block
+  // to an orphan instead of leaving it stuck in band B.
+  it('gesture-3 re-home overwrites stale membership and is revertible via wire-delete', () => {
+    setupTwoBands();
+    useFlowStore.getState().removeEdges(['e-a-end', 'e-end-s2', 'e-b-then']);
+    useFlowStore.getState().onConnect(thenConn('IF-B', 'end'));
+
+    let end = propsOf(useFlowStore.getState().nodes.find((n) => n.id === 'end'));
+    expect(end._isChildOf).toBe('IF-B');           // was IF-A
+    expect(end._stepPath).toBe('steps/1/then/0');  // was steps/0/then/0
+    expect(end[MEMBERSHIP_MARKER]).toBe(true);     // now wire-authored
+
+    // deleting the conferring wire releases end to an orphan (not stuck in band B)
+    const wireId = useFlowStore.getState().edges.find((e) => e.source === 'IF-B' && e.target === 'end')!.id;
+    useFlowStore.getState().removeEdges([wireId]);
+    end = propsOf(useFlowStore.getState().nodes.find((n) => n.id === 'end'));
+    expect(end._isChildOf).toBeUndefined();
+    expect(end._stepPath).toBeUndefined();
+    expect(end[MEMBERSHIP_MARKER]).toBeUndefined();
+    // and y (bumped to then/1 by the insert) compacts back to then/0 on the release
+    expect(propsOf(useFlowStore.getState().nodes.find((n) => n.id === 'y'))._stepPath).toBe('steps/1/then/0');
   });
 });
