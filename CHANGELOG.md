@@ -1,5 +1,120 @@
 # Changelog
 
+## Changes Since `52c0ee4` (0.51.23)
+
+This release lands three pillars and a hardening pass. The Flow Canvas gains a **Run Output console** — the main form's output stream mirrored into a tabbed bottom dock and, optionally, a **detachable OS window** you can drag to a second monitor. The scripting engine and canvas together gain a **loop iteration stepper**: every `foreach`/`while`/`repeat` iteration is recorded with its own per-block status, durations, output, and an end-of-iteration variable snapshot, and the canvas can replay any iteration after the run. The SSH shell session's command-read loop was made unit-testable and fixed for prompt-redraw misalignment. Around them: display settings became continuous sliders with zoom-aware canvas chrome, per-block output attribution was corrected for container steps, and a cluster of branch-membership/step-path integrity bugs was fixed. As before, every canvas change keeps the preset-builder invariant: **nothing new is serialized into the exported YAML script** — view state travels via `WindowState` or `CanvasLayoutData` only.
+
+### Flow Canvas: Run Output Console
+
+The bottom dock is now tabbed — **Block Output | Run Output** (`panels/OutputPreview.tsx`). The Run Output tab hosts a live console (`panels/RunOutputView.tsx`) mirroring the main form's output box: `Form1.AppendOutput` forwards each raw chunk through `FlowCanvasForm.SendRunOutputAppend`/`SendRunOutputClear` into new `run-output` / `run-output-clear` messages, and opening the canvas mid-run seeds the buffer from the current output snapshot.
+
+- **Buffer** — `executionSlice.runOutput` holds the stream with a 5,000-line cap (`MAX_RUN_OUTPUT_LINES`); `appendRunOutput` trims from the top.
+- **Line classifier** — `utils/runOutputClassify.ts` colorizes lines as `banner` (the `######…` host banners, teal), `error` (red), or `normal`; the **Color** toggle drops to plain mode.
+- **View controls** — Color, word **Wrap**, **Follow** (auto-scroll that disengages when the user scrolls more than 24px off the bottom and re-engages on demand), **Copy**, and a pulsing **LIVE** dot while a run is active. All three view prefs persist to `WindowState` (`FlowCanvasRunOutputColor`/`Wrap`/`Follow`) via `pref-save` and restore on canvas open (`restoreRunOutputPrefs`, with `??` semantics so partial payloads keep React defaults).
+- **Find-in-output** — a find bar with case-insensitive substring matching, a live match count, and inline `<mark>` highlights that work in both color and plain modes. Closing the find box clears the query.
+- **Attention routing** — a run start focuses the Run Output tab; output arriving while the Block tab is active shows an unread dot, cleared on tab switch or buffer clear. Clicking a block on the canvas switches the dock back to **Block Output** (plain click only — shift-multi-select doesn't steal the tab).
+- **Blank-line fidelity** — CR-stripping per line preserves LF-only blank lines that `white-space: pre` rendering would otherwise collapse.
+
+A companion main-form fix: `Form1.NormalizeNewlinesForDisplay` inserts a CR before any bare LF so Unix-style output renders line breaks in the WinForms output pane. The fixup is display-only — the raw buffer, `${_output}`, and the canvas mirror keep original line endings.
+
+### Flow Canvas: Detachable Run Output Window
+
+The console pops out into a real OS window (`UI/RunOutputWindowForm.cs`) — a second WebView2 loading the same React bundle with `?panel=runoutput`, which `panelMode.ts` routes to a standalone `RunOutputWindowApp.tsx` rendering only the console over a minimal message bridge (`stores/runOutputWindowBridge.ts`: `run-output`, `run-output-clear`, `execution-started`/`finished`, and a prefs restore; the bridge returns its own cleanup function).
+
+- **Pop out / dock back** — the console's *Pop out* button posts `open-run-output-window`; `Form1` owns the window, creates or activates it, and feeds it the same output taps plus a seed of the current buffer. Clicking the *Run* tab while popped out docks the window back; closing the window posts `run-output-window-closed` so the dock reclaims the console. Reopening the canvas closes any orphaned window from a previous canvas session.
+- **Popped-out etiquette** — while detached, the in-canvas tab suppresses auto-focus and the unread dot (`runOutputPoppedOut` in `uiSlice`).
+- **Geometry persistence** — last *Normal*-state position/size persist to `WindowState` (`FlowCanvasRunOutputWindowLeft`/`Top`/`Width`/`Height`); maximized/minimized geometry is never saved. Defaults to 900×520 centered on the owner, 420×260 minimum. The form uses its own WebView2 user-data folder to avoid lock contention with the canvas, and `Dispose` unhooks `WebMessageReceived` and disposes the WebView.
+
+### Scripting: Live Iteration Stack on Step Events
+
+The engine now reports *which iteration of which loop* every step ran in. A new immutable `IterationFrame(LoopStepPath, Index, Label)` record (`Services/Scripting/Models/IterationFrame.cs`) and an `AsyncLocal` stack on `ScriptContext` (`PushIterationFrame` / `SetCurrentIterationFrame` / `PopIterationFrame`, copy-on-write arrays) make the stack flow correctly into `parallel` arms — each arm sees its own ancestry, never a sibling's.
+
+- **Loop commands tag frames** — `ForeachCommand` pushes a frame on entry and stamps each iteration with the item's display label (truncated to 48 chars, surrogate-pair-safe at the boundary); `WhileCommand` and `RepeatCommand` stamp the index only.
+- **Events carry the stack** — `StepExecutionEventArgs` gains `IterationStack` on both `StepStarting` and `StepCompleted` (a loop's own completion event fires after its frame pops, so it carries only ancestor frames) and `SuppressedError` for steps that failed under `on_error: continue`.
+- **Bridge mapping** — `FlowCanvasBridge` translates each frame's `LoopStepPath` to its canvas node id and attaches an optional `iterationStack: IterationFrameMsg[]` (`{ loopId, i, label }`, outermost first) plus `suppressedError` to execution-update messages; consumers that don't understand the field ignore it.
+
+### Flow Canvas: Loop Iteration Stepper
+
+Loop bands grow a post-run **iteration stepper cluster** (`nodes/IterationCluster.tsx`) for replaying any iteration (design spec `docs/superpowers/specs/2026-06-09-flow-canvas-loop-iteration-stepper-design.md`).
+
+- **Iteration log store** — `stores/slices/iterationSlice.ts` records one `IterationRecord` per loop iteration, keyed by a monotonic `seq` (not array position), with a `parent` link to the containing iteration of the loop above. Each record holds per-node entries (state with sticky errors, `branchTaken`, duration, an index into the block-output history, and a `suppressed` flag), a `failed` flag propagated up all ancestor frames, and a sanitized end-of-iteration `variables` snapshot (heavy keys like `_outputwindow` excluded, strings capped at 2,000 chars). Updates are copy-on-write; eviction keeps the newest records while `totalIterations` preserves the true count.
+- **Stepper cluster** — an **ALL** chip (aggregate view), prev/next arrows with the item label or `#k` and a `k/N` counter, a failure-jump chip showing the failed count, and — past 20 visible iterations — a tick scrubber that buckets down to at most 60 ticks, supports click-to-jump and drag-to-scrub, and tooltips each tick with `label · position`. Evicted history reads "of N". The cluster hides during a live run.
+- **Hierarchical selection** — selectors in `stores/selectors/iterationScope.ts` resolve every node's governing iteration through its ancestor chain. Selecting an outer iteration clears stale inner selections; selecting an inner iteration pulls ancestor selections to its containing iterations. `selectVisibleIterations` filters an inner loop's records to those under the current outer selection.
+- **Iteration-scoped everything** — with an iteration selected, block badges, durations, the neon path status, and Block Output all reflect *that pass*. Output is honest about absence: "(not reached in this iteration)" vs "(no output in this iteration)" are distinct states, and a context chip names the active iteration. Steps that failed under `on_error: continue` surface as suppressed failures in the stepper rather than vanishing.
+- **Variables time travel** — the Variables panel (`panels/VariableInspector.tsx`) shows the frozen end-of-iteration snapshot for the active selection, with a banner naming the iteration and a *Live* button to drop back to current values. Sensitive keys stay masked.
+- **Loop history cap** — Display Settings gains a free-form "Loop history (iterations kept per loop)" number field (1–100,000; default 500), persisted to `WindowState.FlowCanvasIterationHistoryCap`.
+- **Known limitations** (recorded in the spec): the cluster anchors to branch bands (hidden when bands are off), an identical re-run without an `execution-started` between merges into prior records, a cancelled run can leave a static `RUNNING` chip, the "of N" eviction hint can mislead for inner loops across passes, and the scrubber can crowd the pill on bands narrower than ~376px.
+
+### SSH Shell: Read-Loop Alignment and Submode Prompt Tracking
+
+`SshShellSession`'s command-read loop is now testable without Rebex and was fixed for two long-standing alignment bugs.
+
+- **`IShellStream` seam** — a minimal internal interface (`ReadData`/`Send`/`KeepAlive`/`Timeout`/`IsConnected`, `Services/IShellStream.cs`) with a 1:1 `RebexShellStream` production wrapper and an internal test constructor on `SshShellSession`, so `SSH_Helper.Tests/Services/SshShellSessionReadAlignmentTests.cs` replays exact byte sequences deterministically.
+- **One-command output lag fixed** — devices like FortiGate redraw a stale prompt after submode exits, which the next command absorbed as its own leading output. The read loop now **drains residual buffer data before sending** (25ms quiet window) and applies an **echo-aware prompt guard**: the prompt regex is not consulted until the command's own echo has appeared, so an in-flight stale prompt can no longer terminate the read early.
+- **Submode prompt display** — inside config submodes (e.g. FortiGate `(setting) #`), the displayed prompt stayed stuck on the login prompt because the tolerant pattern already matched submode lines. Prompt tracking now always refreshes the literal trailing prompt for display and stripping, while the anchor pattern rebuilds only on genuine change — so trailing-prompt stripping takes the exact-match path again.
+
+### Scripting: Honest Per-Block Output Attribution
+
+Container steps (`if`/`foreach`/`while`/`repeat`/`try`/`switch`/`parallel`/`call`) used to report whatever `LastCommandOutput` held *after* they ran — i.e. a nested `send`'s output. `ScriptExecutor` now captures `carriedOutput` before each step and applies the contract the canvas Block Output panel depends on: a `send` shows its own output (empty if none), any other block shows the output of the send preceding its *start*. A `ContainerStepTypes` set drives the distinction; `SSH_Helper.Tests/Scripting/ScriptExecutorStepOutputAttributionTests.cs` pins the behavior across then/else/elif/switch shapes.
+
+### Flow Canvas: Sliders, XL/XXL Text, and Zoom-Aware Chrome
+
+- **Block width and text size become sliders** — the discrete Display Settings rows are replaced by continuous sliders with much bigger ranges: block width 300–2,000px (step 10, default 330) and text size 0.9×–2.5× (step 0.05, default 1.0), after intermediate XL (1.35×)/XXL (1.6×) presets proved too coarse. Dragging live-previews without persisting; the value commits one layout-save on release. The old `WIDTH_PRESETS`/`TEXT_SCALES` arrays are gone.
+- **Layout fits large text** — node height estimation now scales with `textScale` (header text slice, summary label column at `96 × textScale`, wrapped-row detection), and band padding is a uniform `BAND_PAD = 18` at every nesting depth, so XL/XXL graphs lay out without overlap.
+- **Zoom-aware canvas chrome** — a quantized `uiZoomScale` (1–2.25, 0.05 steps, derived from inverse viewport zoom) feeds a `--fc-ui-scale` CSS variable: handle dots and their invisible ~22px grab pads, band pill labels (clamped 1.75×), the iteration stepper (clamped 2.1×), and the connection drop-snap radius (`28 × uiZoomScale`) all grow as you zoom out, so far-out graphs stay clickable. Handle element boxes stay fixed — only paint/hit pseudo-elements scale.
+- **Preset state isolation** — switching presets in an open canvas no longer leaks `expandedNodes`/`disabledBlocks` across presets (node ids collide between graphs, so preset B could render expanded while measured collapsed, overlapping blocks). `load-graph` now always restores both sets from the incoming payload, clearing them for fresh graphs.
+- **Default block state** — the "New blocks" setting is now **Default block state** (Collapsed/Expanded): it applies immediately to the open graph and stamps every loaded preset accordingly before layout measures heights. **Reset to defaults** likewise collapses the open graph when it had been expanded, keeping the control truthful.
+- **Breakpoint gutter on nested blocks** — every block, including children nested inside loops and branches, renders a clickable breakpoint dot in its header (red fill + glow when set), toggling `node.data.breakpoint` so the executor can pause at any depth.
+
+### Flow Canvas: Live Packet Frontier and Path Building
+
+`AnimatedEdge`'s travelling packet dot is now a true **execution frontier**: exactly one dot rides the edge whose target block is running and has no running successor — a running container yields its dot to its running child at any depth. Previously the dot was source-gated, which lit *all* arms of a running `if`. Branch arms also join the lit path the moment their child is *reached* (non-idle), instead of waiting for the container's late `branchTaken`, so the neon path builds edge-by-edge during the run; untaken arms stay idle and fade when the container resolves. On-path spine edges promote to cyan while branch arms keep their branch hue, and the idle→on-path flip gets a 0.35s bloom (collapsed under reduced motion).
+
+### Flow Canvas: Branch Membership and Step-Path Integrity Fixes
+
+A series of fixes to the import-vs-canvas membership seam, all pinned by regression tests:
+
+- **Re-homing orphans** — wiring an orphaned ex-branch member (its entry edge deleted) into a new branch now re-homes it: `deriveChildMembership` accepts a `targetIsOrphaned` flag that bypasses the don't-clobber guard for targets with no incoming edge. Fan-in is still forbidden upstream, so legitimate members are never clobbered.
+- **Vacated branches renumber and re-export** — moving a block between bands renumbers the survivors of the vacated branch and flags the old parent with `_forceGraphExport`, so its stale snippet can't duplicate the moved block in exported YAML.
+- **Containers carry their subtree** — when a container is re-homed, `applyChildMembership` rewrites every descendant under the old path prefix to the new one in a single pass, instead of stranding the subtree on the old branch.
+- **`_stepPath` stays contiguous on delete** — deleting a nested block used to leave an index gap (`do/0, do/2`), desyncing the runtime step↔node map from there on (dead neon path, missing block output until reopen). A new `renumberStepPaths()` re-derives contiguous indices per branch scope recursively and is wired into every removal path in `graphSlice` (`removeNodes`, node/edge change handlers, `removeEdges`).
+- **Regenerated containers keep nested children mapped** — `FlowCanvasBridge` backfills every nested node's `_stepPath` into the node↔step map after graph regeneration, so debug events still resolve for descendants of a regenerated container (`FlowCanvasForceRegenParityTests`, `FlowCanvasStepPathParityDiagnosticTests`, plus a syslog-graph parity fixture on the React side).
+
+### Configuration and Persistence
+
+`Models/AppConfiguration.cs` — `WindowState` gains `FlowCanvasIterationHistoryCap` (nullable; null = React default of 500), the Run Output view prefs `FlowCanvasRunOutputColor`/`FlowCanvasRunOutputWrap`/`FlowCanvasRunOutputFollow` (nullable booleans; null = React default), and the detached window geometry `FlowCanvasRunOutputWindowLeft`/`Top`/`Width`/`Height`. All flow through the existing `pref-save`/`layout-restore` channel — nothing touches preset YAML.
+
+### Test Coverage
+
+**C# (`SSH_Helper.Tests/`):**
+
+| Test class | Coverage |
+|------------|----------|
+| `Scripting/ScriptContextIterationStackTests.cs` | Push/set/pop frame semantics, `AsyncLocal` copy-on-write |
+| `Scripting/IterationStackEventTests.cs` | `StepStarting`/`StepCompleted` carrying the live stack |
+| `Scripting/IterationStackPayloadTests.cs` | Parallel-arm isolation of iteration stacks |
+| `Scripting/ScriptExecutorStepOutputAttributionTests.cs` | Send vs container vs continue-block output across branch shapes |
+| `Services/SshShellSessionReadAlignmentTests.cs` | Fake-stream read loop: drain-before-send, echo guard, submode prompts |
+| `Services/FlowCanvasForceRegenParityTests.cs` | Step-path parity after force-regenerated export |
+| `Services/FlowCanvasStepPathParityDiagnosticTests.cs` | Node↔step map diagnostics for nested regeneration |
+| `UI/FlowCanvasFormRunOutputTests.cs` | `SendRunOutputAppend`/`Clear` wrappers + message routing |
+| `UI/FlowCanvasFormRunOutputPrefsTests.cs` | Run Output pref persistence and restore |
+| `UI/FlowCanvasFormRunOutputWindowTests.cs` | Open/close-window events and window lifecycle |
+| `UI/RunOutputWindowFormTests.cs` | Detached window Dispose + last-Normal geometry persistence |
+| `UI/OutputNewlineNormalizationTests.cs` | `NormalizeNewlinesForDisplay` LF/CRLF/CR cases |
+
+`Services/FlowCanvasBridgeConnectMembershipExportTests.cs` was extended to pin band-to-band move export.
+
+**Flow Canvas (vitest)** — new specs for the iteration log store (`iterationSlice.test.ts`: copy-on-write and aggregation invariants), iteration scope selectors (`iterationScope.test.ts`, `syslogPathParity.test.ts` + a real syslog graph fixture), the stepper cluster (`IterationCluster.test.tsx`), iteration-scoped output and tabs (`OutputPreviewIteration.test.tsx`, `OutputPreviewTabs.test.tsx`), variables time travel (`VariableInspector.test.tsx`), the Run Output console (`RunOutputView.test.tsx`, `RunOutputFind.test.tsx`, `runOutputClassify.test.ts`, `executionRunOutput.test.ts`, `uiSliceRunOutput.test.ts`), the detached window (`RunOutputWindowApp.test.tsx`, `panelMode.test.ts`, `runOutputWindowBridge.test.ts`), the loop-history setting (`SettingsPopover.loopHistory.test.tsx`), zoom scaling (`uiSlice.zoomScale.test.ts`), and the membership/step-path fixes (`renumberStepPaths.test.ts`, `graphSlice.addConnectDelete.test.ts`, `graphSlice.rewireBranchMembership.test.ts`, `childMembershipReindex.repro.test.ts`).
+
+**e2e (Playwright)** — new `flow-canvas-iteration-stepper.spec.ts` (stepper, scrubber, drag-to-scrub) and `flow-canvas-preset-switch.spec.ts` (preset state isolation); execution-path, interactions, live-wires, and settings-popover specs extended.
+
+### Documentation
+
+Design specs and TDD implementation plans were added under `docs/superpowers/` for the Run Output viewer (`2026-06-08-flow-canvas-run-output-viewer-*`), the detachable Run Output window (`2026-06-09-flow-canvas-run-output-window-*`), and the loop iteration stepper (`2026-06-09-flow-canvas-loop-iteration-stepper-*`, including the shipped-limitations list). `FLOW_CANVAS_ENHANCEMENTS.md` records the variables time-travel and iteration-context UX as shipped.
+
+---
+
 ## Changes Since `4797065` (0.51.22)
 
 This release is a focused, multi-wave expansion of the Flow Canvas editor — bigger and self-describing blocks, labeled branch lanes, in-place block expansion, a Display Settings popover, draggable bands, full comment round-tripping between YAML and the canvas, and a per-preset Auto-flow/Manual layout mode that finally makes hand-arranged layouts stick. Every visual and layout change keeps the canvas-as-preset-builder invariant: **nothing new is serialized into the exported YAML script**. A single scripting change rounds it out. All layout/view state travels with the preset's `CanvasLayoutData` or the app's `WindowState`, never the script body.
