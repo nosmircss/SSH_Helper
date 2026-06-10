@@ -4,10 +4,11 @@ import React from 'react';
 
 // ── Minimal stubs for @xyflow/react (data-position exposes the handle's side) ──
 vi.mock('@xyflow/react', () => ({
-  Handle: ({ type, position, id, style }: any) =>
+  Handle: ({ type, position, id, style, className }: any) =>
     React.createElement('div', {
       'data-testid': `handle-${type}-${id ?? position}`,
       'data-position': position,
+      className,
       style,
     }),
   Position: { Top: 'top', Bottom: 'bottom', Right: 'right', Left: 'left' },
@@ -103,6 +104,24 @@ describe('BaseBlock', () => {
     renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
     expect(screen.getByText('Send').style.fontSize).toBe(`${13 * 1.15}px`); // '14.95px'
     mock.state.textScale = 1; // restore for other tests
+  });
+
+  // The fc-handle class hangs the zoom-compensating pseudo-elements (baseblock.css) off every
+  // handle, while the element's own box MUST stay at its fixed inline size — React Flow measures
+  // it for edge anchors and the spine-straightness test keys on its exact center.
+  it('all handles carry fc-handle and keep their fixed measured box', () => {
+    renderNode({ data: { blockType: 'if', label: 'If', props: {} } as any });
+    const handles = [
+      screen.getByTestId('handle-target-top'),
+      screen.getByTestId('handle-source-bottom'),
+      screen.getByTestId('handle-source-false'),
+      screen.getByTestId('handle-source-continue'),
+    ];
+    for (const h of handles) {
+      expect(h.className).toContain('fc-handle');
+      expect(parseInt(h.style.width, 10)).toBeGreaterThanOrEqual(8);
+      expect(h.style.transform).toBe(''); // no scale on the element itself
+    }
   });
 });
 

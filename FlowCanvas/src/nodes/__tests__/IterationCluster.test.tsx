@@ -102,6 +102,21 @@ describe('IterationCluster', () => {
     fireEvent.click(screen.getByTestId('iter-next'));
     expect(screen.getByTestId('iter-counter').textContent).toBe('3/3');
   });
+
+  // The cluster lives in flow space (ViewportPortal), so it shrinks with the viewport; the
+  // inverse-zoom uiZoomScale must scale it back about its band-pinned top-right corner.
+  it('scales with uiZoomScale about the band-pinned right edge', () => {
+    const prev = useFlowStore.getState().uiZoomScale;
+    try {
+      useFlowStore.setState({ uiZoomScale: 2 });
+      render(<IterationCluster band={band} />);
+      const cluster = screen.getByTestId('iteration-cluster');
+      expect(cluster.style.transform).toContain('scale(2)');
+      expect(cluster.style.transformOrigin).toBe('top right');
+    } finally {
+      useFlowStore.setState({ uiZoomScale: prev });
+    }
+  });
 });
 
 describe('IterationCluster — scrubber', () => {
@@ -135,5 +150,20 @@ describe('IterationCluster — scrubber', () => {
     fireEvent.pointerDown(scrubber, { clientX: 0, pointerId: 1 });
     const records = useFlowStore.getState().iterationLog.get('L')!;
     expect(useFlowStore.getState().iterationSelections.get('L')).toBe(records[0].seq);
+  });
+
+  it('scales with uiZoomScale while keeping its rendered flow width (layout width / scale)', () => {
+    const prev = useFlowStore.getState().uiZoomScale;
+    try {
+      useFlowStore.setState({ uiZoomScale: 2 });
+      seed(100);
+      render(<IterationCluster band={band} />);
+      const scrubber = screen.getByTestId('iter-scrubber');
+      expect(scrubber.style.transform).toContain('scale(2)');
+      // band 320 wide leaves no room after the scaled clearances → 60px floor, halved pre-scale.
+      expect(scrubber.style.width).toBe('30px');
+    } finally {
+      useFlowStore.setState({ uiZoomScale: prev });
+    }
   });
 });

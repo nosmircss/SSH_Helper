@@ -22,6 +22,10 @@ export const DEFAULT_PANEL_SIZES: PanelSizes = {
   outputHeight: 200,
 };
 
+/** Cap for the inverse-zoom UI scale: full screen-size compensation down to zoom ≈ 1/2.25,
+ *  then flow-space chrome shrinks gracefully instead of dwarfing the blocks it belongs to. */
+export const UI_SCALE_MAX = 2.25;
+
 export interface UISlice {
   theme: 'dark' | 'light';
   reducedMotion: boolean;
@@ -60,6 +64,10 @@ export interface UISlice {
   };
   diagnostics: NodeDiagnostic[];
   connectionNotice: { message: string; nonce: number } | null;
+  /** Inverse-zoom scale (1 → UI_SCALE_MAX) keeping flow-space chrome (connection handles,
+   *  band pills, iteration steppers) a near-constant screen size as the viewport zooms out.
+   *  Quantized to 0.05 steps so pan/zoom frames don't churn subscribers. */
+  uiZoomScale: number;
 
   setTheme: (theme: 'dark' | 'light') => void;
   toggleTheme: () => void;
@@ -104,6 +112,8 @@ export interface UISlice {
   setDiagnostics: (d: NodeDiagnostic[]) => void;
   showConnectionNotice: (message: string) => void;
   clearConnectionNotice: () => void;
+  /** Feed the current viewport zoom (from ReactFlow onMove); derives + stores uiZoomScale. */
+  syncUiZoomScale: (zoom: number) => void;
 }
 
 export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get) => ({
@@ -143,6 +153,7 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   },
   diagnostics: [],
   connectionNotice: null,
+  uiZoomScale: 1,
 
   setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
@@ -353,4 +364,10 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   showConnectionNotice: (message) =>
     set((s) => ({ connectionNotice: { message, nonce: (s.connectionNotice?.nonce ?? 0) + 1 } })),
   clearConnectionNotice: () => set({ connectionNotice: null }),
+
+  syncUiZoomScale: (zoom) => {
+    if (!Number.isFinite(zoom) || zoom <= 0) return;
+    const next = Math.round(Math.min(UI_SCALE_MAX, Math.max(1, 1 / zoom)) * 20) / 20;
+    if (get().uiZoomScale !== next) set({ uiZoomScale: next });
+  },
 });

@@ -96,7 +96,13 @@ export default function BranchBandsLayer() {
             onLostPointerCapture={endDrag}
             style={{
               position: 'absolute',
-              transform: `translate(${b.x}px, ${b.y}px)`,
+              // Inverse-zoom scale (CSS var set by App) keeps the drag pill a usable screen
+              // size when zoomed out; top-left origin pins it to the band corner. Clamped to
+              // 1.75 (≈ headroom 30px / pill height 17px) so the scaled pill stays inside the
+              // band's label headroom and never sits over the first block's header, where its
+              // pointerEvents would steal the block's clicks.
+              transform: `translate(${b.x}px, ${b.y}px) scale(min(var(--fc-ui-scale, 1), 1.75))`,
+              transformOrigin: 'top left',
               font: '800 9px/1.4 system-ui, sans-serif', letterSpacing: '0.08em',
               padding: '2px 10px', borderRadius: '9px 0 8px 0',
               color: 'oklch(17% 0.02 275)',

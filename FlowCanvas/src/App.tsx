@@ -99,6 +99,7 @@ function FlowCanvasInner() {
   const pausedAtNodeId = useFlowStore((s) => s.pausedAtNodeId);
   const callStack = useFlowStore((s) => s.callStack);
   const blockOutputs = useFlowStore((s) => s.blockOutputs);
+  const uiZoomScale = useFlowStore((s) => s.uiZoomScale);
 
   const reactFlowInstance = useRef<ReactFlowInstance<any, any> | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -121,6 +122,14 @@ function FlowCanvasInner() {
   useEffect(() => {
     document.body.classList.toggle('fc-reduced-motion', reducedMotion);
   }, [reducedMotion]);
+
+  // Inverse-zoom scale for flow-space chrome (handles, band pills, iteration steppers). The
+  // CSS var drives paint-only scaling in baseblock.css / BranchBandsLayer without re-rendering
+  // any node; components that need the number (IterationCluster, connectionRadius below)
+  // subscribe to the quantized store value.
+  useEffect(() => {
+    wrapperRef.current?.style.setProperty('--fc-ui-scale', String(uiZoomScale));
+  }, [uiZoomScale]);
 
   // Reject illegal drop targets while dragging a connection. Reads getState() so it always
   // sees current nodes/edges without re-subscribing (returning false aborts the drop in v12).
@@ -269,7 +278,6 @@ function FlowCanvasInner() {
   }, [clearSelection, hideContextMenu, hideEdgeContextMenu]);
 
   // Highlight search results on nodes
-  const searchHighlightSet = new Set(searchResults);
   const highlightedNodeId = searchResults.length > 0 ? searchResults[searchIndex] : null;
 
   // Get first selected node for output preview
@@ -294,14 +302,19 @@ function FlowCanvasInner() {
   // contentSizeComment strips comments' oversized fixed hit box so RF auto-measures the card;
   // orderCommentsBehind renders comments behind blocks so a block always wins a pointer overlap.
   // Together these stop a comment from hijacking drags meant for its block or the branch-band handle.
-  const displayNodes = orderCommentsBehind(nodes.map((n) => ({
-    ...contentSizeComment(n),
-    selected: selectedNodeIds.has(n.id),
-    className: [
-      searchHighlightSet.has(n.id) ? 'search-match' : '',
-      n.id === highlightedNodeId ? 'search-current' : '',
-    ].filter(Boolean).join(' ') || undefined,
-  })));
+  // Memoized so renders that touch neither nodes nor highlights (e.g. the zoom-bucket
+  // connectionRadius update) keep node identities stable and skip node re-renders.
+  const displayNodes = useMemo(() => {
+    const searchHighlightSet = new Set(searchResults);
+    return orderCommentsBehind(nodes.map((n) => ({
+      ...contentSizeComment(n),
+      selected: selectedNodeIds.has(n.id),
+      className: [
+        searchHighlightSet.has(n.id) ? 'search-match' : '',
+        n.id === highlightedNodeId ? 'search-current' : '',
+      ].filter(Boolean).join(' ') || undefined,
+    })));
+  }, [nodes, selectedNodeIds, searchResults, highlightedNodeId]);
 
   // Canvas ships dark-only; values come from the token layer (styles/tokens.css).
   const canvasBg = 'var(--fc-canvas-bg)';
@@ -326,7 +339,7 @@ function FlowCanvasInner() {
   }), []);
 
   // Build enhanced edges — all edges use AnimatedEdge (rest + running) + selection highlight
-  const displayEdges = edges.map((e) => ({
+  const displayEdges = useMemo(() => edges.map((e) => ({
     ...e,
     type: 'animated',
     selected: selectedEdgeIds.has(e.id),
@@ -336,7 +349,7 @@ function FlowCanvasInner() {
         ? { stroke: selectedStroke, strokeWidth: 3 }
         : {}),
     },
-  }));
+  })), [edges, selectedEdgeIds, selectedStroke]);
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -357,7 +370,11 @@ function FlowCanvasInner() {
               onConnectEnd={onConnectEnd}
               onDragOver={onDragOver}
               onDrop={onDrop}
-              onInit={(instance) => { reactFlowInstance.current = instance; }}
+              onInit={(instance) => {
+                reactFlowInstance.current = instance;
+                useFlowStore.getState().syncUiZoomScale(instance.getViewport().zoom);
+              }}
+              onMove={(_e, viewport) => useFlowStore.getState().syncUiZoomScale(viewport.zoom)}
               onNodeClick={onNodeClick}
               onPaneClick={onPaneClick}
               onNodeContextMenu={onNodeContextMenu}
@@ -369,6 +386,9 @@ function FlowCanvasInner() {
               edgeTypes={edgeTypes}
               snapToGrid={snapToGrid}
               snapGrid={[gridSize, gridSize]}
+              // Drop-snap radius is measured in FLOW px, so it shrinks on screen as you zoom
+              // out; scaling it by the inverse-zoom factor keeps the forgiveness near-constant.
+              connectionRadius={Math.round(28 * uiZoomScale)}
               selectionOnDrag
               panOnDrag={[1, 2]}
               minZoom={0.2}

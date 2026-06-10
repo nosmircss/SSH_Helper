@@ -33,6 +33,47 @@ function Segmented<T extends string | number>(props: {
   );
 }
 
+// Free-form numeric setting. Edits live in local text state and commit on blur/Enter:
+// non-numeric input reverts to the current value, numeric input is clamped to [min, max].
+function NumberField(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (v: number) => void;
+}) {
+  const [text, setText] = useState(String(props.value));
+  useEffect(() => { setText(String(props.value)); }, [props.value]);
+
+  const commit = () => {
+    const n = Math.round(Number(text));
+    if (text.trim() === '' || !Number.isFinite(n)) { setText(String(props.value)); return; }
+    const clamped = Math.min(props.max, Math.max(props.min, n));
+    setText(String(clamped));
+    if (clamped !== props.value) props.onCommit(clamped);
+  };
+
+  return (
+    <div style={{ padding: '5px 0' }} data-testid={`setting-${props.label.toLowerCase().replace(/\s+/g, '-')}`}>
+      <div style={{ ...labStyle, marginBottom: 4 }}>{props.label}</div>
+      <input
+        value={text}
+        inputMode="numeric"
+        aria-label={props.label}
+        data-testid="number-field-input"
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { commit(); e.currentTarget.blur(); } }}
+        style={{
+          width: 90, fontSize: 11, padding: '3px 7px', fontFamily: 'inherit',
+          background: 'var(--fc-surface-1)', color: 'var(--fc-text)',
+          border: '1px solid var(--fc-border)', borderRadius: 6, outline: 'none',
+        }}
+      />
+    </div>
+  );
+}
+
 function Toggle(props: { label: string; on: boolean; onClick: () => void }) {
   return (
     <div style={rowStyle}>
@@ -97,10 +138,6 @@ export default function SettingsPopover() {
   const textOptions: readonly { label: string; v: number }[] = TEXT_SCALES.map((p) => ({ label: p.label, v: p.v as number }));
   const densityOptions: readonly { label: string; v: number }[] = DENSITIES.map((p) => ({ label: p.label, v: p.v as number }));
   const newBlocksOptions: readonly { label: string; v: number }[] = [{ label: 'Collapsed', v: 0 }, { label: 'Expanded', v: 1 }];
-  const iterationCapOptions: readonly { label: string; v: number }[] = [
-    { label: '100', v: 100 }, { label: '250', v: 250 }, { label: '500', v: 500 },
-    { label: '1k', v: 1000 }, { label: '5k', v: 5000 },
-  ];
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -133,11 +170,12 @@ export default function SettingsPopover() {
           <Segmented label="Block width" value={blockWidth} options={widthOptions} onChange={setBlockWidth} />
           <Segmented label="Text size" value={textScale} options={textOptions} onChange={setTextScale} />
           <Segmented label="Canvas density" value={density} options={densityOptions} onChange={setDensity} />
-          <Segmented
+          <NumberField
             label="Loop history (iterations kept per loop)"
             value={iterationHistoryCap}
-            options={iterationCapOptions}
-            onChange={setIterationHistoryCap}
+            min={1}
+            max={100000}
+            onCommit={setIterationHistoryCap}
           />
           <Segmented
             label="New blocks"

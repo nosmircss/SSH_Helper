@@ -1,2 +1,40 @@
 .search-match { outline: 2px dashed var(--fc-search-outline) !important; outline-offset: 2px; }
 .search-current { outline: 2px solid var(--fc-search-outline) !important; outline-offset: 2px; }
+
+/* Connection handles. The element's own 8-10px box is load-bearing: React Flow measures it
+   for edge anchor points, and AnimatedEdge's spine-straightness test keys on its exact center
+   — so zoom compensation must never change the box. Both pseudo-elements scale with
+   --fc-ui-scale (inverse viewport zoom, capped; set on the canvas wrapper by App) instead:
+   ::before repaints the dot bigger (background/border-radius inherited from the element's
+   inline style), ::after is an invisible grab pad. Pseudo boxes extend the element's pointer
+   hit region, so both enlarge the grab target without touching what React Flow measures. */
+.fc-handle.react-flow__handle::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  transform: scale(var(--fc-ui-scale, 1));
+  transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
+}
+.fc-handle.react-flow__handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(22px * var(--fc-ui-scale, 1));
+  height: calc(22px * var(--fc-ui-scale, 1));
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+}
+/* Hover / live-connection feedback: pop the dot so the now-large target reads as grabbable. */
+.fc-handle.react-flow__handle:hover::before,
+.fc-handle.react-flow__handle.connectingfrom::before,
+.fc-handle.react-flow__handle.connectingto::before {
+  transform: scale(calc(var(--fc-ui-scale, 1) * 1.5));
+  box-shadow: 0 0 0 2px var(--fc-glow-running), 0 0 8px 2px var(--fc-glow-running);
+}
+.fc-handle.react-flow__handle.valid::before {
+  box-shadow: 0 0 0 2px var(--fc-glow-success), 0 0 8px 2px var(--fc-glow-success);
+}
+.fc-reduced-motion .fc-handle.react-flow__handle::before { transition: none; }

@@ -16,6 +16,7 @@ export const WIDTH_PRESETS = [
 ] as const;
 export const TEXT_SCALES = [
   { label: 'S', v: 0.9 }, { label: 'M', v: 1 }, { label: 'L', v: 1.15 },
+  { label: 'XL', v: 1.35 }, { label: 'XXL', v: 1.6 },
 ] as const;
 export const DENSITIES = [
   { label: 'Tight', v: 0.85 }, { label: 'Normal', v: 1 }, { label: 'Roomy', v: 1.2 },

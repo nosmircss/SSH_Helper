@@ -41,6 +41,11 @@ export default function IterationCluster({ band }: IterationClusterProps) {
   const nodes = useFlowStore((s) => s.nodes);
   const total = useFlowStore((s) => s.totalIterations.get(loopId) ?? 0);
   const setSelection = useFlowStore((s) => s.setIterationSelection);
+  // Inverse-zoom scale so the chips stay clickable when zoomed out. The cluster lives in
+  // flow space (ViewportPortal), so without this it shrinks with the viewport. Capped at 2.1:
+  // the ~18.6px chip row anchored at band.y-11 must stay inside the band's 30px label headroom
+  // (18.6 × 2.1 − 11 ≈ 28) so its pointer area never sits over the first block's header.
+  const uiScale = useFlowStore((s) => Math.min(s.uiZoomScale, 2.1));
 
   const visible = useMemo(
     () => selectVisibleIterations(useFlowStore.getState(), loopId),
@@ -122,8 +127,11 @@ export default function IterationCluster({ band }: IterationClusterProps) {
           onLostPointerCapture={() => { scrubDragging.current = false; lastScrubPos.current = -1; }}
           style={{
             position: 'absolute',
-            transform: `translate(${band.x + SCRUB_LEFT}px, ${band.y - 8}px)`,
-            width: Math.max(60, band.width - SCRUB_LEFT - SCRUB_RIGHT_RESERVE),
+            // Clearances scale with uiScale (the pill and the cluster both grow by it); the strip
+            // keeps its RENDERED flow width by dividing the layout width by the scale factor.
+            transform: `translate(${band.x + SCRUB_LEFT * uiScale}px, ${band.y - 8}px) scale(${uiScale})`,
+            transformOrigin: 'top left',
+            width: Math.max(60, band.width - (SCRUB_LEFT + SCRUB_RIGHT_RESERVE) * uiScale) / uiScale,
             height: 15, display: 'flex', alignItems: 'center', gap: 1,
             background: 'var(--fc-surface-0)',
             border: `1px solid ${mix(band.colorVar, 45)}`,
@@ -158,7 +166,11 @@ export default function IterationCluster({ band }: IterationClusterProps) {
         onPointerDown={(e) => e.stopPropagation()}
         style={{
           position: 'absolute',
-          transform: `translate(calc(${band.x + band.width - 8}px - 100%), ${band.y - 11}px)`,
+          // scale() composes after the translate, about the element's (untransformed-size)
+          // top-right corner — so the right edge stays pinned to the band and growth runs
+          // left/down into the band's own header space.
+          transform: `translate(calc(${band.x + band.width - 8}px - 100%), ${band.y - 11}px) scale(${uiScale})`,
+          transformOrigin: 'top right',
           display: 'flex', alignItems: 'center', gap: 4,
           zIndex: 6, pointerEvents: 'auto',
           font: '600 9px/1.4 system-ui, sans-serif',

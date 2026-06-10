@@ -194,18 +194,24 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     border: colors.border,
   });
 
+  // NO overflow:hidden here — the card is the containing block for the connection handles, and
+  // clipping it would cut the fc-handle pseudo-elements (grab pad + zoom-scaled dot) to their
+  // inward half. Content is clipped to the rounded corners by the inner wrapper below instead.
   const containerStyle: CSSProperties = {
     background: isDisabled ? 'var(--fc-surface-disabled)' : 'var(--fc-node-surface)',
     border: `1px solid ${nodeBorderColor({ selected, isDisabled, border: colors.border })}`,
     borderRadius: 8,
     minWidth: isChild ? blockWidth - BLOCK_WIDTH_INSET : blockWidth,
     maxWidth: isChild ? blockWidth - BLOCK_WIDTH_INSET : blockWidth,
-    overflow: 'hidden',
     opacity: isDisabled ? 0.5 : isChild ? 0.95 : 1,
     boxShadow: heatTint ? `0 0 0 3px ${heatTint}, ${existingBoxShadow}` : existingBoxShadow,
     transition: 'box-shadow 0.2s, border-color 0.2s, opacity 0.2s',
     position: 'relative',
   };
+
+  // Clips the square-cornered header/summary backgrounds to the card's rounded corners
+  // (7 = card radius 8 minus the 1px border). Must NOT wrap the handles.
+  const contentClipStyle: CSSProperties = { overflow: 'hidden', borderRadius: 7 };
 
   // running + error get a state class whose CSS animation owns the card's box-shadow/transform
   // (breathing glow / shake+ripple). success + skipped stay on the inline box-shadow path.
@@ -333,8 +339,12 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       <Handle
         type="target"
         position={Position.Top}
+        className="fc-handle"
         style={{ background: colors.border, width: 8, height: 8, border: 'none' }}
       />
+
+      {/* Content clip wrapper: header + summary/preview only — handles stay outside it. */}
+      <div style={contentClipStyle}>
 
       {/* Header */}
       <div style={headerStyle}>
@@ -416,6 +426,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         </div>
       ) : null}
 
+      </div>
+
       {/* Output handle (bottom). For a CONTAINER this is the THEN/body branch source and the
           continuation diamond sits at bottom-center, so shift this handle right (toward the indented
           body) to keep the two from stacking. A plain block's single successor stays centered so its
@@ -423,6 +435,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       <Handle
         type="source"
         position={Position.Bottom}
+        className="fc-handle"
         style={{
           background: colors.border, width: 8, height: 8, border: 'none',
           ...(def.isContainer ? { left: '75%' } : {}),
@@ -435,6 +448,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           type="source"
           position={Position.Right}
           id="false"
+          className="fc-handle"
           style={{
             background: 'var(--fc-state-error)', width: 8, height: 8, border: 'none',
             top: '50%',
@@ -453,6 +467,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           type="source"
           position={Position.Bottom}
           id="continue"
+          className="fc-handle"
           style={{ background: 'var(--fc-accent)', width: 10, height: 10, border: 'none', borderRadius: 3 }}
         />
       )}
