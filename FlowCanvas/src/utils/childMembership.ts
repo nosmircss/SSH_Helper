@@ -42,12 +42,19 @@ function propsOf(n: Node | undefined): Record<string, unknown> {
  * Returns null (leave the existing edge-only behaviour untouched) when the gesture can't confer
  * membership: not one of the three handles above, the source is canvas-authored (no `_stepPath`,
  * so its structure lives on edges), the source is top-level (the layout spine walk already places
- * a top-level successor correctly), or the target already carries membership (don't clobber).
+ * a top-level successor correctly), or the target already carries (still-anchored) membership.
+ *
+ * `targetIsOrphaned` (target has no incoming edge right now) is the seam for rewiring: a block whose
+ * parent branch-entry edge was DELETED still carries its stale imported `_isChildOf`/`_stepPath`, but
+ * it no longer belongs to that branch. Wiring it somewhere new should re-home it, not be refused by
+ * the don't-clobber guard — otherwise (the reported bug) it stays visually in its old band while its
+ * new wire dangles. Fan-in is already forbidden upstream, so a target that still has its entry edge
+ * never reaches here on a new connect; an orphaned member here is always safe to re-home.
  */
 export function deriveChildMembership(
   nodes: Node[],
   connection: Connection,
-  opts: { sourceIsContainer: boolean; branchMetadata?: BranchMetadataInput },
+  opts: { sourceIsContainer: boolean; branchMetadata?: BranchMetadataInput; targetIsOrphaned?: boolean },
 ): ChildMembership | null {
   if (!connection.source || !connection.target) return null;
   const source = nodes.find((n) => n.id === connection.source);
@@ -55,7 +62,10 @@ export function deriveChildMembership(
   if (!source || !target) return null;
 
   const tProps = propsOf(target);
-  if (tProps['_isChildOf'] != null || tProps['_stepPath'] != null) return null; // don't clobber
+  const hasMembership = tProps['_isChildOf'] != null || tProps['_stepPath'] != null;
+  // Keep a still-anchored member where it is (don't clobber). An orphaned member — its branch-entry
+  // edge was deleted — is fair game to re-home into the branch the user is now wiring it into.
+  if (hasMembership && !opts.targetIsOrphaned) return null;
 
   const sProps = propsOf(source);
   const sPath = sProps['_stepPath'];

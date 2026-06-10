@@ -380,7 +380,12 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       // orphaning it at the spine. Returns null (and leaves nodes untouched) for gestures that don't
       // nest — top-level successors, canvas-authored containers, already-nested targets.
       let nextNodes = state.nodes;
-      const membership = deriveChildMembership(state.nodes, connection, { sourceIsContainer: isContainer, branchMetadata });
+      // A target with no incoming edge right now is an orphan — if it still carries imported
+      // membership, its branch-entry edge was deleted, so rewiring it should re-home it (not be
+      // blocked by the don't-clobber guard). Fan-in is forbidden upstream, so any membership-carrying
+      // target that reaches here necessarily lost its entry edge.
+      const targetIsOrphaned = !state.edges.some((e) => e.target === connection.target);
+      const membership = deriveChildMembership(state.nodes, connection, { sourceIsContainer: isContainer, branchMetadata, targetIsOrphaned });
       if (membership) nextNodes = applyChildMembership(state.nodes, membership);
 
       if (isContinuation) {
