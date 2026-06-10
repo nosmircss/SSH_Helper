@@ -116,4 +116,17 @@ describe('default block state (always-expanded)', () => {
     expect(s.expandedNodes.has('A')).toBe(true);
     expect(s.expandedNodes.has('B')).toBe(false);
   });
+
+  it('resetCanvasSettings collapses the open graph when the default was Expanded', () => {
+    // Reset flips the setting to Collapsed, so the open graph must collapse too — otherwise
+    // the control reads Collapsed while every block stays expanded (and autosave persists it).
+    chain();
+    useFlowStore.getState().setDefaultBlockExpanded(true);
+    expect(useFlowStore.getState().expandedNodes.size).toBe(2);
+    useFlowStore.getState().resetCanvasSettings();
+    const s = useFlowStore.getState();
+    expect(s.defaultBlockExpanded).toBe(false);
+    expect(s.expandedNodes.size).toBe(0);
+    expect((s.nodes.find((n) => n.id === 'A')!.data as Record<string, unknown>).expanded).toBe(false);
+  });
 });

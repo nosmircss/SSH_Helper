@@ -76,7 +76,12 @@ export const createSettingsSlice: StateCreator<FlowStore, [], [], SettingsSlice>
       if (get().nodes.length > 0) get().setAllExpanded(v);
     },
     resetCanvasSettings: () => {
+      const wasExpanded = get().defaultBlockExpanded;
       set({ ...SETTINGS_DEFAULTS });
+      // Mirror setDefaultBlockExpanded(false): the reset flips "Default block state" to
+      // Collapsed, so collapse the open graph too — otherwise the control reads Collapsed
+      // while every block stays expanded and the autosave persists that expansion.
+      if (wasExpanded && get().nodes.length > 0) get().setAllExpanded(false);
       reflowAndPersist({ ...SETTINGS_DEFAULTS });
     },
     // Host-driven restore. Apply values, then reflow if a graph is already loaded so a
