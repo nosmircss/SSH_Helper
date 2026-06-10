@@ -123,6 +123,47 @@ describe('iterationSlice — recordIterationEvent', () => {
     rec('A', [{ loopId: 'L', i: -1 } as IterationFrameMsg], { state: 'success' });
     expect(useFlowStore.getState().iterationLog.size).toBe(0);
   });
+
+  it('records the sanitized variables snapshot on completion events', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    rec('A', [F('L', 0)], { state: 'success' }, {
+      host: 'web-01',
+      _output: 'BIG',
+      _outputwindow: 'HUGE',
+      note: 'x'.repeat(3000),
+    });
+
+    const vars = useFlowStore.getState().iterationLog.get('L')![0].variables!;
+    expect(vars.host).toBe('web-01');
+    expect(vars).not.toHaveProperty('_output');
+    expect(vars).not.toHaveProperty('_outputwindow');
+    expect(typeof vars.note).toBe('string');
+    expect((vars.note as string).endsWith('… [truncated]')).toBe(true);
+    expect((vars.note as string).length).toBe(2000 + 13);
+  });
+
+  it('last completion wins and ancestors inherit the end-of-outer-iteration snapshot', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    rec('X', [F('OUT', 0), F('IN', 0)], { state: 'success' }, { v: 1 });
+    rec('X', [F('OUT', 0), F('IN', 1)], { state: 'success' }, { v: 2 });
+
+    const inner = useFlowStore.getState().iterationLog.get('IN')!;
+    const outer = useFlowStore.getState().iterationLog.get('OUT')!;
+    expect(inner[0].variables).toEqual({ v: 1 });
+    expect(inner[1].variables).toEqual({ v: 2 });
+    expect(outer[0].variables).toEqual({ v: 2 });
+  });
+
+  it('events without variables preserve the existing snapshot', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    rec('A', [F('L', 0)], { state: 'running' }, { host: 'web-01' });
+    rec('A', [F('L', 0)], { state: 'success', duration: 5 });
+
+    const records = useFlowStore.getState().iterationLog.get('L')!;
+    expect(records).toHaveLength(1);
+    expect(records[0].variables).toEqual({ host: 'web-01' });
+    expect(records[0].nodes.get('A')!.state).toBe('success');
+  });
 });
 
 describe('iterationSlice — selections', () => {
@@ -166,5 +207,41 @@ describe('iterationSlice — selections', () => {
     expect(useFlowStore.getState().iterationLog.size).toBe(0);
     expect(useFlowStore.getState().iterationSelections.size).toBe(0);
     expect(useFlowStore.getState().totalIterations.size).toBe(0);
+  });
+
+  it('lastSelectedLoopId follows selections', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    rec('A', [F('L', 0)], { state: 'success' });
+    rec('B', [F('M', 0)], { state: 'success' });
+    const lSeq = useFlowStore.getState().iterationLog.get('L')![0].seq;
+    const mSeq = useFlowStore.getState().iterationLog.get('M')![0].seq;
+
+    // Selecting L marks it active.
+    useFlowStore.getState().setIterationSelection('L', lSeq);
+    expect(useFlowStore.getState().lastSelectedLoopId).toBe('L');
+
+    // Clearing L's own selection clears the marker.
+    useFlowStore.getState().setIterationSelection('L', null);
+    expect(useFlowStore.getState().lastSelectedLoopId).toBeNull();
+
+    // Select L, then select M (different loop, no nesting) → M wins.
+    useFlowStore.getState().setIterationSelection('L', lSeq);
+    useFlowStore.getState().setIterationSelection('M', mSeq);
+    expect(useFlowStore.getState().lastSelectedLoopId).toBe('M');
+
+    // Clearing M's selection clears the marker (it IS the active loop), even though L stays selected.
+    useFlowStore.getState().setIterationSelection('M', null);
+    expect(useFlowStore.getState().lastSelectedLoopId).toBeNull();
+    expect(useFlowStore.getState().iterationSelections.get('L')).toBe(lSeq);
+  });
+
+  it('clearIterations resets lastSelectedLoopId', () => {
+    const rec = useFlowStore.getState().recordIterationEvent;
+    rec('A', [F('L', 0)], { state: 'success' });
+    useFlowStore.getState().setIterationSelection('L', useFlowStore.getState().iterationLog.get('L')![0].seq);
+    expect(useFlowStore.getState().lastSelectedLoopId).toBe('L');
+
+    useFlowStore.getState().clearIterations();
+    expect(useFlowStore.getState().lastSelectedLoopId).toBeNull();
   });
 });

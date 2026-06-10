@@ -7,6 +7,22 @@ import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
 
 export const DEFAULT_ITERATION_HISTORY_CAP = 500;
 
+/** Synthetic context keys that dwarf real variables (the full output window / last command
+ *  output already live in runOutput / blockOutputs) — never store them per iteration. */
+const HEAVY_VARIABLE_KEYS = new Set(['_outputwindow', '_output']);
+const MAX_SNAPSHOT_STRING = 2000;
+
+function sanitizeSnapshot(vars: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(vars)) {
+    if (HEAVY_VARIABLE_KEYS.has(k.toLowerCase())) continue;
+    out[k] = typeof v === 'string' && v.length > MAX_SNAPSHOT_STRING
+      ? v.slice(0, MAX_SNAPSHOT_STRING) + '… [truncated]'
+      : v;
+  }
+  return out;
+}
+
 export interface IterationNodeEntry {
   state: BlockExecState;
   branchTaken?: string;
@@ -31,6 +47,11 @@ export interface IterationRecord {
   /** Per-node entries: innermost-loop records hold exact values; ancestor records
    *  aggregate (error sticky, otherwise last write wins). */
   nodes: Map<string, IterationNodeEntry>;
+  /** Variables as of the LAST recorded completion within this iteration (end-of-iteration
+   *  state; for failed iterations = state at the failure). Sanitized: heavy synthetic keys
+   *  stripped, long string values truncated. One snapshot per record, last write wins —
+   *  via write-to-all-frames, ancestor records hold the end-of-outer-iteration snapshot. */
+  variables?: Record<string, unknown>;
 }
 
 export interface IterationSlice {
@@ -41,11 +62,15 @@ export interface IterationSlice {
   totalIterations: Map<string, number>;
   iterationSeq: number;
   iterationHistoryCap: number;
+  /** The loop the user last touched a selection on — the active iteration context for
+   *  node-agnostic panels (Variables). Null = no active context. */
+  lastSelectedLoopId: string | null;
 
   recordIterationEvent: (
     nodeId: string,
     stack: IterationFrameMsg[],
     patch: Partial<IterationNodeEntry>,
+    variables?: Record<string, unknown>,
   ) => void;
   setIterationSelection: (loopId: string, seq: number | null) => void;
   clearIterations: () => void;
@@ -61,14 +86,16 @@ export const createIterationSlice: StateCreator<FlowStore, [], [], IterationSlic
   totalIterations: new Map(),
   iterationSeq: 0,
   iterationHistoryCap: DEFAULT_ITERATION_HISTORY_CAP,
+  lastSelectedLoopId: null,
 
-  recordIterationEvent: (nodeId, stack, patch) => set((s) => {
+  recordIterationEvent: (nodeId, stack, patch, variables) => set((s) => {
     if (!Array.isArray(stack) || stack.length === 0) return {};
 
     const log = new Map(s.iterationLog);
     const totals = new Map(s.totalIterations);
     let nextSeq = s.iterationSeq;
     const eventFailed = patch.state === 'error';
+    const sanitized = variables ? sanitizeSnapshot(variables) : undefined;
     let parentRef: { loopId: string; seq: number } | null = null;
 
     for (let d = 0; d < stack.length; d++) {
@@ -112,6 +139,10 @@ export const createIterationSlice: StateCreator<FlowStore, [], [], IterationSlic
         outputIdx: patch.outputIdx ?? prev?.outputIdx,
       });
       if (eventFailed) rec.failed = true;
+      // End-of-iteration snapshot: last completion wins. The matched branch shallow-copied
+      // the record above (COW), so assigning here mutates only the fresh copy. Events without
+      // variables leave rec.variables as carried by the copy.
+      if (sanitized) rec.variables = sanitized;
 
       log.set(frame.loopId, records);
       totals.set(frame.loopId, Math.max(totals.get(frame.loopId) ?? 0, frame.i + 1));
@@ -159,7 +190,12 @@ export const createIterationSlice: StateCreator<FlowStore, [], [], IterationSlic
       }
     }
 
-    return { iterationSelections: sels };
+    // Selecting a record marks the loop as the active context; clearing THIS loop's selection
+    // clears the marker; clearing a different loop leaves the existing active context intact.
+    const lastSelectedLoopId =
+      seq != null ? loopId : (s.lastSelectedLoopId === loopId ? null : s.lastSelectedLoopId);
+
+    return { iterationSelections: sels, lastSelectedLoopId };
   }),
 
   clearIterations: () => set({
@@ -167,6 +203,7 @@ export const createIterationSlice: StateCreator<FlowStore, [], [], IterationSlic
     iterationSelections: new Map(),
     totalIterations: new Map(),
     iterationSeq: 0,
+    lastSelectedLoopId: null,
   }),
 
   setIterationHistoryCap: (v) => {

@@ -3,7 +3,7 @@ vi.mock('../../../utils/layoutAutosave', () => ({ sendLayoutAutosave: vi.fn(), f
 vi.mock('../../../MessageBus', () => ({ messageBus: { send: vi.fn() }, CANVAS_HOST_MESSAGES: { outgoing: {} } }));
 import { useFlowStore } from '../../useFlowStore';
 import type { IterationFrameMsg } from '../../../communication-message-types';
-import { selectIterationScope, selectVisibleIterations, LOOP_TYPES } from '../iterationScope';
+import { selectIterationScope, selectVisibleIterations, selectActiveIterationContext, LOOP_TYPES } from '../iterationScope';
 import { selectEdgePathStatus } from '../edgePath';
 import type { Node, Edge } from '@xyflow/react';
 
@@ -191,6 +191,48 @@ describe('nested loops', () => {
     // Governing selection active: the dangling record's parent walk dead-ends → filtered out.
     after.setIterationSelection('LO', after.iterationLog.get('LO')![0].seq);
     expect(selectVisibleIterations(useFlowStore.getState(), 'LI')).toEqual([]);
+  });
+});
+
+describe('selectActiveIterationContext', () => {
+  it('returns the last-touched loop record', () => {
+    seedNestedGraph();
+    runNestedIterations();
+    const st = useFlowStore.getState();
+    const inner = st.iterationLog.get('LI')!;
+
+    // Selecting the inner loop also pulls the outer (inner-pulls-outer), but the
+    // last-touched loop is the inner one.
+    st.setIterationSelection('LI', inner[1].seq);
+
+    const ctx = selectActiveIterationContext(useFlowStore.getState());
+    expect(ctx?.loopId).toBe('LI');
+    expect(ctx?.record.seq).toBe(inner[1].seq);
+  });
+
+  it('falls back to the deepest selected loop when the last-touched selection is gone', () => {
+    seedNestedGraph();
+    runNestedIterations();
+    const st = useFlowStore.getState();
+    const inner = st.iterationLog.get('LI')!;
+    const outer = st.iterationLog.get('LO')!;
+
+    // Select inner (pulls outer to its containing iteration), then clear ONLY the inner
+    // selection directly — lastSelectedLoopId clears, but the outer stays selected.
+    st.setIterationSelection('LI', inner[0].seq);
+    useFlowStore.getState().setIterationSelection('LI', null);
+    expect(useFlowStore.getState().lastSelectedLoopId).toBeNull();
+    expect(useFlowStore.getState().iterationSelections.get('LO')).toBe(outer[0].seq);
+
+    const ctx = selectActiveIterationContext(useFlowStore.getState());
+    expect(ctx?.loopId).toBe('LO');
+    expect(ctx?.record.seq).toBe(outer[0].seq);
+  });
+
+  it('returns null when nothing is selected', () => {
+    seedNestedGraph();
+    runNestedIterations();
+    expect(selectActiveIterationContext(useFlowStore.getState())).toBeNull();
   });
 });
 

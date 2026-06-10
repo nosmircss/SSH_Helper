@@ -49,6 +49,52 @@ export function selectIterationScope(state: FlowStore, nodeId: string): Iteratio
   return null;
 }
 
+export interface ActiveIterationContext {
+  loopId: string;
+  record: IterationRecord;
+}
+
+/**
+ * The globally active iteration context — drives panels that aren't tied to one node
+ * (Variables). Primary: the loop the user last touched, when it still has a selection.
+ * Fallback: the DEEPEST loop with a non-null selection (inner-pulls-outer keeps chains
+ * consistent; descendant-reset clears stale inners, so this is deterministic).
+ * Null = live/aggregate view.
+ */
+export function selectActiveIterationContext(state: FlowStore): ActiveIterationContext | null {
+  const resolve = (loopId: string): ActiveIterationContext | null => {
+    const sel = state.iterationSelections?.get(loopId);
+    if (sel == null) return null;
+    const rec = (state.iterationLog?.get(loopId) ?? []).find((r) => r.seq === sel);
+    return rec ? { loopId, record: rec } : null;
+  };
+
+  const last = state.lastSelectedLoopId;
+  if (last) {
+    const ctx = resolve(last);
+    if (ctx) return ctx;
+  }
+
+  // Fallback: deepest selected loop by parent-chain length.
+  let best: ActiveIterationContext | null = null;
+  let bestDepth = -1;
+  for (const [loopId, sel] of state.iterationSelections ?? []) {
+    if (sel == null) continue;
+    const ctx = resolve(loopId);
+    if (!ctx) continue;
+    let depth = 0;
+    let p = ctx.record.parent;
+    const seen = new Set<number>();
+    while (p && !seen.has(p.seq)) {
+      depth++;
+      seen.add(p.seq);
+      p = (state.iterationLog?.get(p.loopId) ?? []).find((r) => r.seq === p!.seq)?.parent ?? null;
+    }
+    if (depth > bestDepth) { best = ctx; bestDepth = depth; }
+  }
+  return best;
+}
+
 /**
  * The records of `loopId` visible under the current ancestor selections, time-ordered.
  * Unconstrained when no ancestor loop has a selection.

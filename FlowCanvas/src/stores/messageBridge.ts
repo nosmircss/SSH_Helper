@@ -282,14 +282,22 @@ export function initMessageBridge(): () => void {
       // Iteration attribution: every tagged event lands in the iteration log (transient,
       // never written onto node.data, so export is unaffected).
       if (Array.isArray(msg.iterationStack) && msg.iterationStack.length > 0) {
-        state.recordIterationEvent(stepId, msg.iterationStack, {
-          state: execState,
-          duration: msg.duration != null ? Number(msg.duration) : undefined,
-          branchTaken:
-            typeof msg.branchTaken === 'string' && msg.branchTaken.trim().length > 0
-              ? msg.branchTaken.trim()
-              : undefined,
-        });
+        const isCompletion = execState === 'success' || execState === 'error' || execState === 'skipped';
+        state.recordIterationEvent(
+          stepId,
+          msg.iterationStack,
+          {
+            state: execState,
+            duration: msg.duration != null ? Number(msg.duration) : undefined,
+            branchTaken:
+              typeof msg.branchTaken === 'string' && msg.branchTaken.trim().length > 0
+                ? msg.branchTaken.trim()
+                : undefined,
+          },
+          isCompletion && msg.variables && typeof msg.variables === 'object'
+            ? (msg.variables as Record<string, unknown>)
+            : undefined,
+        );
       }
     }),
 
