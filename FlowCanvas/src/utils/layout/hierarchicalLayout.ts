@@ -80,8 +80,10 @@ function verticalGap(): number { return activeSizing.nodeSpacingY - COLLAPSED_HE
 
 function advanceFor(n: LayoutTreeNode): number {
   const data = (n.node?.data ?? {}) as { blockType?: string; expanded?: boolean; props?: Record<string, unknown> };
-  if (!data.expanded) return activeSizing.nodeSpacingY;
-  return estimateNodeHeight(data.blockType ?? '', data.props ?? {}, true, activeSizing.textScale) + verticalGap();
+  // Collapsed and expanded both go through the textScale-aware estimate + the base gap, so
+  // bigger text sizes keep the same breathing room. At textScale 1 a collapsed block reduces
+  // to COLLAPSED_HEIGHT + (nodeSpacingY - COLLAPSED_HEIGHT) = nodeSpacingY — the historical step.
+  return estimateNodeHeight(data.blockType ?? '', data.props ?? {}, !!data.expanded, activeSizing.textScale) + verticalGap();
 }
 
 interface SubtreeSize { columns: number; rows: number; indent: number; }

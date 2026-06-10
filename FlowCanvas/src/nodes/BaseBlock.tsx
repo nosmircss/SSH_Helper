@@ -7,6 +7,7 @@ import { nodeBorderColor, resolveNodeShadow } from '../utils/nodeStyle';
 import { summarizeBlock } from '../utils/blockSummary';
 import { BLOCK_WIDTH_INSET } from '../utils/nodeSize';
 import { BlockIcon } from './BlockIcon';
+import { selectIterationScope, selectVisibleIterations, LOOP_TYPES } from '../stores/selectors/iterationScope';
 import './baseblock.css';
 import './execution-cinematics.css';
 
@@ -100,11 +101,23 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     s.blockTimings.forEach((t) => { if (t.duration && t.duration > max) max = t.duration; });
     return max;
   });
-  const loopIteration = useFlowStore((s) => s.loopIterations.get(id));
-  const branchTakenKey = useFlowStore((s) => s.branchTaken.get(id));
+  const loopIterationAggregate = useFlowStore((s) => s.loopIterations.get(id));
+  const branchTakenAggregate = useFlowStore((s) => s.branchTaken.get(id));
+  // Iteration scoping: when an ancestor loop has a selected iteration, this block's
+  // indicator/badges/duration show that single iteration. Display-only and transient —
+  // node.data is never written. The governing record is referentially stable between
+  // store changes, so this selector doesn't churn renders.
+  const iterScope = useFlowStore((s) => selectIterationScope(s, id));
+  const scopedEntry = iterScope?.nodes.get(id);
+  const isLoopBlock = LOOP_TYPES.has(blockData.blockType);
+  // An inner loop's ×N under an outer selection = its iterations within that outer iteration.
+  const scopedInnerCount = useFlowStore((s) =>
+    iterScope && isLoopBlock ? selectVisibleIterations(s, id).length : null,
+  );
+  const loopIteration = iterScope ? (scopedInnerCount ?? undefined) : loopIterationAggregate;
+  const branchTakenKey = iterScope ? scopedEntry?.branchTaken : branchTakenAggregate;
   const isExpanded = useFlowStore((s) => s.isExpanded(id));
   const toggleExpanded = useFlowStore((s) => s.toggleExpanded);
-  const selectNode = useFlowStore((s) => s.selectNode);
   const blockWidth = useFlowStore((s) => s.blockWidth);
   const textScale = useFlowStore((s) => s.textScale);
   const updateNodeData = useFlowStore((s) => s.updateNodeData);
@@ -140,9 +153,11 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   // Duration badge: settled value after completion. While running, the live ticker (read above)
   // drives the badge; on completion it locks to the measured duration.
   const timing = blockTimings.get(id);
-  const durationMs = timing?.duration;
+  const durationMs = iterScope ? scopedEntry?.duration : timing?.duration;
+  // Not reached in the selected iteration → render as idle (chip hidden).
+  const displayExecState = iterScope ? (scopedEntry?.state ?? 'idle') : execState;
   const durationText = durationMs != null ? formatDuration(durationMs) : null;
-  const badgeText = execState === 'running' ? liveText : durationText;
+  const badgeText = displayExecState === 'running' ? liveText : durationText;
 
   // Run-heatmap tint: only on idle/success blocks so it never overrides the
   // running pulse or the error glow (precedence). Render-time only — never
@@ -178,18 +193,24 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     border: colors.border,
   });
 
+  // NO overflow:hidden here — the card is the containing block for the connection handles, and
+  // clipping it would cut the fc-handle pseudo-elements (grab pad + zoom-scaled dot) to their
+  // inward half. Content is clipped to the rounded corners by the inner wrapper below instead.
   const containerStyle: CSSProperties = {
     background: isDisabled ? 'var(--fc-surface-disabled)' : 'var(--fc-node-surface)',
     border: `1px solid ${nodeBorderColor({ selected, isDisabled, border: colors.border })}`,
     borderRadius: 8,
     minWidth: isChild ? blockWidth - BLOCK_WIDTH_INSET : blockWidth,
     maxWidth: isChild ? blockWidth - BLOCK_WIDTH_INSET : blockWidth,
-    overflow: 'hidden',
     opacity: isDisabled ? 0.5 : isChild ? 0.95 : 1,
     boxShadow: heatTint ? `0 0 0 3px ${heatTint}, ${existingBoxShadow}` : existingBoxShadow,
     transition: 'box-shadow 0.2s, border-color 0.2s, opacity 0.2s',
     position: 'relative',
   };
+
+  // Clips the square-cornered header/summary backgrounds to the card's rounded corners
+  // (7 = card radius 8 minus the 1px border). Must NOT wrap the handles.
+  const contentClipStyle: CSSProperties = { overflow: 'hidden', borderRadius: 7 };
 
   // running + error get a state class whose CSS animation owns the card's box-shadow/transform
   // (breathing glow / shake+ripple). success + skipped stay on the inline box-shadow path.
@@ -237,21 +258,21 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     flexShrink: 0,
   };
 
-  const execIndicator = execState !== 'idle' && execState !== 'disabled' ? (
+  const execIndicator = displayExecState !== 'idle' && displayExecState !== 'disabled' ? (
     <span style={{
       fontSize: 9,
       marginLeft: 'auto',
       display: 'flex',
       alignItems: 'center',
       gap: 3,
-      color: execState === 'running' ? 'var(--fc-accent)'
-        : execState === 'success' ? 'var(--fc-state-success)'
-        : execState === 'skipped' ? 'var(--fc-text-secondary)'
+      color: displayExecState === 'running' ? 'var(--fc-accent)'
+        : displayExecState === 'success' ? 'var(--fc-state-success)'
+        : displayExecState === 'skipped' ? 'var(--fc-text-secondary)'
         : 'var(--fc-state-error)',
       fontWeight: 600,
     }}>
-      {execState === 'running' ? 'RUNNING'
-        : execState === 'success' ? (
+      {displayExecState === 'running' ? 'RUNNING'
+        : displayExecState === 'success' ? (
           <>
             <svg className="fc-check" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">
               <path d="M5 13l4 4L19 7" pathLength={1} />
@@ -259,7 +280,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
             DONE
           </>
         )
-        : execState === 'skipped' ? '— SKIP'
+        : displayExecState === 'skipped' ? '— SKIP'
         : '✗ ERROR'}
       {badgeText && (
         <span data-testid="exec-duration-badge" style={{
@@ -317,27 +338,30 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       <Handle
         type="target"
         position={Position.Top}
+        className="fc-handle"
         style={{ background: colors.border, width: 8, height: 8, border: 'none' }}
       />
 
+      {/* Content clip wrapper: header + summary/preview only — handles stay outside it. */}
+      <div style={contentClipStyle}>
+
       {/* Header */}
       <div style={headerStyle}>
-        {/* Breakpoint gutter */}
-        {!isChild && (
-          <span
-            onClick={handleBreakpointToggle}
-            style={{
-              width: 10, height: 10, borderRadius: '50%',
-              background: hasBreakpoint ? 'var(--fc-state-error)' : 'transparent',
-              border: hasBreakpoint ? 'none' : '1px solid var(--fc-border-subtle)',
-              flexShrink: 0,
-              cursor: 'pointer',
-              boxShadow: hasBreakpoint ? '0 0 4px var(--fc-glow-error)' : 'none',
-              transition: 'background 0.15s',
-            }}
-            title="Toggle breakpoint"
-          />
-        )}
+        {/* Breakpoint gutter — shown on every block (incl. nested children) so breakpoints
+            can be set inside loops/containers; the executor pauses by step path at any depth. */}
+        <span
+          onClick={handleBreakpointToggle}
+          style={{
+            width: 10, height: 10, borderRadius: '50%',
+            background: hasBreakpoint ? 'var(--fc-state-error)' : 'transparent',
+            border: hasBreakpoint ? 'none' : '1px solid var(--fc-border-subtle)',
+            flexShrink: 0,
+            cursor: 'pointer',
+            boxShadow: hasBreakpoint ? '0 0 4px var(--fc-glow-error)' : 'none',
+            transition: 'background 0.15s',
+          }}
+          title="Toggle breakpoint"
+        />
 
         {/* Category-tinted icon chip */}
         <span style={iconChipStyle}>
@@ -374,7 +398,9 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         <div data-testid="block-summary" style={{ background: 'var(--fc-surface-0)', padding: '8px 9px 6px' }}>
           {summary.rows.map((r) => (
             <div key={r.key} style={{ display: 'flex', gap: 10, padding: '3px 0', alignItems: 'baseline' }}>
-              <span style={{ flex: 'none', width: 96, fontSize: 10.5 * textScale, fontWeight: 600, color: 'var(--fc-text-secondary)' }}>{r.label}</span>
+              {/* Label column scales with the text so a label that fits at 1× never wraps at XL/XXL
+                  (wrapped rows are taller than the layout's height estimate). */}
+              <span style={{ flex: 'none', width: 96 * textScale, fontSize: 10.5 * textScale, fontWeight: 600, color: 'var(--fc-text-secondary)' }}>{r.label}</span>
               <span style={{
                 flex: 1, fontSize: 11.5 * textScale, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 fontFamily: r.isCode ? 'var(--fc-font-mono)' : undefined,
@@ -382,15 +408,11 @@ function BaseBlock({ data, selected, id }: NodeProps) {
               }}>{r.value}</span>
             </div>
           ))}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, paddingTop: 6,
+          <div style={{ marginTop: 5, paddingTop: 6,
                         borderTop: '1px solid var(--fc-border)', fontSize: 10 * textScale }}>
             <span style={{ color: 'var(--fc-text-faint)' }}>
               {summary.hiddenCount} fields at default
             </span>
-            <span
-              onClick={(e) => { e.stopPropagation(); selectNode(id); }}
-              style={{ color: 'var(--fc-accent)', cursor: 'pointer' }}
-            >Edit in Properties</span>
           </div>
         </div>
       ) : previewText ? (
@@ -401,6 +423,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         </div>
       ) : null}
 
+      </div>
+
       {/* Output handle (bottom). For a CONTAINER this is the THEN/body branch source and the
           continuation diamond sits at bottom-center, so shift this handle right (toward the indented
           body) to keep the two from stacking. A plain block's single successor stays centered so its
@@ -408,6 +432,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       <Handle
         type="source"
         position={Position.Bottom}
+        className="fc-handle"
         style={{
           background: colors.border, width: 8, height: 8, border: 'none',
           ...(def.isContainer ? { left: '75%' } : {}),
@@ -420,6 +445,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           type="source"
           position={Position.Right}
           id="false"
+          className="fc-handle"
           style={{
             background: 'var(--fc-state-error)', width: 8, height: 8, border: 'none',
             top: '50%',
@@ -438,6 +464,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           type="source"
           position={Position.Bottom}
           id="continue"
+          className="fc-handle"
           style={{ background: 'var(--fc-accent)', width: 10, height: 10, border: 'none', borderRadius: 3 }}
         />
       )}

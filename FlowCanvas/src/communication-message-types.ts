@@ -23,6 +23,9 @@ export const CANVAS_HOST_MESSAGES = {
     layoutRestore: 'layout-restore',
     browsePathResult: 'browse-path-result',
     prefRestore: 'pref-restore',
+    runOutput: 'run-output',
+    runOutputClear: 'run-output-clear',
+    runOutputWindowClosed: 'run-output-window-closed',
   },
   outgoing: {
     ready: 'ready',
@@ -40,6 +43,8 @@ export const CANVAS_HOST_MESSAGES = {
     browsePath: 'browse-path',
     prefSave: 'pref-save',
     setLayoutMode: 'set-layout-mode',
+    openRunOutputWindow: 'open-run-output-window',
+    closeRunOutputWindow: 'close-run-output-window',
   },
   deprecatedOutgoingAliases: {
     runRequest: 'run-request',
@@ -68,4 +73,19 @@ export interface ExecutionUpdateMessage {
   iterationCount?: number | null;
   /** Taken branch scope-key (if/switch), e.g. 'else', 'cases/2/do', 'elif/0/then'. */
   branchTaken?: string | null;
+  /** Step failed but the error was suppressed via on_error: continue — reported as success
+   *  for control flow, flagged here so the iteration stepper's failure markers can find it. */
+  suppressedError?: boolean | null;
+  /** Live loop-iteration stack for this step event (outermost first); absent outside loops. */
+  iterationStack?: IterationFrameMsg[] | null;
+}
+
+/** One frame of a loop-iteration stack (outermost first), as sent by the host. */
+export interface IterationFrameMsg {
+  /** Canvas node id of the loop block. */
+  loopId: string;
+  /** 0-based iteration index within that loop. */
+  i: number;
+  /** Foreach item value (truncated host-side); null/absent for while/repeat. */
+  label?: string | null;
 }

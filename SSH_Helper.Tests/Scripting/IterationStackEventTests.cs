@@ -1,0 +1,404 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using FluentAssertions;
+using SSH_Helper.Services.Scripting;
+using SSH_Helper.Services.Scripting.Models;
+using Xunit;
+
+namespace SSH_Helper.Tests.Scripting;
+
+public class IterationStackEventTests
+{
+    private static async Task<List<StepExecutionEventArgs>> RunAndCaptureAll(
+        Script script, ScriptContext? context = null)
+    {
+        var executor = new ScriptExecutor();
+        var events = new List<StepExecutionEventArgs>();
+        executor.StepCompleted += (_, e) => { lock (events) events.Add(e); };
+        await executor.ExecuteAsync(script, context ?? new ScriptContext());
+        return events;
+    }
+
+    [Fact]
+    public async Task TopLevelStep_HasEmptyIterationStack()
+    {
+        var script = new Script
+        {
+            Steps = new List<ScriptStep> { new() { Set = "x = 1" } }
+        };
+
+        var events = await RunAndCaptureAll(script);
+
+        events.Should().HaveCount(1);
+        (events[0].IterationStack ?? new List<IterationFrame>()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Foreach_TagsNestedEvents_PerIteration_WithItemLabels()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("items", "[\"alpha\",\"beta\",\"gamma\"]");
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Foreach = "x in items",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new() { Set = "last = x", StepPath = "steps/0/do/0" }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var bodyEvents = events.Where(e => e.StepPath == "steps/0/do/0").ToList();
+        bodyEvents.Should().HaveCount(3);
+        for (int i = 0; i < 3; i++)
+        {
+            bodyEvents[i].IterationStack.Should().NotBeNull();
+            bodyEvents[i].IterationStack!.Should().HaveCount(1);
+            bodyEvents[i].IterationStack![0].LoopStepPath.Should().Be("steps/0");
+            bodyEvents[i].IterationStack![0].Index.Should().Be(i);
+        }
+        bodyEvents.Select(e => e.IterationStack![0].Label)
+            .Should().Equal("alpha", "beta", "gamma");
+
+        // The loop's own completion fires AFTER its frame pops → ancestors only (none here).
+        var loopEvent = events.Single(e => e.StepPath == "steps/0");
+        (loopEvent.IterationStack ?? new List<IterationFrame>()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Foreach_DictForm_UsesKeyAsLabel()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("map", "{\"k1\":\"v1\",\"k2\":\"v2\"}");
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Foreach = "key, value in map",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new() { Set = "last = value", StepPath = "steps/0/do/0" }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        events.Where(e => e.StepPath == "steps/0/do/0")
+            .Select(e => e.IterationStack![0].Label)
+            .Should().Equal("k1", "k2");
+    }
+
+    [Fact]
+    public async Task Foreach_LongItemValue_IsTruncatedTo48Chars()
+    {
+        var longItem = new string('z', 60);
+        var context = new ScriptContext();
+        context.SetVariable("items", $"[\"{longItem}\"]");
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Foreach = "x in items",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new() { Set = "last = x", StepPath = "steps/0/do/0" }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var label = events.Single(e => e.StepPath == "steps/0/do/0").IterationStack![0].Label;
+        label.Should().HaveLength(48);
+        label.Should().Be(new string('z', 47) + "…");
+    }
+
+    [Fact]
+    public async Task Foreach_TruncationDoesNotSplitSurrogatePairs()
+    {
+        // 46 z's then an emoji (surrogate pair at positions 46-47): a naive cut at 47
+        // would strand the high surrogate. The guard trims one extra char instead.
+        var item = new string('z', 46) + "\U0001F600" + new string('z', 10);
+        var context = new ScriptContext();
+        context.SetVariable("items", $"[\"{item}\"]");
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Foreach = "x in items",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep> { new() { Set = "last = x", StepPath = "steps/0/do/0" } }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var label = events.Single(e => e.StepPath == "steps/0/do/0").IterationStack![0].Label!;
+        char.IsHighSurrogate(label[label.Length - 2]).Should().BeFalse(); // char before '…' is not a stranded high surrogate
+        label.Should().EndWith("…");
+    }
+
+    [Fact]
+    public async Task Foreach_StackIsPopped_AfterBreak()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("items", "[\"a\",\"b\",\"c\"]");
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Foreach = "x in items",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new() { BreakLoop = true, StepPath = "steps/0/do/0" }
+                    }
+                },
+                new() { Set = "after = 1", StepPath = "steps/1" }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        // Only iteration 0 ran; the trailing top-level step must carry an EMPTY stack.
+        events.Where(e => e.StepPath == "steps/0/do/0").Should().HaveCount(1);
+        var after = events.Single(e => e.StepPath == "steps/1");
+        (after.IterationStack ?? new List<IterationFrame>()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task While_TagsNestedEvents_PerIteration_NoLabel()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("n", 0);
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    While = "n < 3",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new() { Set = "n = n + 1", StepPath = "steps/0/do/0" }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var bodyEvents = events.Where(e => e.StepPath == "steps/0/do/0").ToList();
+        bodyEvents.Should().HaveCount(3);
+        bodyEvents.Select(e => e.IterationStack![0].Index).Should().Equal(0, 1, 2);
+        bodyEvents.Should().OnlyContain(e => e.IterationStack![0].Label == null);
+        bodyEvents.Should().OnlyContain(e => e.IterationStack![0].LoopStepPath == "steps/0");
+    }
+
+    [Fact]
+    public async Task Repeat_TagsNestedEvents_PerIteration_NoLabel()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("n", 0);
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Until = "n >= 3",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new() { Set = "n = n + 1", StepPath = "steps/0/do/0" }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var bodyEvents = events.Where(e => e.StepPath == "steps/0/do/0").ToList();
+        bodyEvents.Should().HaveCount(3);
+        bodyEvents.Select(e => e.IterationStack![0].Index).Should().Equal(0, 1, 2);
+        bodyEvents.Should().OnlyContain(e => e.IterationStack![0].Label == null);
+        bodyEvents.Should().OnlyContain(e => e.IterationStack![0].LoopStepPath == "steps/0");
+    }
+
+    [Fact]
+    public async Task NestedLoops_StackTwoFramesDeep()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("outer", "[\"o1\",\"o2\"]");
+        context.SetVariable("inner", "[\"i1\",\"i2\",\"i3\"]");
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Foreach = "o in outer",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new()
+                        {
+                            Foreach = "v in inner",
+                            StepPath = "steps/0/do/0",
+                            Do = new List<ScriptStep>
+                            {
+                                new() { Set = "last = v", StepPath = "steps/0/do/0/do/0" }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var leaf = events.Where(e => e.StepPath == "steps/0/do/0/do/0").ToList();
+        leaf.Should().HaveCount(6); // 2 outer × 3 inner
+
+        foreach (var e in leaf)
+        {
+            e.IterationStack.Should().HaveCount(2);
+            e.IterationStack![0].LoopStepPath.Should().Be("steps/0");
+            e.IterationStack![1].LoopStepPath.Should().Be("steps/0/do/0");
+        }
+        // Inner index restarts per outer iteration.
+        leaf.Select(e => (e.IterationStack![0].Index, e.IterationStack![1].Index))
+            .Should().Equal((0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2));
+
+        // The inner loop's OWN completions carry just the outer frame (its own frame popped).
+        var innerLoopEvents = events.Where(e => e.StepPath == "steps/0/do/0").ToList();
+        innerLoopEvents.Should().HaveCount(2);
+        innerLoopEvents.Select(e => e.IterationStack!.Single().Index).Should().Equal(0, 1);
+    }
+
+    [Fact]
+    public async Task SuppressedError_IsFlaggedOnCompletionEvents()
+    {
+        // A body step that fails under on_error: continue runs as success for control flow
+        // (the loop keeps iterating), but its completion events must carry SuppressedError so
+        // the canvas iteration stepper's failure markers can still find the problem.
+        // Dns with no host fails synchronously and offline; on_error: continue suppresses it.
+        var context = new ScriptContext();
+        context.SetVariable("items", "[\"alpha\",\"beta\"]");
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Foreach = "x in items",
+                    StepPath = "steps/0",
+                    Do = new List<ScriptStep>
+                    {
+                        new()
+                        {
+                            Dns = new DnsOptions(),
+                            OnError = "continue",
+                            StepPath = "steps/0/do/0"
+                        }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        var bodyEvents = events.Where(e => e.StepPath == "steps/0/do/0").ToList();
+        bodyEvents.Should().HaveCount(2, "both iterations ran — the suppressed failure did not abort the loop");
+        bodyEvents.Should().OnlyContain(e => e.Success == true && e.SuppressedError);
+    }
+
+    [Fact]
+    public async Task ParallelArms_WithLoops_DoNotCrossContaminateStacks()
+    {
+        // Two parallel arms, each a foreach over 3 items, sharing one ScriptContext —
+        // exactly how ParallelCommand executes arms (shared context + Task.Run).
+        // Every body event must carry exactly its OWN arm's single frame.
+        var context = new ScriptContext();
+        context.SetVariable("itemsA", "[\"a0\",\"a1\",\"a2\"]");
+        context.SetVariable("itemsB", "[\"b0\",\"b1\",\"b2\"]");
+        // AssignStepPaths wraps each parallel arm in a singleton list with scope
+        // "steps/N/parallel/I", so the arm itself lands at "steps/0/parallel/0/0"
+        // and its Do children at "steps/0/parallel/0/0/do/0" (confirmed by
+        // ScriptExecutorStepPathTests line 112-113: parallel/0/0, parallel/1/0).
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Parallel = new SSH_Helper.Services.Scripting.Models.ParallelOptions
+                    {
+                        Steps = new List<ScriptStep>
+                        {
+                            new()
+                            {
+                                Foreach = "a in itemsA",
+                                Do = new List<ScriptStep>
+                                {
+                                    new() { Set = "lastA = a" }
+                                }
+                            },
+                            new()
+                            {
+                                Foreach = "b in itemsB",
+                                Do = new List<ScriptStep>
+                                {
+                                    new() { Set = "lastB = b" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        var events = await RunAndCaptureAll(script, context);
+
+        // Canonical paths after AssignStepPaths: arm foreach = steps/0/parallel/I/0,
+        // body set = steps/0/parallel/I/0/do/0.
+        var armA = events.Where(e => e.StepPath == "steps/0/parallel/0/0/do/0").ToList();
+        var armB = events.Where(e => e.StepPath == "steps/0/parallel/1/0/do/0").ToList();
+        armA.Should().HaveCount(3);
+        armB.Should().HaveCount(3);
+
+        armA.Should().OnlyContain(e =>
+            e.IterationStack!.Count == 1 &&
+            e.IterationStack![0].LoopStepPath == "steps/0/parallel/0/0");
+        armB.Should().OnlyContain(e =>
+            e.IterationStack!.Count == 1 &&
+            e.IterationStack![0].LoopStepPath == "steps/0/parallel/1/0");
+
+        armA.Select(e => e.IterationStack![0].Index).OrderBy(i => i).Should().Equal(0, 1, 2);
+        armB.Select(e => e.IterationStack![0].Index).OrderBy(i => i).Should().Equal(0, 1, 2);
+    }
+}

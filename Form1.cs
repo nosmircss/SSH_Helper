@@ -112,7 +112,7 @@ namespace SSH_Helper
 
         #region Constants
 
-        private const string ApplicationVersion = "0.51.22";
+        private const string ApplicationVersion = "0.51.23";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -173,6 +173,7 @@ namespace SSH_Helper
         #region State
 
         private FlowCanvasForm? _flowCanvasForm;
+        private RunOutputWindowForm? _runOutputWindow;
         private Dictionary<string, string>? _nodeToStepPathMap;
         private Dictionary<string, string>? _stepPathToNodeIdMap;
         private Dictionary<string, int>? _nodeToStepIndexMap;
@@ -6617,6 +6618,30 @@ namespace SSH_Helper
                 menuStrip1.Items.Add(flowCanvasItem);
         }
 
+        private void OpenRunOutputWindow()
+        {
+            if (_runOutputWindow != null && !_runOutputWindow.IsDisposed)
+            {
+                _runOutputWindow.BringToFront();
+                _runOutputWindow.Activate();
+                return;
+            }
+
+            var config = _configService.GetCurrent();
+            _runOutputWindow = new RunOutputWindowForm(config.DarkMode, _configService);
+            _runOutputWindow.FormClosed += (_, _) =>
+            {
+                _runOutputWindow = null;
+                // Tell the canvas to dock the console back into its bottom panel.
+                _flowCanvasForm?.SendMessage(new { type = "run-output-window-closed" });
+            };
+            _runOutputWindow.Show(this);
+
+            // Seed with whatever the main output box currently holds.
+            _runOutputWindow.SendRunOutputClear();
+            _runOutputWindow.SendRunOutputAppend(GetBufferedOutputSnapshot());
+        }
+
         private void OpenFlowCanvas()
         {
             // Reuse existing window if still open
@@ -6627,6 +6652,14 @@ namespace SSH_Helper
                 _flowCanvasForm.BringToFront();
                 _flowCanvasForm.Activate();
                 return;
+            }
+
+            // Opening a FRESH canvas (the previous one was closed): a fresh React store defaults to
+            // docked, so close any orphaned popped-out window — the reopened canvas starts docked
+            // and we avoid showing the same output in both the dock and a stray window.
+            if (_runOutputWindow != null && !_runOutputWindow.IsDisposed)
+            {
+                _runOutputWindow.Close();
             }
 
             var config = _configService.GetCurrent();
@@ -6771,6 +6804,16 @@ namespace SSH_Helper
                 BeginInvoke(() => HandleFlowCanvasBrowsePathRequest(msg));
             };
 
+            _flowCanvasForm.OnOpenRunOutputWindow += (_) =>
+            {
+                BeginInvoke(() => OpenRunOutputWindow());
+            };
+
+            _flowCanvasForm.OnCloseRunOutputWindow += (_) =>
+            {
+                BeginInvoke(() => _runOutputWindow?.Close());
+            };
+
             _flowCanvasForm.Show();
 
             // Load current script into canvas if it's a YAML script
@@ -6778,6 +6821,11 @@ namespace SSH_Helper
 
             // Send the initial target host to the Host Bar
             SendTargetHostToCanvas();
+
+            // Seed the Run Output tab with whatever the main output box currently holds,
+            // so a canvas opened after a run isn't empty. Clear first so reopening doesn't double up.
+            _flowCanvasForm.SendRunOutputClear();
+            _flowCanvasForm.SendRunOutputAppend(GetBufferedOutputSnapshot());
         }
 
         private void LoadCurrentScriptIntoCanvas()
@@ -12318,6 +12366,7 @@ namespace SSH_Helper
                 }
             }
 
+            _runOutputWindow?.SendRunState(true);
             ClearOutput();
             if (includeCommandPreview)
             {
@@ -12648,6 +12697,7 @@ namespace SSH_Helper
                     success = false,
                     error = "No valid target host available."
                 });
+                _runOutputWindow?.SendRunState(false);
                 return;
             }
 
@@ -13545,6 +13595,7 @@ namespace SSH_Helper
             _uiOutputThrottler.Flush();
             _flowCanvasForm?.SendMessage(new { type = "execution-finished", success = true });
             _flowCanvasForm?.SendMessage(new { type = "debug-resumed", callStack = Array.Empty<string>() });
+            _runOutputWindow?.SendRunState(false);
         }
 
         private void SshService_StepStarting(object? sender, StepExecutionEventArgs e)
@@ -13561,7 +13612,8 @@ namespace SSH_Helper
             {
                 type = "execution-update",
                 stepId = nodeId,
-                state = e.Skipped ? "skipped" : "running"
+                state = e.Skipped ? "skipped" : "running",
+                iterationStack = FlowCanvasBridge.BuildIterationStackPayload(e.IterationStack, _stepPathToNodeIdMap)
             });
         }
 
@@ -13582,6 +13634,7 @@ namespace SSH_Helper
 
             var activeContext = _sshService.ActiveScriptContext;
             var variables = activeContext?.GetAllVariables();
+            var iterationStack = FlowCanvasBridge.BuildIterationStackPayload(e.IterationStack, _stepPathToNodeIdMap);
 
             _flowCanvasForm.SendMessage(new
             {
@@ -13591,7 +13644,9 @@ namespace SSH_Helper
                 duration = e.DurationMs,
                 iterationCount = e.IterationCount,
                 branchTaken = e.BranchTaken,
-                variables
+                suppressedError = e.SuppressedError ? (bool?)true : null,
+                variables,
+                iterationStack
             });
 
             // Send step output if available
@@ -13601,7 +13656,8 @@ namespace SSH_Helper
                 {
                     type = "step-output",
                     stepId = nodeId,
-                    output = e.Output
+                    output = e.Output,
+                    iterationStack
                 });
             }
         }
@@ -13918,8 +13974,37 @@ namespace SSH_Helper
                 return;
             }
 
-            txtOutput.AppendText(output);
+            txtOutput.AppendText(NormalizeNewlinesForDisplay(output));
             ScrollOutputToEnd();
+
+            // Mirror the same chunk into the Flow Canvas Run Output tab (no-op if closed).
+            // Forward RAW output, not NormalizeNewlinesForDisplay(output): the LF->CRLF fixup
+            // is specific to the WinForms TextBox sink; React renders bare \n natively, and
+            // normalizing here would double-convert CRLF in the canvas. Do not "fix" this.
+            _flowCanvasForm?.SendRunOutputAppend(output);
+            _runOutputWindow?.SendRunOutputAppend(output);
+        }
+
+        /// <summary>
+        /// Converts lone LF (\n) to CRLF so multiline output renders line breaks in the
+        /// WinForms TextBox, which only treats \r\n as a break (a bare \n is swallowed).
+        /// Existing CRLF and lone CR are left untouched. Display-only: the raw output
+        /// buffer keeps original line endings so script data (${_output}, extract) is unaffected.
+        /// </summary>
+        internal static string NormalizeNewlinesForDisplay(string text)
+        {
+            if (string.IsNullOrEmpty(text) || !text.Contains('\n'))
+                return text;
+
+            var sb = new System.Text.StringBuilder(text.Length + 16);
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (c == '\n' && (i == 0 || text[i - 1] != '\r'))
+                    sb.Append('\r');
+                sb.Append(c);
+            }
+            return sb.ToString();
         }
 
         private void SetOutputText(string text)
@@ -13944,7 +14029,7 @@ namespace SSH_Helper
                     ShrinkOutputBufferCapacityIfNeeded_NoLock();
                 }
 
-                txtOutput.Text = sourceText;
+                txtOutput.Text = NormalizeNewlinesForDisplay(sourceText);
                 txtOutput.ClearUndo();
             }
             finally
@@ -13982,6 +14067,10 @@ namespace SSH_Helper
                 NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
                 txtOutput.Invalidate();
             }
+
+            // Mirror the clear into the Flow Canvas Run Output tab (no-op if closed).
+            _flowCanvasForm?.SendRunOutputClear();
+            _runOutputWindow?.SendRunOutputClear();
         }
 
         private void ScrollOutputToEnd()

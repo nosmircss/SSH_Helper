@@ -77,6 +77,7 @@ function FlowCanvasInner() {
   const onConnect = useFlowStore((s) => s.onConnect);
   const addNode = useFlowStore((s) => s.addNode);
   const selectNode = useFlowStore((s) => s.selectNode);
+  const setOutputTab = useFlowStore((s) => s.setOutputTab);
   const clearSelection = useFlowStore((s) => s.clearSelection);
   const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
   const selectedEdgeIds = useFlowStore((s) => s.selectedEdgeIds);
@@ -98,6 +99,7 @@ function FlowCanvasInner() {
   const pausedAtNodeId = useFlowStore((s) => s.pausedAtNodeId);
   const callStack = useFlowStore((s) => s.callStack);
   const blockOutputs = useFlowStore((s) => s.blockOutputs);
+  const uiZoomScale = useFlowStore((s) => s.uiZoomScale);
 
   const reactFlowInstance = useRef<ReactFlowInstance<any, any> | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -120,6 +122,14 @@ function FlowCanvasInner() {
   useEffect(() => {
     document.body.classList.toggle('fc-reduced-motion', reducedMotion);
   }, [reducedMotion]);
+
+  // Inverse-zoom scale for flow-space chrome (handles, band pills, iteration steppers). The
+  // CSS var drives paint-only scaling in baseblock.css / BranchBandsLayer without re-rendering
+  // any node; components that need the number (IterationCluster, connectionRadius below)
+  // subscribe to the quantized store value.
+  useEffect(() => {
+    wrapperRef.current?.style.setProperty('--fc-ui-scale', String(uiZoomScale));
+  }, [uiZoomScale]);
 
   // Reject illegal drop targets while dragging a connection. Reads getState() so it always
   // sees current nodes/edges without re-subscribing (returning false aborts the drop in v12).
@@ -233,10 +243,12 @@ function FlowCanvasInner() {
         useFlowStore.getState().toggleNodeSelection(node.id);
       } else {
         selectNode(node.id);
+        // Focusing a single block surfaces its own output, so reveal the Block Output tab.
+        setOutputTab('block');
       }
       hideContextMenu();
     },
-    [selectNode, hideContextMenu],
+    [selectNode, setOutputTab, hideContextMenu],
   );
 
   const onEdgeClick = useCallback(
@@ -266,7 +278,6 @@ function FlowCanvasInner() {
   }, [clearSelection, hideContextMenu, hideEdgeContextMenu]);
 
   // Highlight search results on nodes
-  const searchHighlightSet = new Set(searchResults);
   const highlightedNodeId = searchResults.length > 0 ? searchResults[searchIndex] : null;
 
   // Get first selected node for output preview
@@ -274,43 +285,11 @@ function FlowCanvasInner() {
     ? [...selectedNodeIds][0]
     : null;
 
-  // Walk backward through the flow to find the nearest send/interactive block
-  // that produced SSH output. Extract/Print/etc. operate on the output of the
-  // preceding send command, so clicking them should show that send's output.
-  const OUTPUT_BLOCK_TYPES = new Set(['send', 'interactive']);
-  const outputSourceId = useMemo(() => {
-    if (!firstSelectedId) return null;
-    const nodeMap = new Map(nodes.map(n => [n.id, n]));
-    // Build a reverse adjacency map (target -> sources)
-    const parentMap = new Map<string, string[]>();
-    for (const e of edges) {
-      const list = parentMap.get(e.target) || [];
-      list.push(e.source);
-      parentMap.set(e.target, list);
-    }
-    // If the selected node itself is a send/interactive with output, use it
-    const selectedNode = nodeMap.get(firstSelectedId);
-    if (selectedNode && OUTPUT_BLOCK_TYPES.has((selectedNode.data as any)?.blockType)) {
-      if (blockOutputs.get(firstSelectedId)?.length) return firstSelectedId;
-    }
-    // BFS backward to find the nearest send/interactive ancestor with output
-    const visited = new Set<string>();
-    const queue = [firstSelectedId];
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (visited.has(current)) continue;
-      visited.add(current);
-      const parents = parentMap.get(current) || [];
-      for (const pid of parents) {
-        const pnode = nodeMap.get(pid);
-        if (pnode && OUTPUT_BLOCK_TYPES.has((pnode.data as any)?.blockType)) {
-          if (blockOutputs.get(pid)?.length) return pid;
-        }
-        queue.push(pid);
-      }
-    }
-    return null;
-  }, [firstSelectedId, nodes, edges, blockOutputs]);
+  // The output pane mirrors the SELECTED block's own per-step output. The executor
+  // computes that per block (a send shows its own output; a container/non-send shows the
+  // output of the send preceding its start), so the pane shows exactly that — blank when
+  // the block carried nothing, never walking to a neighbour's output.
+  const outputSourceId = firstSelectedId;
 
   const selectedOutput = outputSourceId
     ? blockOutputs.get(outputSourceId)
@@ -323,14 +302,19 @@ function FlowCanvasInner() {
   // contentSizeComment strips comments' oversized fixed hit box so RF auto-measures the card;
   // orderCommentsBehind renders comments behind blocks so a block always wins a pointer overlap.
   // Together these stop a comment from hijacking drags meant for its block or the branch-band handle.
-  const displayNodes = orderCommentsBehind(nodes.map((n) => ({
-    ...contentSizeComment(n),
-    selected: selectedNodeIds.has(n.id),
-    className: [
-      searchHighlightSet.has(n.id) ? 'search-match' : '',
-      n.id === highlightedNodeId ? 'search-current' : '',
-    ].filter(Boolean).join(' ') || undefined,
-  })));
+  // Memoized so renders that touch neither nodes nor highlights (e.g. the zoom-bucket
+  // connectionRadius update) keep node identities stable and skip node re-renders.
+  const displayNodes = useMemo(() => {
+    const searchHighlightSet = new Set(searchResults);
+    return orderCommentsBehind(nodes.map((n) => ({
+      ...contentSizeComment(n),
+      selected: selectedNodeIds.has(n.id),
+      className: [
+        searchHighlightSet.has(n.id) ? 'search-match' : '',
+        n.id === highlightedNodeId ? 'search-current' : '',
+      ].filter(Boolean).join(' ') || undefined,
+    })));
+  }, [nodes, selectedNodeIds, searchResults, highlightedNodeId]);
 
   // Canvas ships dark-only; values come from the token layer (styles/tokens.css).
   const canvasBg = 'var(--fc-canvas-bg)';
@@ -355,7 +339,7 @@ function FlowCanvasInner() {
   }), []);
 
   // Build enhanced edges — all edges use AnimatedEdge (rest + running) + selection highlight
-  const displayEdges = edges.map((e) => ({
+  const displayEdges = useMemo(() => edges.map((e) => ({
     ...e,
     type: 'animated',
     selected: selectedEdgeIds.has(e.id),
@@ -365,7 +349,7 @@ function FlowCanvasInner() {
         ? { stroke: selectedStroke, strokeWidth: 3 }
         : {}),
     },
-  }));
+  })), [edges, selectedEdgeIds, selectedStroke]);
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -386,7 +370,11 @@ function FlowCanvasInner() {
               onConnectEnd={onConnectEnd}
               onDragOver={onDragOver}
               onDrop={onDrop}
-              onInit={(instance) => { reactFlowInstance.current = instance; }}
+              onInit={(instance) => {
+                reactFlowInstance.current = instance;
+                useFlowStore.getState().syncUiZoomScale(instance.getViewport().zoom);
+              }}
+              onMove={(_e, viewport) => useFlowStore.getState().syncUiZoomScale(viewport.zoom)}
               onNodeClick={onNodeClick}
               onPaneClick={onPaneClick}
               onNodeContextMenu={onNodeContextMenu}
@@ -398,6 +386,9 @@ function FlowCanvasInner() {
               edgeTypes={edgeTypes}
               snapToGrid={snapToGrid}
               snapGrid={[gridSize, gridSize]}
+              // Drop-snap radius is measured in FLOW px, so it shrinks on screen as you zoom
+              // out; scaling it by the inverse-zoom factor keeps the forgiveness near-constant.
+              connectionRadius={Math.round(28 * uiZoomScale)}
               selectionOnDrag
               panOnDrag={[1, 2]}
               minZoom={0.2}

@@ -517,6 +517,21 @@ namespace SSH_Helper.Models
         public bool? FlowCanvasSnapToGrid { get; set; }
         public bool? FlowCanvasBranchBands { get; set; }
         public bool? FlowCanvasCompactComments { get; set; }
+
+        // Flow Canvas loop-iteration history cap (persisted from React UI; null = React default of 500)
+        public int? FlowCanvasIterationHistoryCap { get; set; }
+
+        // Flow Canvas Run Output tab view prefs (persisted from React UI; null = use the React default)
+        public bool? FlowCanvasRunOutputColor { get; set; }
+        public bool? FlowCanvasRunOutputWrap { get; set; }
+        public bool? FlowCanvasRunOutputFollow { get; set; }
+
+        // Detached Run Output window geometry (persisted across sessions; null = not yet set)
+        public int? FlowCanvasRunOutputWindowLeft { get; set; }
+        public int? FlowCanvasRunOutputWindowTop { get; set; }
+        public int? FlowCanvasRunOutputWindowWidth { get; set; }
+        public int? FlowCanvasRunOutputWindowHeight { get; set; }
+
         /// <summary>
         /// LEGACY: replaced by FlowCanvasDefaultLayoutMode. Still deserialized so the value can be
         /// migrated on load (the migration nulls it). The canvas write-back to this field is removed

@@ -55,7 +55,9 @@ function StartNode({ data, selected }: NodeProps) {
     borderRadius: 8,
     minWidth: blockWidth,
     maxWidth: blockWidth,
-    overflow: 'hidden',
+    // No overflow:hidden: it would clip the handle's fc-handle pseudo-elements (grab pad +
+    // zoom-scaled dot) to their inward half. Nothing square-cornered bleeds here — the rail
+    // carries its own corner radii.
     boxShadow: selected
       ? '0 0 12px var(--fc-glow-selected)'
       : '0 0 12px var(--fc-glow-start)',
@@ -126,6 +128,7 @@ function StartNode({ data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Bottom}
+        className="fc-handle"
         style={{ background: 'var(--fc-start-accent)', width: 8, height: 8, border: 'none' }}
       />
     </div>

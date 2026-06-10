@@ -407,6 +407,9 @@ Four sequenced waves. Each wave leaves the canvas shippable and de-risks the nex
 - Anything that changes node semantics (Quick-Add node creation, Edge Splice) must reuse the existing `addNode`/`onConnect` paths and be proven through Import→Export→re-import parity (the e2e specs gate this).
 - Frames ride the **comment layout-only channel** (stripped from executable payload, excluded from the structure hash) — they must mirror the comment exclusion in `exportGraph.ts` *and* `ComputeStructureHash`.
 
+### Container handle adjacency (then/body vs continue)
+On container blocks the branch/body source handle (bottom, `left:75%`) and the `continue` diamond (bottom-center) sit only a few pixels apart at typical zoom — and the two gestures have **different semantics**: the body handle nests the wired block *inside* the container's branch, while `continue` makes it a *sibling after* the container in the outer scope. A misdrop silently swaps one for the other (this was the likely origin of the 2026-06 "block didn't join the then band" report — the orphan re-home fix in `childMembership.ts` now heals the rewire, but the ambiguity remains). Candidate mitigations if it recurs: physically separate the hit areas (wider spread, larger `continue` hit target, or move `continue` to the container's right edge), and/or a post-drop affordance (a transient "nested in THEN / placed after IF" toast with one-click swap) so the chosen semantics are visible the moment the wire lands.
+
 ### C# bridge / message additions
 The following proposals require coordinated `communication-message-types.ts` + `FlowCanvasForm.cs` + `Form1.cs` edits (no schema version negotiation exists — stale builds silently drop unknown messages):
 

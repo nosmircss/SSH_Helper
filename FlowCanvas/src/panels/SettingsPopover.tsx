@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
-import { WIDTH_PRESETS, TEXT_SCALES, DENSITIES } from '../stores/slices/settingsSlice';
+import { BLOCK_WIDTH_MIN, BLOCK_WIDTH_MAX, TEXT_SCALE_MIN, TEXT_SCALE_MAX, DENSITIES } from '../stores/slices/settingsSlice';
 import { mix } from '../utils/tokens';
 
 // Label on its own line above a FULL-WIDTH segmented row whose chips share the width equally
@@ -29,6 +29,85 @@ function Segmented<T extends string | number>(props: {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Live-preview slider: every drag tick calls onPreview (apply + reflow, no persistence);
+// release/blur calls onCommit, which persists once. Keyboard arrows preview via onChange and
+// commit on blur. The value readout follows the live store value (controlled input).
+function SliderRow(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onPreview: (v: number) => void;
+  onCommit: (v: number) => void;
+  /** Value readout next to the label; defaults to px. */
+  format?: (v: number) => string;
+}) {
+  return (
+    <div style={{ padding: '5px 0' }} data-testid={`setting-${props.label.toLowerCase().replace(/\s+/g, '-')}`}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+        <span style={labStyle}>{props.label}</span>
+        <span style={{ fontSize: 11, color: 'var(--fc-text)', fontVariantNumeric: 'tabular-nums' }}>
+          {props.format ? props.format(props.value) : `${props.value}px`}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={props.min}
+        max={props.max}
+        step={props.step}
+        value={props.value}
+        aria-label={props.label}
+        onChange={(e) => props.onPreview(Number(e.target.value))}
+        onPointerUp={(e) => props.onCommit(Number((e.target as HTMLInputElement).value))}
+        onBlur={(e) => props.onCommit(Number(e.target.value))}
+        style={{ width: '100%', margin: 0, accentColor: 'var(--fc-accent)', cursor: 'pointer' }}
+      />
+    </div>
+  );
+}
+
+// Free-form numeric setting. Edits live in local text state and commit on blur/Enter:
+// non-numeric input reverts to the current value, numeric input is clamped to [min, max].
+function NumberField(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (v: number) => void;
+}) {
+  const [text, setText] = useState(String(props.value));
+  useEffect(() => { setText(String(props.value)); }, [props.value]);
+
+  const commit = () => {
+    const n = Math.round(Number(text));
+    if (text.trim() === '' || !Number.isFinite(n)) { setText(String(props.value)); return; }
+    const clamped = Math.min(props.max, Math.max(props.min, n));
+    setText(String(clamped));
+    if (clamped !== props.value) props.onCommit(clamped);
+  };
+
+  return (
+    <div style={{ padding: '5px 0' }} data-testid={`setting-${props.label.toLowerCase().replace(/\s+/g, '-')}`}>
+      <div style={{ ...labStyle, marginBottom: 4 }}>{props.label}</div>
+      <input
+        value={text}
+        inputMode="numeric"
+        aria-label={props.label}
+        data-testid="number-field-input"
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { commit(); e.currentTarget.blur(); } }}
+        style={{
+          width: 90, fontSize: 11, padding: '3px 7px', fontFamily: 'inherit',
+          background: 'var(--fc-surface-1)', color: 'var(--fc-text)',
+          border: '1px solid var(--fc-border)', borderRadius: 6, outline: 'none',
+        }}
+      />
     </div>
   );
 }
@@ -80,6 +159,8 @@ export default function SettingsPopover() {
   const toggleHeatmap = useFlowStore((s) => s.toggleHeatmap);
   const reducedMotion = useFlowStore((s) => s.reducedMotion);
   const toggleReducedMotion = useFlowStore((s) => s.toggleReducedMotion);
+  const iterationHistoryCap = useFlowStore((s) => s.iterationHistoryCap);
+  const setIterationHistoryCap = useFlowStore((s) => s.setIterationHistoryCap);
 
   useEffect(() => {
     if (!open) return;
@@ -91,10 +172,8 @@ export default function SettingsPopover() {
   }, [open]);
 
   // Widen literal-typed preset arrays to the plain primitive type that the generic Segmented expects.
-  const widthOptions: readonly { label: string; v: number }[] = WIDTH_PRESETS.map((p) => ({ label: p.label, v: p.px as number }));
-  const textOptions: readonly { label: string; v: number }[] = TEXT_SCALES.map((p) => ({ label: p.label, v: p.v as number }));
   const densityOptions: readonly { label: string; v: number }[] = DENSITIES.map((p) => ({ label: p.label, v: p.v as number }));
-  const newBlocksOptions: readonly { label: string; v: number }[] = [{ label: 'Collapsed', v: 0 }, { label: 'Expanded', v: 1 }];
+  const blockStateOptions: readonly { label: string; v: number }[] = [{ label: 'Collapsed', v: 0 }, { label: 'Expanded', v: 1 }];
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -124,13 +203,39 @@ export default function SettingsPopover() {
           </div>
 
           <div style={groupStyle}>Sizing</div>
-          <Segmented label="Block width" value={blockWidth} options={widthOptions} onChange={setBlockWidth} />
-          <Segmented label="Text size" value={textScale} options={textOptions} onChange={setTextScale} />
+          <SliderRow
+            label="Block width"
+            value={blockWidth}
+            min={BLOCK_WIDTH_MIN}
+            max={BLOCK_WIDTH_MAX}
+            step={10}
+            onPreview={(v) => setBlockWidth(v, { persist: false })}
+            onCommit={(v) => setBlockWidth(v)}
+          />
+          <SliderRow
+            label="Text size"
+            value={textScale}
+            min={TEXT_SCALE_MIN}
+            max={TEXT_SCALE_MAX}
+            step={0.05}
+            format={(v) => `${Math.round(v * 100)}%`}
+            onPreview={(v) => setTextScale(v, { persist: false })}
+            onCommit={(v) => setTextScale(v)}
+          />
           <Segmented label="Canvas density" value={density} options={densityOptions} onChange={setDensity} />
+          <NumberField
+            label="Loop history (iterations kept per loop)"
+            value={iterationHistoryCap}
+            min={1}
+            max={100000}
+            onCommit={setIterationHistoryCap}
+          />
+          {/* Applies everywhere: the open graph (immediately), every preset load, and new
+              palette blocks. Expanded forces blocks open regardless of per-preset saved state. */}
           <Segmented
-            label="New blocks"
+            label="Default block state"
             value={defaultBlockExpanded ? 1 : 0}
-            options={newBlocksOptions}
+            options={blockStateOptions}
             onChange={(v) => setDefaultBlockExpanded(v === 1)}
           />
 

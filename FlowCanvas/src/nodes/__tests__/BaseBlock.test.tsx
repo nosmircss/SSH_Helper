@@ -1,13 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 // ── Minimal stubs for @xyflow/react (data-position exposes the handle's side) ──
 vi.mock('@xyflow/react', () => ({
-  Handle: ({ type, position, id, style }: any) =>
+  Handle: ({ type, position, id, style, className }: any) =>
     React.createElement('div', {
       'data-testid': `handle-${type}-${id ?? position}`,
       'data-position': position,
+      className,
       style,
     }),
   Position: { Top: 'top', Bottom: 'bottom', Right: 'right', Left: 'left' },
@@ -71,7 +72,10 @@ describe('BaseBlock', () => {
     // store stub returns isExpanded=true
     renderNode({ data: { blockType: 'send', label: 'Send', props: { command: 'show ver', capture: 'out' } } as any });
     expect(screen.getByTestId('block-summary')).toBeInTheDocument();
-    expect(screen.getByText('Edit in Properties')).toBeInTheDocument();
+    // The footer keeps the defaults hint only — the "Edit in Properties" link was removed
+    // (clicking the block already selects it and opens Properties).
+    expect(screen.queryByText('Edit in Properties')).toBeNull();
+    expect(screen.getByText(/fields at default/)).toBeInTheDocument();
   });
 
   it('block width follows the store blockWidth setting', () => {
@@ -103,6 +107,24 @@ describe('BaseBlock', () => {
     renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
     expect(screen.getByText('Send').style.fontSize).toBe(`${13 * 1.15}px`); // '14.95px'
     mock.state.textScale = 1; // restore for other tests
+  });
+
+  // The fc-handle class hangs the zoom-compensating pseudo-elements (baseblock.css) off every
+  // handle, while the element's own box MUST stay at its fixed inline size — React Flow measures
+  // it for edge anchors and the spine-straightness test keys on its exact center.
+  it('all handles carry fc-handle and keep their fixed measured box', () => {
+    renderNode({ data: { blockType: 'if', label: 'If', props: {} } as any });
+    const handles = [
+      screen.getByTestId('handle-target-top'),
+      screen.getByTestId('handle-source-bottom'),
+      screen.getByTestId('handle-source-false'),
+      screen.getByTestId('handle-source-continue'),
+    ];
+    for (const h of handles) {
+      expect(h.className).toContain('fc-handle');
+      expect(parseInt(h.style.width, 10)).toBeGreaterThanOrEqual(8);
+      expect(h.style.transform).toBe(''); // no scale on the element itself
+    }
   });
 });
 
@@ -136,6 +158,27 @@ describe('BaseBlock — just-placed entrance highlight', () => {
   it('shouldClearJustPlaced ignores the entrance pulse once the flag is already cleared', () => {
     expect(shouldClearJustPlaced(JUST_PLACED_ANIMATION, false)).toBe(false);
     expect(shouldClearJustPlaced(JUST_PLACED_ANIMATION, undefined)).toBe(false);
+  });
+});
+
+describe('BaseBlock — breakpoint gutter', () => {
+  it('renders the breakpoint gutter on a top-level block', () => {
+    renderNode({ data: { blockType: 'send', label: 'Send', props: {} } as any });
+    expect(screen.getByTitle('Toggle breakpoint')).toBeInTheDocument();
+  });
+
+  it('renders the breakpoint gutter on a child (nested) block so breakpoints work inside loops/containers', () => {
+    renderNode({ data: { blockType: 'send', label: 'Send', props: { _isChildOf: 'loop-1', _stepPath: 'steps/0/do/0' } } as any });
+    expect(screen.getByTitle('Toggle breakpoint')).toBeInTheDocument();
+  });
+
+  it('toggles the breakpoint when the gutter on a nested block is clicked', () => {
+    const toggle = vi.fn();
+    mock.state.toggleBreakpoint = toggle;
+    renderNode({ id: 'child-1', data: { blockType: 'send', label: 'Send', props: { _isChildOf: 'loop-1', _stepPath: 'steps/0/do/0' } } as any });
+    fireEvent.click(screen.getByTitle('Toggle breakpoint'));
+    expect(toggle).toHaveBeenCalledWith('child-1');
+    mock.state.toggleBreakpoint = () => {}; // restore for other tests
   });
 });
 

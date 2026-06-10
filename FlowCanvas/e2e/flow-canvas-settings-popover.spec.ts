@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installHostMessageCapture, waitForOutgoingMessage } from './support/harness';
+import { clearOutgoingMessages, installHostMessageCapture, waitForOutgoingMessage } from './support/harness';
 
 // Guards the settings popover against the chip-clipping regression: the segmented
 // controls must lay their option chips out so EVERY chip sits inside the popover and
@@ -41,13 +41,34 @@ test.describe('Flow Canvas settings popover', () => {
     await waitForOutgoingMessage(page, 'ready');
   });
 
-  test('all five block-width presets fit inside the popover (no clipping)', async ({ page }) => {
-    const dialog = await openPopover(page);
-    const dialogBox = await dialog.boundingBox();
-    expect(dialogBox).not.toBeNull();
+  test('block width is a 300-2000 slider that persists once on commit', async ({ page }) => {
+    await openPopover(page);
+    const slider = page.locator('[data-testid="setting-block-width"] input[type="range"]');
+    await expect(slider).toBeVisible();
+    await expect(slider).toHaveAttribute('min', '300');
+    await expect(slider).toHaveAttribute('max', '2000');
 
-    const labels = await assertChipsFitWithin(page, dialogBox!, 'setting-block-width');
-    expect(labels).toEqual(['Compact', 'Normal', 'Wide', 'Extra', 'Max']);
+    await clearOutgoingMessages(page);
+    await slider.focus();
+    await page.keyboard.press('End'); // keyboard preview to the max…
+    await slider.blur();              // …commit persists via layout-save
+    const saved = await waitForOutgoingMessage(page, 'layout-save');
+    expect(saved.blockWidth).toBe(2000);
+  });
+
+  test('text size is a 0.9-2.5 slider that persists once on commit', async ({ page }) => {
+    await openPopover(page);
+    const slider = page.locator('[data-testid="setting-text-size"] input[type="range"]');
+    await expect(slider).toBeVisible();
+    await expect(slider).toHaveAttribute('min', '0.9');
+    await expect(slider).toHaveAttribute('max', '2.5');
+
+    await clearOutgoingMessages(page);
+    await slider.focus();
+    await page.keyboard.press('End');
+    await slider.blur();
+    const saved = await waitForOutgoingMessage(page, 'layout-save');
+    expect(saved.textScale).toBe(2.5);
   });
 
   test('canvas density presets fit inside the popover (Roomy not squished off-edge)', async ({ page }) => {

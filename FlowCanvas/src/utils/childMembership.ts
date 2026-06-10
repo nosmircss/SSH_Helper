@@ -25,6 +25,13 @@ export interface ChildMembership {
   props: Record<string, unknown>;
   /** Later siblings in this branch (and their subtrees) shift up by one to make room. */
   renumber: { prefix: string; fromIndex: number };
+  /** Present when the target carried prior (orphaned) membership: it is MOVING, not just joining.
+   *  `fromParentId` is the container it vacated (undefined when the stale path was top-level).
+   *  applyChildMembership flags that container's chain for re-export (its stale snippet still nests
+   *  the moved block), strips the target's stale band cosmetics, and carries the target's SUBTREE
+   *  to the new path prefix (a moved container's descendants ride along); the caller must renumber
+   *  so the vacated branch's survivors stay contiguous. */
+  rehome?: { fromParentId?: string };
 }
 
 const TRAILING_INDEX = /\/(\d+)$/;
@@ -42,12 +49,19 @@ function propsOf(n: Node | undefined): Record<string, unknown> {
  * Returns null (leave the existing edge-only behaviour untouched) when the gesture can't confer
  * membership: not one of the three handles above, the source is canvas-authored (no `_stepPath`,
  * so its structure lives on edges), the source is top-level (the layout spine walk already places
- * a top-level successor correctly), or the target already carries membership (don't clobber).
+ * a top-level successor correctly), or the target already carries (still-anchored) membership.
+ *
+ * `targetIsOrphaned` (target has no incoming edge right now) is the seam for rewiring: a block whose
+ * parent branch-entry edge was DELETED still carries its stale imported `_isChildOf`/`_stepPath`, but
+ * it no longer belongs to that branch. Wiring it somewhere new should re-home it, not be refused by
+ * the don't-clobber guard — otherwise (the reported bug) it stays visually in its old band while its
+ * new wire dangles. Fan-in is already forbidden upstream, so a target that still has its entry edge
+ * never reaches here on a new connect; an orphaned member here is always safe to re-home.
  */
 export function deriveChildMembership(
   nodes: Node[],
   connection: Connection,
-  opts: { sourceIsContainer: boolean; branchMetadata?: BranchMetadataInput },
+  opts: { sourceIsContainer: boolean; branchMetadata?: BranchMetadataInput; targetIsOrphaned?: boolean },
 ): ChildMembership | null {
   if (!connection.source || !connection.target) return null;
   const source = nodes.find((n) => n.id === connection.source);
@@ -55,7 +69,16 @@ export function deriveChildMembership(
   if (!source || !target) return null;
 
   const tProps = propsOf(target);
-  if (tProps['_isChildOf'] != null || tProps['_stepPath'] != null) return null; // don't clobber
+  const hasMembership = tProps['_isChildOf'] != null || tProps['_stepPath'] != null;
+  // Keep a still-anchored member where it is (don't clobber). An orphaned member — its branch-entry
+  // edge was deleted — is fair game to re-home into the branch the user is now wiring it into.
+  if (hasMembership && !opts.targetIsOrphaned) return null;
+  // A re-home is a MOVE between bands: record the vacated parent so the old container re-exports
+  // and the caller can renumber its branch's survivors.
+  const rehome: ChildMembership['rehome'] | undefined = hasMembership
+    ? { ...(typeof tProps['_isChildOf'] === 'string' && tProps['_isChildOf'].length > 0
+        ? { fromParentId: tProps['_isChildOf'] as string } : {}) }
+    : undefined;
 
   const sProps = propsOf(source);
   const sPath = sProps['_stepPath'];
@@ -74,7 +97,7 @@ export function deriveChildMembership(
       _stepPath: `${prefix}/0`,
       [MEMBERSHIP_MARKER]: true,
     };
-    return { targetId: target.id, props, renumber: { prefix, fromIndex: 0 } };
+    return { targetId: target.id, props, renumber: { prefix, fromIndex: 0 }, ...(rehome ? { rehome } : {}) };
   }
 
   // Gestures 1 & 2 — a container's `continue` handle, or a leaf's bottom handle: the new block is
@@ -97,7 +120,7 @@ export function deriveChildMembership(
   for (const key of COSMETIC_KEYS) {
     if (sProps[key] !== undefined) props[key] = sProps[key];
   }
-  return { targetId: target.id, props, renumber: { prefix: branchPrefix, fromIndex: insertIndex } };
+  return { targetId: target.id, props, renumber: { prefix: branchPrefix, fromIndex: insertIndex }, ...(rehome ? { rehome } : {}) };
 }
 
 /** Shift a single index segment of a stepPath up by one when it sits at/after the insertion point.
@@ -122,30 +145,62 @@ function bumpStepPath(stepPath: string, prefix: string, fromIndex: number): stri
  * graph re-export so the change survives a YAML round-trip. Pure — returns a new array.
  */
 export function applyChildMembership(nodes: Node[], membership: ChildMembership): Node[] {
-  const { targetId, props, renumber } = membership;
+  const { targetId, props, renumber, rehome } = membership;
 
   // Ancestor containers = the _isChildOf chain above the new parent. Every link is a container
   // (only containers own children), so flag each so export regenerates them from the graph.
+  // On a re-home (band-to-band move) the VACATED parent's chain is flagged too — its stale snippet
+  // still nests the moved block, so it must regenerate from the graph as well.
   const ancestors = new Set<string>();
-  let cursor = props['_isChildOf'];
-  while (typeof cursor === 'string' && cursor.length > 0 && !ancestors.has(cursor)) {
-    ancestors.add(cursor);
-    cursor = propsOf(nodes.find((n) => n.id === cursor))['_isChildOf'];
-  }
+  const walkChain = (start: unknown): void => {
+    let cursor = start;
+    while (typeof cursor === 'string' && cursor.length > 0 && !ancestors.has(cursor)) {
+      ancestors.add(cursor);
+      cursor = propsOf(nodes.find((n) => n.id === cursor))['_isChildOf'];
+    }
+  };
+  walkChain(props['_isChildOf']);
+  if (rehome) walkChain(rehome.fromParentId);
+
+  // A re-homed CONTAINER carries its subtree: every descendant's path still starts with the
+  // target's OLD path, so rewrite that prefix to the new one in this same pass. renumberStepPaths
+  // can't recover them later — it matches a container's children against the container's CURRENT
+  // path (already the new one), so stale descendants fail the startsWith and would stay stranded on
+  // the vacated branch's prefix, desyncing the runtime step↔node map and colliding with that
+  // branch's renumbered survivors.
+  const oldTargetPath = rehome ? propsOf(nodes.find((n) => n.id === targetId))['_stepPath'] : undefined;
+  const newTargetPath = props['_stepPath'];
+  const subtreeHead =
+    typeof oldTargetPath === 'string' && typeof newTargetPath === 'string' && oldTargetPath !== newTargetPath
+      ? `${oldTargetPath}/`
+      : undefined;
 
   return nodes.map((n) => {
     const data = (n.data as Record<string, unknown>) ?? {};
     const existing = (data.props as Record<string, unknown> | undefined) ?? {};
 
     if (n.id === targetId) {
-      return { ...n, data: { ...data, props: { ...existing, ...props } } };
+      let base = existing;
+      if (rehome) {
+        // Moving bands: drop the OLD branch's cosmetics so nothing keeps pointing at the vacated
+        // lane. The gesture's own props re-add fresh values where applicable (gesture 1/2 copies
+        // them from the new sibling; gesture 3 leaves them unset like any fresh first child).
+        base = { ...existing };
+        for (const key of COSMETIC_KEYS) delete base[key];
+      }
+      return { ...n, data: { ...data, props: { ...base, ...props } } };
     }
 
     let nextProps = existing;
     const sp = existing['_stepPath'];
     if (typeof sp === 'string') {
-      const bumped = bumpStepPath(sp, renumber.prefix, renumber.fromIndex);
-      if (bumped !== sp) nextProps = { ...nextProps, _stepPath: bumped };
+      // Descendants of a re-homed container follow it to the new prefix; everyone else gets the
+      // ordinary sibling bump at the insertion point. Mutually exclusive: the old subtree lives in
+      // the vacated branch, the bump applies to the destination branch.
+      const next = subtreeHead && sp.startsWith(subtreeHead)
+        ? `${newTargetPath as string}/${sp.slice(subtreeHead.length)}`
+        : bumpStepPath(sp, renumber.prefix, renumber.fromIndex);
+      if (next !== sp) nextProps = { ...nextProps, _stepPath: next };
     }
     if (ancestors.has(n.id)) {
       nextProps = { ...nextProps, _forceGraphExport: true };
@@ -153,6 +208,91 @@ export function applyChildMembership(nodes: Node[], membership: ChildMembership)
     if (nextProps === existing) return n;
     return { ...n, data: { ...data, props: nextProps } };
   });
+}
+
+/**
+ * Re-derive contiguous `_stepPath` indices for every container child from the current graph
+ * structure (`_isChildOf` + the existing `_stepPath` ordering), per branch scope, recursively.
+ *
+ * Why this exists: `applyChildMembership` bumps later siblings' indices +1 to make room when a
+ * block is wired in, but no delete path renumbers them back DOWN — so removing a nested block
+ * leaves a gap (e.g. `do/0, do/2, do/3`). The executor always assigns SEQUENTIAL paths
+ * (`do/0, do/1, do/2`) to the exported YAML, so any gap makes the runtime node↔stepPath map
+ * disagree with the executor from the gap onward, silently dropping those nodes' step-update /
+ * step-output events (dead neon + missing per-block output). Running this after any removal keeps
+ * `_stepPath` self-consistent so the map always matches what runs.
+ *
+ * Pure. Only rewrites `_stepPath`, only on nodes whose index actually changed. Nodes without a
+ * `_stepPath` (canvas-authored / freshly dropped) and orphans whose parent link is broken are
+ * left untouched — they fall through to the exporter's own top-level fallback.
+ */
+export function renumberStepPaths(nodes: Node[]): Node[] {
+  const oldPath = new Map<string, string>();
+  const childrenOf = new Map<string, string[]>();
+  const roots: string[] = [];
+
+  for (const n of nodes) {
+    if (n.type === 'comment') continue;
+    const p = propsOf(n);
+    const sp = p['_stepPath'];
+    if (typeof sp !== 'string' || sp.length === 0) continue; // not an executable step
+    oldPath.set(n.id, sp);
+    const parent = p['_isChildOf'];
+    if (typeof parent === 'string' && parent.length > 0) {
+      const list = childrenOf.get(parent);
+      if (list) list.push(n.id);
+      else childrenOf.set(parent, [n.id]);
+    } else {
+      roots.push(n.id);
+    }
+  }
+
+  const trailingIndex = (id: string): number => {
+    const m = oldPath.get(id)!.match(TRAILING_INDEX);
+    return m ? Number(m[1]) : 0;
+  };
+
+  const newPath = new Map<string, string>();
+  const assign = (id: string, assignedPath: string): void => {
+    newPath.set(id, assignedPath);
+    const kids = childrenOf.get(id);
+    if (!kids || kids.length === 0) return;
+    const head = `${oldPath.get(id)!}/`;
+    // Group children by branch scope (relative path minus the trailing step index). The scope keeps
+    // any branch selector indices intact (e.g. "elif/0/then", "cases/2/do") — only the final step
+    // index is renumbered.
+    const groups = new Map<string, string[]>();
+    for (const kid of kids) {
+      const kp = oldPath.get(kid);
+      if (kp === undefined || !kp.startsWith(head)) continue; // dangling metadata → leave as-is
+      const rel = kp.slice(head.length);
+      const lastSlash = rel.lastIndexOf('/');
+      if (lastSlash === -1) continue; // malformed (no scope segment) → leave as-is
+      const scope = rel.slice(0, lastSlash);
+      const list = groups.get(scope);
+      if (list) list.push(kid);
+      else groups.set(scope, [kid]);
+    }
+    for (const [scope, arr] of groups) {
+      arr.sort((a, b) => trailingIndex(a) - trailingIndex(b));
+      arr.forEach((kid, i) => assign(kid, `${assignedPath}/${scope}/${i}`));
+    }
+  };
+
+  roots.sort((a, b) => trailingIndex(a) - trailingIndex(b));
+  roots.forEach((id, i) => assign(id, `steps/${i}`));
+
+  let changed = false;
+  const result = nodes.map((n) => {
+    const np = newPath.get(n.id);
+    if (np === undefined) return n;
+    const data = (n.data as Record<string, unknown>) ?? {};
+    const existing = (data.props as Record<string, unknown> | undefined) ?? {};
+    if (existing['_stepPath'] === np) return n;
+    changed = true;
+    return { ...n, data: { ...data, props: { ...existing, _stepPath: np } } };
+  });
+  return changed ? result : nodes;
 }
 
 /**

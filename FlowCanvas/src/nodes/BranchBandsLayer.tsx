@@ -6,17 +6,19 @@ import { computeBranchBands, branchPillLabel, type BranchBand } from '../utils/b
 import { BLOCK_WIDTH_INSET } from '../utils/nodeSize';
 import { mix } from '../utils/tokens';
 import { sendLayoutAutosave } from '../utils/layoutAutosave';
+import IterationCluster from './IterationCluster';
 import './bandlayer.css';
 
 export default function BranchBandsLayer() {
   const nodes = useFlowStore((s) => s.nodes);
   const enabled = useFlowStore((s) => s.branchBandsEnabled);
   const blockWidth = useFlowStore((s) => s.blockWidth);
+  const textScale = useFlowStore((s) => s.textScale);
   const { screenToFlowPosition } = useReactFlow();
   const drag = useRef<{ memberIds: string[]; lastX: number; lastY: number } | null>(null);
 
   if (!enabled) return null;
-  const bands = computeBranchBands(nodes, blockWidth - BLOCK_WIDTH_INSET);
+  const bands = computeBranchBands(nodes, blockWidth - BLOCK_WIDTH_INSET, textScale);
   if (bands.length === 0) return null;
 
   const startDrag = (e: PointerEvent<HTMLDivElement>, band: BranchBand) => {
@@ -95,7 +97,13 @@ export default function BranchBandsLayer() {
             onLostPointerCapture={endDrag}
             style={{
               position: 'absolute',
-              transform: `translate(${b.x}px, ${b.y}px)`,
+              // Inverse-zoom scale (CSS var set by App) keeps the drag pill a usable screen
+              // size when zoomed out; top-left origin pins it to the band corner. Clamped to
+              // 1.75 (≈ headroom 30px / pill height 17px) so the scaled pill stays inside the
+              // band's label headroom and never sits over the first block's header, where its
+              // pointerEvents would steal the block's clicks.
+              transform: `translate(${b.x}px, ${b.y}px) scale(min(var(--fc-ui-scale, 1), 1.75))`,
+              transformOrigin: 'top left',
               font: '800 9px/1.4 system-ui, sans-serif', letterSpacing: '0.08em',
               padding: '2px 10px', borderRadius: '9px 0 8px 0',
               color: 'oklch(17% 0.02 275)',
@@ -110,6 +118,13 @@ export default function BranchBandsLayer() {
           </div>
         );
       })}
+
+      {/* Iteration stepper clusters: one per loop band, top-right. Post-run only —
+          the component returns null while running or with no recorded iterations.
+          Sibling of the rectangles/handles so zIndex isn't trapped (same precedent). */}
+      {bands.filter((b) => b.branchKey === 'do').map((b) => (
+        <IterationCluster key={`${b.id}::iters`} band={b} />
+      ))}
     </ViewportPortal>
   );
 }

@@ -100,6 +100,7 @@ namespace SSH_Helper.Services.Scripting
         private readonly SharedScriptExecutionState _sharedState;
         private readonly AsyncLocal<int> _loopDepth = new();
         private readonly AsyncLocal<int> _callDepth = new();
+        private readonly AsyncLocal<IterationFrame[]?> _iterationStack = new();
 
         private sealed class SharedScriptExecutionState
         {
@@ -318,6 +319,46 @@ namespace SSH_Helper.Services.Scripting
         {
             get => _callDepth.Value;
             set => _callDepth.Value = value;
+        }
+
+        /// <summary>
+        /// Live loop-iteration stack, outermost frame first. Backed by an AsyncLocal holding
+        /// an immutable array — the same isolation pattern as <see cref="LoopDepth"/>, so
+        /// parallel arms see independent stacks and event handlers can keep the returned
+        /// list without copying (mutations always replace the array).
+        /// </summary>
+        public IReadOnlyList<IterationFrame> IterationStack =>
+            _iterationStack.Value ?? System.Array.Empty<IterationFrame>();
+
+        /// <summary>Enters a loop: pushes a frame (Index = -1 until the first iteration starts).</summary>
+        public void PushIterationFrame(string loopStepPath, int index, string? label = null)
+        {
+            var current = _iterationStack.Value ?? System.Array.Empty<IterationFrame>();
+            var next = new IterationFrame[current.Length + 1];
+            System.Array.Copy(current, next, current.Length);
+            next[current.Length] = new IterationFrame(loopStepPath, index, label);
+            _iterationStack.Value = next;
+        }
+
+        /// <summary>Starts iteration <paramref name="index"/> of the innermost loop.</summary>
+        public void SetCurrentIterationFrame(int index, string? label = null)
+        {
+            var current = _iterationStack.Value;
+            if (current == null || current.Length == 0) return;
+            var next = (IterationFrame[])current.Clone();
+            next[^1] = next[^1] with { Index = index, Label = label };
+            _iterationStack.Value = next;
+        }
+
+        /// <summary>Exits the innermost loop. No-op on an empty stack.</summary>
+        public void PopIterationFrame()
+        {
+            var current = _iterationStack.Value;
+            if (current == null || current.Length == 0) return;
+            if (current.Length == 1) { _iterationStack.Value = null; return; }
+            var next = new IterationFrame[current.Length - 1];
+            System.Array.Copy(current, next, next.Length);
+            _iterationStack.Value = next;
         }
 
         /// <summary>

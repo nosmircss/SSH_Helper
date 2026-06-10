@@ -1356,6 +1356,29 @@ namespace SSH_Helper.Services
                 }
             }
 
+            // Backfill the runtime node->stepPath map for nested children.
+            //
+            // When a container regenerates from graph (e.g. _forceGraphExport set after a connect),
+            // its descendants are marked consumedByContainer and the main loop above `continue`s past
+            // them BEFORE recording their _stepPath. Without this, those children are absent from the
+            // map, so the debug bridge can't resolve their step events — per-step neon highlight and
+            // per-block output silently die at the first nested step (the original "neon stops at the
+            // start of the loop" report after an add->connect->delete edit). Every nested node carries
+            // its hierarchical _stepPath (kept contiguous by the React-side renumber on edits, so it
+            // matches the sequential paths the executor assigns to the emitted YAML); map it here
+            // regardless of which emission path the container took.
+            foreach (var kv in nodeMap)
+            {
+                var nid = kv.Key;
+                if (nid == "__start__" || result.NodeToStepPathMap.ContainsKey(nid)) continue;
+                if (string.Equals(kv.Value["type"]?.ToString(), "comment", StringComparison.OrdinalIgnoreCase)) continue;
+                var childProps = kv.Value["data"]?["props"] as JObject;
+                if (childProps?["_isChildOf"] == null) continue; // top-level handled by the main loop
+                var childPath = childProps["_stepPath"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(childPath))
+                    result.NodeToStepPathMap[nid] = childPath!;
+            }
+
             if (result.Success)
                 result.Yaml = sb.ToString().TrimEnd() + "\n";
             else
@@ -5233,6 +5256,37 @@ namespace SSH_Helper.Services
                 return false;
 
             return int.TryParse(parts[1], out stepIndex);
+        }
+
+        /// <summary>
+        /// Converts a live iteration stack into the canvas message payload: each frame's loop
+        /// step-path is mapped to its canvas node id. Frames that don't resolve (subroutine
+        /// loops with no canvas node, empty paths, not-yet-started frames with Index &lt; 0)
+        /// are skipped individually — a dropped middle frame simply re-parents its children
+        /// to the nearest resolvable ancestor on the React side. Returns null when nothing
+        /// resolves, so callers serialize the field as absent.
+        /// </summary>
+        internal static List<Dictionary<string, object?>>? BuildIterationStackPayload(
+            IReadOnlyList<IterationFrame>? stack,
+            IReadOnlyDictionary<string, string>? stepPathToNodeId)
+        {
+            if (stack == null || stack.Count == 0 || stepPathToNodeId == null) return null;
+
+            List<Dictionary<string, object?>>? frames = null;
+            foreach (var frame in stack)
+            {
+                if (string.IsNullOrWhiteSpace(frame.LoopStepPath)) continue;
+                if (frame.Index < 0) continue;
+                if (!stepPathToNodeId.TryGetValue(frame.LoopStepPath, out var loopNodeId)) continue;
+
+                (frames ??= new List<Dictionary<string, object?>>()).Add(new Dictionary<string, object?>
+                {
+                    ["loopId"] = loopNodeId,
+                    ["i"] = frame.Index,
+                    ["label"] = frame.Label,
+                });
+            }
+            return frames;
         }
 
         #endregion

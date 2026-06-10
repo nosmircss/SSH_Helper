@@ -34,42 +34,52 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             int iteration = 0;
             int executed = 0;
-            while (iteration < maxIterations)
+
+            context.PushIterationFrame(step.StepPath ?? string.Empty, -1);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                context.SetVariable("_iteration", iteration);
-
-                var execResult = await _executor.ExecuteStepsAsync(step.Do, context, cancellationToken, context.LoopDepth + 1);
-                executed++;
-
-                if (execResult.ShouldExit || execResult.ShouldReturn)
+                while (iteration < maxIterations)
                 {
-                    execResult.IterationCount = executed;
-                    return execResult;
-                }
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                if (execResult.ShouldBreak)
-                {
-                    context.EmitOutput($"Repeat: break after {iteration + 1} iteration(s)", ScriptOutputType.Debug);
-                    break;
-                }
+                    context.SetVariable("_iteration", iteration);
+                    context.SetCurrentIterationFrame(iteration);
 
-                // `continue` falls through to the bottom condition check; a genuine failure stops the loop.
-                if (!execResult.ShouldContinue && !execResult.Success)
-                {
-                    execResult.IterationCount = executed;
-                    return execResult;
-                }
+                    var execResult = await _executor.ExecuteStepsAsync(step.Do, context, cancellationToken, context.LoopDepth + 1);
+                    executed++;
 
-                iteration++;
+                    if (execResult.ShouldExit || execResult.ShouldReturn)
+                    {
+                        execResult.IterationCount = executed;
+                        return execResult;
+                    }
 
-                // Bottom-tested: exit once the until condition becomes true.
-                if (evaluator.Evaluate(step.Until))
-                {
-                    context.EmitOutput($"Repeat: until condition true after {iteration} iteration(s)", ScriptOutputType.Debug);
-                    break;
+                    if (execResult.ShouldBreak)
+                    {
+                        context.EmitOutput($"Repeat: break after {iteration + 1} iteration(s)", ScriptOutputType.Debug);
+                        break;
+                    }
+
+                    // `continue` falls through to the bottom condition check; a genuine failure stops the loop.
+                    if (!execResult.ShouldContinue && !execResult.Success)
+                    {
+                        execResult.IterationCount = executed;
+                        return execResult;
+                    }
+
+                    iteration++;
+
+                    // Bottom-tested: exit once the until condition becomes true.
+                    if (evaluator.Evaluate(step.Until))
+                    {
+                        context.EmitOutput($"Repeat: until condition true after {iteration} iteration(s)", ScriptOutputType.Debug);
+                        break;
+                    }
                 }
+            }
+            finally
+            {
+                context.PopIterationFrame();
             }
 
             if (iteration >= maxIterations)

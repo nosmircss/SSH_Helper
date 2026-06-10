@@ -55,6 +55,7 @@ namespace SSH_Helper.Services
     {
         private readonly Ssh _sshClient;
         private readonly RebexScripting _scripting;
+        private readonly IShellStream _stream;
         private readonly SshTimeoutOptions _timeouts;
         private readonly IDisposable? _scriptingOwner;
         private readonly IDisposable? _terminalOwner;
@@ -62,6 +63,9 @@ namespace SSH_Helper.Services
         private string _currentPrompt;
         private bool _disposed;
         private DateTime _nextKeepAliveAtUtc;
+
+        /// <summary>Quiet window (ms) used to drain leftover data before sending a command.</summary>
+        private const int ResidualDrainQuietMs = 25;
 
         // Rebex ScriptEvents for pattern matching
         private ScriptEvent? _shellPromptEvent;
@@ -98,7 +102,7 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Gets whether the session is still valid and connected.
         /// </summary>
-        public bool IsConnected => !_disposed && _sshClient.IsConnected;
+        public bool IsConnected => !_disposed && _stream.IsConnected;
 
         /// <summary>
         /// Internal access to the live scripting stream for shared interactive terminal mode.
@@ -190,6 +194,7 @@ namespace SSH_Helper.Services
         {
             _sshClient = sshClient ?? throw new ArgumentNullException(nameof(sshClient));
             _scripting = scripting ?? throw new ArgumentNullException(nameof(scripting));
+            _stream = new RebexShellStream(_sshClient, _scripting);
             _timeouts = timeouts ?? SshTimeoutOptions.Default;
             _scriptingOwner = scripting as IDisposable;
             _terminalOwner = terminalOwner;
@@ -199,6 +204,29 @@ namespace SSH_Helper.Services
 
             // Initialize ScriptEvents for pattern matching
             InitializeScriptEvents();
+        }
+
+        /// <summary>
+        /// Test-only constructor that injects a fake <see cref="IShellStream"/> and a known
+        /// starting prompt, bypassing the live Rebex client so the command read loop can be
+        /// exercised deterministically without an SSH connection.
+        /// </summary>
+        internal SshShellSession(IShellStream stream, SshTimeoutOptions? timeouts, string initialPrompt)
+        {
+            _sshClient = null!;
+            _scripting = null!;
+            _stream = stream ?? throw new ArgumentNullException(nameof(stream));
+            _timeouts = timeouts ?? SshTimeoutOptions.Default;
+            _scriptingOwner = null;
+            _terminalOwner = null;
+            _currentPrompt = initialPrompt ?? string.Empty;
+            _promptPattern = string.IsNullOrEmpty(initialPrompt)
+                ? Patterns.ShellPrompt
+                : PromptDetector.BuildPromptRegex(initialPrompt);
+            _nextKeepAliveAtUtc = ComputeNextKeepAliveUtc();
+            // Deliberately skips InitializeScriptEvents(): those Rebex ScriptEvents are only
+            // used by SyncAfterInteractive, which the read loop never touches. Skipping keeps
+            // tests free of any Rebex license dependency.
         }
 
         /// <summary>
@@ -230,6 +258,11 @@ namespace SSH_Helper.Services
         /// </summary>
         private void RebuildPromptEvent(string specificPromptPattern)
         {
+            // In test mode the ScriptEvents are never initialized (and Rebex isn't available);
+            // the read loop matches prompts via _promptPattern, so skip the event rebuild.
+            if (_shellPromptEvent == null)
+                return;
+
             var pagerPattern = string.Join("|", Patterns.PagerPatterns);
             var combinedPattern = $@"(?:{pagerPattern}|{specificPromptPattern})";
             var combinedRegex = new Regex(combinedPattern, RegexOptions.IgnoreCase);
@@ -255,7 +288,7 @@ namespace SSH_Helper.Services
             }
 
             // Set initial timeout for prompt detection
-            _scripting.Timeout = (int)_timeouts.InitialPromptTimeout.TotalMilliseconds;
+            _stream.Timeout = (int)_timeouts.InitialPromptTimeout.TotalMilliseconds;
 
             // NOTE: Do NOT send \r before reading initial output.
             // Devices like FortiGate send their banner/prompt automatically after shell starts.
@@ -283,14 +316,13 @@ namespace SSH_Helper.Services
         /// </summary>
         public void FlushBuffer()
         {
-            var savedTimeout = _scripting.Timeout;
-            _scripting.Timeout = 200;
-            var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
+            var savedTimeout = _stream.Timeout;
+            _stream.Timeout = 200;
             try
             {
                 while (true)
                 {
-                    _scripting.ReadUntil(anyDataEvent);
+                    _stream.ReadData();
                 }
             }
             catch (Exception ex) when (
@@ -302,7 +334,7 @@ namespace SSH_Helper.Services
             }
             finally
             {
-                _scripting.Timeout = savedTimeout;
+                _stream.Timeout = savedTimeout;
             }
         }
 
@@ -314,11 +346,11 @@ namespace SSH_Helper.Services
             if (_disposed || !_sshClient.IsConnected)
                 return;
 
-            var savedTimeout = _scripting.Timeout;
+            var savedTimeout = _stream.Timeout;
             try
             {
-                _scripting.Send("\r");
-                _scripting.Timeout = (int)_timeouts.IdleTimeout.TotalMilliseconds;
+                _stream.Send("\r");
+                _stream.Timeout = (int)_timeouts.IdleTimeout.TotalMilliseconds;
                 var promptEvent = _promptOrPagerEvent ?? _shellPromptEvent ?? ScriptEvent.FromRegex(Patterns.ShellPromptPattern);
                 _scripting.ReadUntil(promptEvent);
             }
@@ -328,7 +360,7 @@ namespace SSH_Helper.Services
             }
             finally
             {
-                _scripting.Timeout = savedTimeout;
+                _stream.Timeout = savedTimeout;
             }
         }
 
@@ -340,9 +372,8 @@ namespace SSH_Helper.Services
         private async Task InitializeWithPollingAsync(StringBuilder allOutput, int maxBannerAttempts, CancellationToken cancellationToken)
         {
             var attemptCount = 0;
-            var overallTimeout = _scripting.Timeout; // Save original (e.g., 30000ms)
+            var overallTimeout = _stream.Timeout; // Save original (e.g., 30000ms)
             var pollInterval = DebugMode ? 3000 : 1000; // Longer polls in debug for readable output pacing
-            var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]"); // Matches as soon as any data arrives
             var bannerAcceptCount = 0;
             var maxBannerAccepts = 5; // Max times we'll send the acceptance key before giving up
 
@@ -364,12 +395,12 @@ namespace SSH_Helper.Services
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     TrySendKeepAliveIfDue("session initialization");
-                    _scripting.Timeout = pollInterval;
+                    _stream.Timeout = pollInterval;
 
                     try
                     {
                         // Use catch-all event to return as soon as ANY data arrives
-                        var chunk = _scripting.ReadUntil(anyDataEvent);
+                        var chunk = _stream.ReadData();
 
                         if (!string.IsNullOrEmpty(chunk))
                         {
@@ -389,7 +420,7 @@ namespace SSH_Helper.Services
                                 RebuildPromptEvent(_promptPattern.ToString());
                                 EmitDebug($"Shell prompt detected: {EscapeForDebug(detectedPrompt, 200)}");
                                 EmitDebug($"Built prompt regex: {_promptPattern}");
-                                _scripting.Timeout = overallTimeout;
+                                _stream.Timeout = overallTimeout;
                                 return;
                             }
 
@@ -401,7 +432,7 @@ namespace SSH_Helper.Services
                                 {
                                     EmitDebug($"Banner acceptance limit reached ({maxBannerAccepts}). Trying with carriage return...");
                                     var keyToPress = GetBannerAcceptKey(bannerMatch);
-                                    _scripting.Send(keyToPress + "\r");
+                                    _stream.Send(keyToPress + "\r");
                                     await Task.Delay(500, cancellationToken);
                                     allOutput.Clear();
                                     bannerAcceptCount++;
@@ -417,7 +448,7 @@ namespace SSH_Helper.Services
                                 EmitDebug($"Banner prompt matched ({bannerAcceptCount}/{maxBannerAccepts}): '{bannerMatch.Value}'");
                                 var key = GetBannerAcceptKey(bannerMatch);
                                 EmitDebug($"Sending banner acceptance key: '{key}'");
-                                _scripting.Send(key);
+                                _stream.Send(key);
                                 await Task.Delay(500, cancellationToken);
                                 // Clear the buffer completely so we don't re-match old banner text
                                 allOutput.Clear();
@@ -434,7 +465,7 @@ namespace SSH_Helper.Services
                                 RebuildPromptEvent(_promptPattern.ToString());
                                 EmitDebug($"Fallback prompt detected: {EscapeForDebug(lastLine, 200)}");
                                 EmitDebug($"Built fallback prompt regex: {_promptPattern}");
-                                _scripting.Timeout = overallTimeout;
+                                _stream.Timeout = overallTimeout;
                                 return;
                             }
 
@@ -485,12 +516,12 @@ namespace SSH_Helper.Services
                 if (attemptCount < maxBannerAttempts)
                 {
                     EmitDebug($"Sending newline to retry...");
-                    _scripting.Send("\r");
+                    _stream.Send("\r");
                     await Task.Delay(200, cancellationToken);
                 }
             }
 
-            _scripting.Timeout = overallTimeout; // Restore original timeout
+            _stream.Timeout = overallTimeout; // Restore original timeout
         }
 
         /// <summary>
@@ -509,9 +540,10 @@ namespace SSH_Helper.Services
                 EmitDebug($">>> Sending command: \"{EscapeForDebug(command, 200)}\"");
                 EmitDebug($">>> Prompt regex in use: {_promptPattern}");
 
-                _scripting.Send(command + "\r");
+                DrainResidualBuffer();
+                _stream.Send(command + "\r");
 
-                var output = await ReadUntilPromptAsync(cancellationToken);
+                var output = await ReadUntilPromptAsync(command, cancellationToken);
                 return output;
             }
             finally
@@ -545,7 +577,8 @@ namespace SSH_Helper.Services
                 EmitDebug($">>> Sending command: \"{EscapeForDebug(command, 200)}\"");
                 EmitDebug($">>> Prompt regex in use: {_promptPattern}");
 
-                _scripting.Send(command + "\r");
+                DrainResidualBuffer();
+                _stream.Send(command + "\r");
 
                 if (!string.IsNullOrWhiteSpace(expectPattern))
                 {
@@ -553,7 +586,7 @@ namespace SSH_Helper.Services
                     return await ReadUntilPatternAsync(expectRegex, cancellationToken, timeoutSeconds);
                 }
 
-                return await ReadUntilPromptAsync(cancellationToken, timeoutSeconds);
+                return await ReadUntilPromptAsync(command, cancellationToken, timeoutSeconds);
             }
             finally
             {
@@ -585,7 +618,8 @@ namespace SSH_Helper.Services
             {
                 EmitDebug($">>> Sending command with {responds.Count} respond pair(s): \"{EscapeForDebug(command, 200)}\"");
 
-                _scripting.Send(command + "\r");
+                DrainResidualBuffer();
+                _stream.Send(command + "\r");
 
                 var allOutput = new StringBuilder();
 
@@ -603,12 +637,12 @@ namespace SSH_Helper.Services
                     EmitDebug($">>> Pattern matched, sending reply: \"{EscapeForDebug(reply, 100)}\"");
 
                     // Send the reply
-                    _scripting.Send(reply + "\r");
+                    _stream.Send(reply + "\r");
                 }
 
                 // Wait for final prompt after all respond pairs
                 EmitDebug(">>> All respond pairs done, waiting for final prompt");
-                var finalOutput = await ReadUntilPromptAsync(cancellationToken, timeoutSeconds);
+                var finalOutput = await ReadUntilPromptAsync(null, cancellationToken, timeoutSeconds);
                 allOutput.Append(finalOutput);
 
                 return allOutput.ToString();
@@ -660,18 +694,18 @@ namespace SSH_Helper.Services
         /// Uses Rebex Scripting API to wait for the prompt pattern.
         /// Handles pager prompts automatically.
         /// </summary>
-        private Task<string> ReadUntilPromptAsync(CancellationToken cancellationToken, int? timeoutSeconds = null)
+        private Task<string> ReadUntilPromptAsync(string? commandEcho, CancellationToken cancellationToken, int? timeoutSeconds = null)
         {
-            return Task.Run(() => ReadUntilPromptCore(cancellationToken, timeoutSeconds), cancellationToken);
+            return Task.Run(() => ReadUntilPromptCore(commandEcho, cancellationToken, timeoutSeconds), cancellationToken);
         }
 
         /// <summary>
         /// Core implementation of ReadUntilPrompt (runs on background thread).
         /// Uses polling with data accumulation to reliably capture all output.
         /// </summary>
-        private string ReadUntilPromptCore(CancellationToken cancellationToken, int? timeoutSeconds = null)
+        private string ReadUntilPromptCore(string? commandEcho, CancellationToken cancellationToken, int? timeoutSeconds = null)
         {
-            return ReadUntilPromptWithPolling(cancellationToken, timeoutSeconds);
+            return ReadUntilPromptWithPolling(commandEcho, cancellationToken, timeoutSeconds);
         }
 
         /// <summary>
@@ -680,7 +714,7 @@ namespace SSH_Helper.Services
         /// This avoids premature regex matches on the command-echo prompt that occur with
         /// blocking ReadUntil(patternEvent) calls.
         /// </summary>
-        private string ReadUntilPromptWithPolling(CancellationToken cancellationToken, int? timeoutSeconds = null)
+        private string ReadUntilPromptWithPolling(string? commandEcho, CancellationToken cancellationToken, int? timeoutSeconds = null)
         {
             var output = new StringBuilder();
             var rawBuffer = new StringBuilder();
@@ -689,19 +723,25 @@ namespace SSH_Helper.Services
             var maxPages = 50000;
             var pageCount = 0;
 
-            var savedTimeout = _scripting.Timeout;
+            var savedTimeout = _stream.Timeout;
             var overallTimeout = timeoutSeconds.HasValue && timeoutSeconds.Value > 0
                 ? timeoutSeconds.Value * 1000
                 : (int)_timeouts.CommandTimeout.TotalMilliseconds;
             var batchTimeout = 50; // Short timeout to accumulate chars into batches
             var idleTimeout = 2000; // How long to wait with no data before trying again
-            var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
 
             // Guard against matching the command-echo prompt. When a command is sent,
             // the device echoes "prompt# command-text\r\n" before the output. Without
             // this guard, the prompt regex can match the echo before output arrives.
             bool seenNewlineAfterEcho = false;
             var minTimeBeforePromptMatch = 500; // ms - safety for commands with no output
+
+            // Echo guard: a stale prompt left in the buffer by the previous command also
+            // contains a newline, so seenNewlineAfterEcho alone can't tell it apart from this
+            // command's completion. Require this command's echo to appear before trusting a
+            // prompt match. Empty needle (e.g. respond-pair final prompt) keeps old behaviour.
+            var echoNeedle = CollapseWhitespace(commandEcho ?? string.Empty);
+            bool echoConsumed = echoNeedle.Length == 0;
 
             EmitDebug($"ReadUntilPrompt started.");
             EmitDebug($"  Prompt pattern: {_promptPattern}");
@@ -728,14 +768,14 @@ namespace SSH_Helper.Services
 
                 // Inner loop: accumulate characters into a batch using short timeout
                 var batch = new StringBuilder();
-                _scripting.Timeout = batchTimeout;
+                _stream.Timeout = batchTimeout;
                 bool gotData = false;
 
                 while (true)
                 {
                     try
                     {
-                        var ch = _scripting.ReadUntil(anyDataEvent);
+                        var ch = _stream.ReadData();
                         if (!string.IsNullOrEmpty(ch))
                         {
                             batch.Append(ch);
@@ -781,37 +821,45 @@ namespace SSH_Helper.Services
                     {
                         pageCount++;
                         EmitDebug($"Pager detected ({pageCount}), sending space");
-                        _scripting.Send(" ");
+                        _stream.Send(" ");
                         continue;
                     }
 
-                    // Only check for prompt after the command echo line has completed
-                    // (contains a newline), or after enough time for no-output commands.
-                    bool canCheckPrompt = seenNewlineAfterEcho ||
-                                          overallSw.ElapsedMilliseconds >= minTimeBeforePromptMatch;
+                    // Normalize once so we can both detect this command's echo and test the prompt.
+                    var normalized = TerminalOutputProcessor.Normalize(
+                        TerminalOutputProcessor.Sanitize(rawBuffer.ToString()));
 
-                    if (canCheckPrompt)
+                    // Mark the echo consumed as soon as this command's text appears in the
+                    // buffer. Until then, a prompt match can only be a stale one from a prior
+                    // command, so it must be ignored.
+                    if (!echoConsumed &&
+                        CollapseWhitespace(normalized).Contains(echoNeedle, StringComparison.Ordinal))
                     {
-                        // Check if accumulated normalized output matches prompt
-                        var accumulated = TerminalOutputProcessor.Sanitize(rawBuffer.ToString());
-                        var normalized = TerminalOutputProcessor.Normalize(accumulated);
+                        echoConsumed = true;
+                    }
 
-                        if (_promptPattern != null && _promptPattern.IsMatch(normalized))
-                        {
-                            EmitDebug($"Prompt regex matched! Command complete.");
-                            promptMatched = true;
-                            UpdatePromptIfChanged(new StringBuilder(normalized));
-                            break;
-                        }
+                    // Match the prompt once this command's echo is consumed (the prompt that
+                    // follows it is genuinely this command's completion), or after the safety
+                    // window for devices that don't echo / wrap long command lines.
+                    bool canCheckPrompt =
+                        (echoConsumed && seenNewlineAfterEcho) ||
+                        overallSw.ElapsedMilliseconds >= minTimeBeforePromptMatch;
+
+                    if (canCheckPrompt && _promptPattern != null && _promptPattern.IsMatch(normalized))
+                    {
+                        EmitDebug($"Prompt regex matched! Command complete.");
+                        promptMatched = true;
+                        UpdatePromptTracking(new StringBuilder(normalized));
+                        break;
                     }
                 }
                 else
                 {
                     // No data received — wait for idleTimeout before trying again
-                    _scripting.Timeout = idleTimeout;
+                    _stream.Timeout = idleTimeout;
                     try
                     {
-                        var ch = _scripting.ReadUntil(anyDataEvent);
+                        var ch = _stream.ReadData();
                         if (!string.IsNullOrEmpty(ch))
                         {
                             // Got data after idle wait — put it back in the buffer and continue
@@ -820,7 +868,7 @@ namespace SSH_Helper.Services
                             {
                                 pageCount++;
                                 EmitDebug($"Pager detected ({pageCount}), sending space");
-                                _scripting.Send(" ");
+                                _stream.Send(" ");
                             }
                             // Feed back into the next iteration's batch start
                             continue;
@@ -873,7 +921,7 @@ namespace SSH_Helper.Services
             }
 
             // Restore original timeout
-            _scripting.Timeout = savedTimeout;
+            _stream.Timeout = savedTimeout;
             FlushPendingStreamingOutput(output, ref pendingLineCarry, ref zshPromptSpCarry);
 
             var result = output.ToString();
@@ -952,13 +1000,12 @@ namespace SSH_Helper.Services
             var maxPages = 50000;
             var pageCount = 0;
 
-            var savedTimeout = _scripting.Timeout;
+            var savedTimeout = _stream.Timeout;
             var overallTimeout = timeoutSeconds.HasValue && timeoutSeconds.Value > 0
                 ? timeoutSeconds.Value * 1000
                 : (int)_timeouts.CommandTimeout.TotalMilliseconds;
             var batchTimeout = 50;
             var idleTimeout = 2000;
-            var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
 
             bool seenNewlineAfterEcho = false;
             var minTimeBeforeMatch = 500;
@@ -987,14 +1034,14 @@ namespace SSH_Helper.Services
                 TrySendKeepAliveIfDue("ReadUntilExpect");
 
                 var batch = new StringBuilder();
-                _scripting.Timeout = batchTimeout;
+                _stream.Timeout = batchTimeout;
                 bool gotData = false;
 
                 while (true)
                 {
                     try
                     {
-                        var ch = _scripting.ReadUntil(anyDataEvent);
+                        var ch = _stream.ReadData();
                         if (!string.IsNullOrEmpty(ch))
                         {
                             batch.Append(ch);
@@ -1034,7 +1081,7 @@ namespace SSH_Helper.Services
                     {
                         pageCount++;
                         EmitDebug($"Pager detected ({pageCount}), sending space");
-                        _scripting.Send(" ");
+                        _stream.Send(" ");
                         continue;
                     }
 
@@ -1048,17 +1095,17 @@ namespace SSH_Helper.Services
                         {
                             matched = true;
                             // Update prompt if the output indicates a prompt change.
-                            UpdatePromptIfChanged(new StringBuilder(normalized));
+                            UpdatePromptTracking(new StringBuilder(normalized));
                             break;
                         }
                     }
                 }
                 else
                 {
-                    _scripting.Timeout = idleTimeout;
+                    _stream.Timeout = idleTimeout;
                     try
                     {
-                        var ch = _scripting.ReadUntil(anyDataEvent);
+                        var ch = _stream.ReadData();
                         if (!string.IsNullOrEmpty(ch))
                         {
                             bool hitPager = ProcessChunk(ch, rawBuffer, output, ref seenNewlineAfterEcho, ref zshPromptSpCarry, ref pendingLineCarry, overallSw, "Idle read received");
@@ -1066,7 +1113,7 @@ namespace SSH_Helper.Services
                             {
                                 pageCount++;
                                 EmitDebug($"Pager detected ({pageCount}), sending space");
-                                _scripting.Send(" ");
+                                _stream.Send(" ");
                             }
                             continue;
                         }
@@ -1100,7 +1147,7 @@ namespace SSH_Helper.Services
                 EmitDebug($"  Raw buffer tail: {EscapeForDebug(rawTail, 300)}");
             }
 
-            _scripting.Timeout = savedTimeout;
+            _stream.Timeout = savedTimeout;
             FlushPendingStreamingOutput(output, ref pendingLineCarry, ref zshPromptSpCarry);
 
             var result = output.ToString();
@@ -1182,14 +1229,31 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Checks if the prompt has changed (e.g., entered config mode) and updates tracking.
+        /// Refreshes prompt tracking after a command completes.
         /// </summary>
-        private void UpdatePromptIfChanged(StringBuilder buffer)
+        /// <remarks>
+        /// Two values are tracked from one buffer because they have opposite needs:
+        /// <list type="bullet">
+        ///   <item><see cref="_currentPrompt"/> (drives the displayed command prefix, the
+        ///   <c>${_prompt}</c> variable, and trailing-prompt stripping) is refreshed to the
+        ///   literal prompt line this command ended on, so config submodes like
+        ///   "host (setting) #" show the real prompt instead of the frozen login one.</item>
+        ///   <item><see cref="_promptPattern"/> (used to match command completion) stays
+        ///   deliberately tolerant and is only rebuilt when the stable prompt anchor genuinely
+        ///   changes — rebuilding it for every submode hop would just produce the same pattern
+        ///   (the anchor is unchanged) while needlessly recreating the Rebex ScriptEvent.</item>
+        /// </list>
+        /// </remarks>
+        private void UpdatePromptTracking(StringBuilder buffer)
         {
-            if (PromptDetector.TryDetectDifferentPrompt(buffer, _promptPattern, out var newPrompt))
+            if (PromptDetector.TryDetectPromptFromTail(buffer.ToString(), out var livePrompt))
             {
-                _currentPrompt = newPrompt;
-                _promptPattern = PromptDetector.BuildPromptRegex(newPrompt);
+                _currentPrompt = livePrompt;
+            }
+
+            if (PromptDetector.TryDetectDifferentPrompt(buffer, _promptPattern, out var changedPrompt))
+            {
+                _promptPattern = PromptDetector.BuildPromptRegex(changedPrompt);
                 RebuildPromptEvent(_promptPattern.ToString());
             }
         }
@@ -1252,7 +1316,7 @@ namespace SSH_Helper.Services
 
             try
             {
-                _scripting.KeepAlive();
+                _stream.KeepAlive();
                 EmitDebug($"Sent SSH keepalive during {operation}.");
             }
             catch (Exception ex)
@@ -1316,6 +1380,61 @@ namespace SSH_Helper.Services
                     return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// Discards any data left in the stream buffer before a new command is sent.
+        /// A device can emit a trailing prompt redraw after a command completes (for example
+        /// FortiGate redraws its prompt after <c>end</c> exits a config submode). Left in the
+        /// buffer, that residual is matched immediately by the next command's read, which then
+        /// returns the previous command's output and shifts every later command by one. Draining
+        /// here keeps each command aligned with the output it actually produced.
+        /// </summary>
+        private void DrainResidualBuffer()
+        {
+            var savedTimeout = _stream.Timeout;
+            _stream.Timeout = ResidualDrainQuietMs;
+            try
+            {
+                while (true)
+                {
+                    var leftover = _stream.ReadData();
+                    if (string.IsNullOrEmpty(leftover))
+                        break;
+                    EmitDebug($"Drained {leftover.Length} residual char(s) before send: {EscapeForDebug(leftover, 120)}");
+                }
+            }
+            catch (Exception ex) when (IsTimeoutException(ex))
+            {
+                // Timeout means the buffer is empty \u2014 the stream is ready for the command.
+            }
+            finally
+            {
+                _stream.Timeout = savedTimeout;
+            }
+        }
+
+        /// <summary>
+        /// True when an exception represents a read/idle timeout (no data within the window)
+        /// rather than a real error. Rebex surfaces these via the message text.
+        /// </summary>
+        private static bool IsTimeoutException(Exception ex)
+        {
+            return ex is not OperationCanceledException &&
+                   (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Collapses runs of whitespace to single spaces and trims the ends. Used for a
+        /// forgiving comparison when detecting a command's echo in streamed output.
+        /// </summary>
+        private static string CollapseWhitespace(string value)
+        {
+            return string.IsNullOrEmpty(value)
+                ? string.Empty
+                : Regex.Replace(value, @"\s+", " ").Trim();
         }
 
         private void ThrowIfDisposed()

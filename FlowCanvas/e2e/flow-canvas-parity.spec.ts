@@ -33,7 +33,7 @@ test.describe('Flow Canvas Browser Harness', () => {
     await expect(page.getByText('Beta', { exact: true })).toBeVisible();
     await expect(page.getByText('10.0.0.10', { exact: true })).toBeVisible();
 
-    await page.getByRole('button', { name: /run/i }).click();
+    await page.getByTestId('toolbar-run').click();
     const toolbarRun = await waitForOutgoingMessage(page, 'execute-canvas');
     expect(toolbarRun.mode).toBe('run');
 
@@ -95,7 +95,7 @@ test.describe('Flow Canvas Browser Harness', () => {
       },
     });
 
-    const runButton = page.getByRole('button', { name: /run/i });
+    const runButton = page.getByTestId('toolbar-run');
     await expect(runButton).toBeEnabled();
 
     await postHostMessage(page, {
@@ -134,7 +134,7 @@ test.describe('Flow Canvas Browser Harness', () => {
     await page.keyboard.press('Control+V');
 
     await clearOutgoingMessages(page);
-    await page.getByRole('button', { name: /run/i }).click();
+    await page.getByTestId('toolbar-run').click();
     const runAfterPaste = await waitForOutgoingMessage(page, 'execute-canvas');
     expect(runAfterPaste.mode).toBe('run');
     expect(runAfterPaste.graphChanged).toBeTruthy();
@@ -155,7 +155,7 @@ test.describe('Flow Canvas Browser Harness', () => {
     await page.getByRole('button', { name: /layout/i }).click();
 
     await clearOutgoingMessages(page);
-    await page.getByRole('button', { name: /run/i }).click();
+    await page.getByTestId('toolbar-run').click();
     const runAfterLayout = await waitForOutgoingMessage(page, 'execute-canvas');
     expect(runAfterLayout.mode).toBe('run');
     expect(runAfterLayout.graphChanged).toBeTruthy();

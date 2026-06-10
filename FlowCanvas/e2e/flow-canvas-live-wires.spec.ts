@@ -59,16 +59,29 @@ test.describe('Flow Canvas Live Wires', () => {
     expect(stopColor).toBe(await resolveVar(page, '--fc-edge-idle'));
   });
 
-  test('packet travels only while running, and never under reduced-motion', async ({ page }) => {
+  test('the frontier packet rides the edge whose target is running, then moves on', async ({ page }) => {
     await loadGraphFixture(page, edgeFixture('var(--fc-branch-then)'));
     const packet = page.locator('.fc-edge-packet');
     await expect(packet).toHaveCount(0); // at rest
 
     await postHostMessage(page, { type: 'execution-started' });
+    // The packet is the live FRONTIER dot: it rides the edge whose TARGET block is running.
+    // The source completing alone does not light it (that was the old, branch-confusing behavior).
     await postHostMessage(page, { type: 'execution-update', stepId: 'src', state: 'success' });
+    await expect(packet).toHaveCount(0);
+
+    await postHostMessage(page, { type: 'execution-update', stepId: 'dst', state: 'running' });
     await expect(packet).toHaveCount(1);
     expect(await packet.evaluate((el) => getComputedStyle(el as Element).animationName)).toContain('fc-packet-travel');
 
+    // Frontier moves on: once the target completes, no dot is left behind (the neon on-path wire
+    // — asserted in the execution-path spec — carries the built trail instead).
+    await postHostMessage(page, { type: 'execution-update', stepId: 'dst', state: 'success' });
+    await expect(packet).toHaveCount(0);
+    await expect(edgePath(page)).toHaveClass(/fc-edge-onpath/);
+
+    await postHostMessage(page, { type: 'execution-update', stepId: 'dst', state: 'running' }); // re-light to test reduced-motion
+    await expect(packet).toHaveCount(1);
     await postHostMessage(page, { type: 'pref-restore', reducedMotion: true }); // enable reduced motion
     await expect(packet).toHaveCount(0);
   });

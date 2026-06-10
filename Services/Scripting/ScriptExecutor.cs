@@ -44,6 +44,19 @@ namespace SSH_Helper.Services.Scripting
 
         /// <summary>Scope-path key of the branch taken (only set on StepCompleted for if/switch).</summary>
         public string? BranchTaken { get; init; }
+
+        /// <summary>
+        /// Live loop-iteration stack at the moment the event fired (outermost first).
+        /// Null or empty outside loops. The list is an immutable point-in-time snapshot —
+        /// later iterations never mutate it. NOTE: a loop's own StepCompleted fires after
+        /// its frame is popped, so a loop's events carry only its ancestors' frames.
+        /// </summary>
+        public IReadOnlyList<IterationFrame>? IterationStack { get; init; }
+
+        /// <summary>True when the step failed but the error was suppressed (on_error: continue) —
+        /// reported as success for control flow, but flagged so debugging surfaces (the canvas
+        /// iteration stepper's failure markers) can still find it.</summary>
+        public bool SuppressedError { get; init; }
     }
 
     /// <summary>
@@ -74,6 +87,16 @@ namespace SSH_Helper.Services.Scripting
     {
         private readonly Dictionary<StepType, IScriptCommand> _commands;
 
+        // Container steps re-enter the executor to run nested steps. After they finish,
+        // ScriptContext.LastCommandOutput holds the output of a send nested INSIDE them, so
+        // their block must instead report the output carried from the send preceding the
+        // container's start. Leaf steps keep LastCommandOutput as-is.
+        private static readonly HashSet<StepType> ContainerStepTypes = new()
+        {
+            StepType.If, StepType.Foreach, StepType.While, StepType.Repeat,
+            StepType.Try, StepType.Switch, StepType.Parallel, StepType.Call,
+        };
+
         /// <summary>
         /// Raised before a step begins execution.
         /// </summary>
@@ -96,14 +119,15 @@ namespace SSH_Helper.Services.Scripting
 
         internal ScriptExecutor(
             IBrowserCallbackUiHost? browserCallbackUiHost,
-            ILocalCmdConfirmation? localCmdConfirmation = null)
+            ILocalCmdConfirmation? localCmdConfirmation = null,
+            Func<ScriptContext, SendCommand.ISendCommandSession?>? sendSessionResolver = null)
         {
             browserCallbackUiHost ??= new BrowserCallbackUiHost(BrowserCallbackWebViewProfileManager.Shared);
 
             // Register command handlers
             _commands = new Dictionary<StepType, IScriptCommand>
             {
-                { StepType.Send, new SendCommand() },
+                { StepType.Send, sendSessionResolver is null ? new SendCommand() : new SendCommand(sendSessionResolver) },
                 { StepType.Print, new PrintCommand() },
                 { StepType.Wait, new WaitCommand() },
                 { StepType.Set, new SetCommand() },
@@ -288,6 +312,10 @@ namespace SSH_Helper.Services.Scripting
                 {
                     var step = steps[stepIndex];
                     var stepPath = step.StepPath ?? $"steps/{stepIndex}";
+                    // Loop commands read step.StepPath to tag iteration frames, so make the
+                    // effective path visible on the step even when it wasn't assigned
+                    // (hand-built scripts). Idempotent: same value on every iteration.
+                    step.StepPath ??= stepPath;
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // Handle debug pausing
@@ -309,7 +337,8 @@ namespace SSH_Helper.Services.Scripting
                             StepType = stepType,
                             LineNumber = step.LineNumber,
                             Success = true,
-                            Skipped = true
+                            Skipped = true,
+                            IterationStack = context.IterationStack
                         });
                         continue;
                     }
@@ -328,7 +357,8 @@ namespace SSH_Helper.Services.Scripting
                                 StepType = stepType,
                                 LineNumber = step.LineNumber,
                                 Success = true,
-                                Skipped = true
+                                Skipped = true,
+                                IterationStack = context.IterationStack
                             });
                             continue;
                         }
@@ -341,12 +371,26 @@ namespace SSH_Helper.Services.Scripting
                         StepPath = stepPath,
                         StepType = stepType,
                         LineNumber = step.LineNumber,
-                        StepName = null
+                        StepName = null,
+                        IterationStack = context.IterationStack
                     });
+
+                    // Output carried into this step = whatever the most recent send produced
+                    // before the step started. A container overwrites LastCommandOutput via a
+                    // nested send, so capture it now to report it instead.
+                    var carriedOutput = context.LastCommandOutput;
 
                     var sw = System.Diagnostics.Stopwatch.StartNew();
                     var result = await ExecuteStepAsync(step, context, cancellationToken);
                     sw.Stop();
+
+                    // A send block shows its own output (empty when it produced none). A non-send
+                    // leaf never changed LastCommandOutput, so it already holds the preceding
+                    // send's output. A container reports the send preceding its start, not the
+                    // nested send it just ran.
+                    var stepOutput = ContainerStepTypes.Contains(stepType)
+                        ? carriedOutput
+                        : context.LastCommandOutput;
 
                     // Fire step-completed event
                     StepCompleted?.Invoke(this, new StepExecutionEventArgs
@@ -357,10 +401,12 @@ namespace SSH_Helper.Services.Scripting
                         LineNumber = step.LineNumber,
                         StepName = null,
                         Success = result.Success,
-                        Output = context.LastCommandOutput,
+                        Output = stepOutput,
                         DurationMs = sw.ElapsedMilliseconds,
                         IterationCount = result.IterationCount,
-                        BranchTaken = result.BranchTaken
+                        BranchTaken = result.BranchTaken,
+                        SuppressedError = result.SuppressedError,
+                        IterationStack = context.IterationStack
                     });
 
                     if (result.SuppressedError)

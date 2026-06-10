@@ -48,19 +48,18 @@ describe('branchBands', () => {
     expect(b.width).toBe(300 + 18 * 2); // childWidth 300 + pad, NOT stretched by the comment
   });
 
-  it('insets a nested band on the LEFT only, preserving top/right/bottom padding', () => {
-    // A nested band that shares its parent's left edge (e.g. a multi-branch then under a loop)
-    // would paint over the parent's left accent — hiding the nesting (yellow→green). Inset the
-    // LEFT of depth>=1 bands so the parent shows through, but keep full top/right/bottom padding
-    // so the pill label clears the first block and blocks aren't crowded at the bottom.
+  it('pads nested bands uniformly — same BAND_PAD on left/right/bottom at every depth', () => {
+    // The old per-depth left inset (18 → 8 → 4) made nested lanes look progressively cramped on
+    // the left. Pass 2 already guarantees a parent band wraps a nested band's rect with a full
+    // BAND_PAD, so the inset's parent-accent concern is moot — padding is uniform now.
     const outer = computeBranchBands([child('c', 'p', 'steps/0/then/0', 100, 100)])[0];
-    expect(outer.x).toBe(100 - 18); // depth 0: flush, no inset
+    expect(outer.x).toBe(100 - 18);
     const nested = computeBranchBands([child('g', 'q', 'steps/0/then/0/else/0', 100, 100)])[0];
     expect(nested.depth).toBeGreaterThanOrEqual(1);
-    expect(nested.x).toBeGreaterThan(100 - 18);           // left pulled inward (reveals parent accent)
+    expect(nested.x).toBe(100 - 18);                      // left: full padding, no depth inset
     expect(nested.y).toBe(100 - 18 - 12);                 // top extended by headroom (pill clears the first block)
-    expect(nested.x + nested.width).toBe(100 + 300 + 18); // right NOT inset (full padding)
-    expect(nested.y + nested.height).toBe(100 + 52 + 18); // bottom unchanged (headroom is top-only)
+    expect(nested.x + nested.width).toBe(100 + 300 + 18); // right: full padding
+    expect(nested.y + nested.height).toBe(100 + 52 + 18); // bottom: full padding (headroom is top-only)
   });
 
   it('marks the outermost branch depth 0', () => {
@@ -123,6 +122,18 @@ describe('branchBands', () => {
     // Top is extended by BAND_PAD + BAND_LABEL_HEADROOM; the bottom keeps BAND_PAD only.
     expect(b.y).toBe(200 - BAND_PAD - BAND_LABEL_HEADROOM);
     expect(b.y + b.height).toBe(200 + COLLAPSED_HEIGHT + BAND_PAD);
+  });
+
+  it('grows the band bottom with textScale so taller XL/XXL blocks still fit', () => {
+    // Collapsed blocks really render taller at XL/XXL; the band must use the scaled estimate
+    // or the last block crosses the bottom border (the "bands are not fitting" bug).
+    const node = () => [child('c1', 'p', 'steps/1/then/0', 100, 200)];
+    const base = computeBranchBands(node(), 300, 1)[0];
+    const xxl = computeBranchBands(node(), 300, 1.6)[0];
+    expect(base.y + base.height).toBe(200 + COLLAPSED_HEIGHT + BAND_PAD);
+    expect(xxl.y + xxl.height).toBe(200 + COLLAPSED_HEIGHT + 18 + BAND_PAD); // +18px text slice @1.6
+    // Width is textScale-independent (block widths are fixed by the width preset).
+    expect(xxl.width).toBe(base.width);
   });
 
   it('exposes memberIds for every node in the branch subtree, including nested bodies', () => {

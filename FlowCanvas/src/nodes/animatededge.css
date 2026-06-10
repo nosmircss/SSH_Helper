@@ -34,3 +34,12 @@
 .fc-edge-untaken {
   opacity: 0.35;
 }
+
+/* The neon trail BUILDS edge-by-edge as the run reaches each wire: when an edge flips to on-path
+ * its bloom (filter) and width fade in rather than snapping, so the path visibly grows behind the
+ * travelling frontier dot. Declared on the base path (present in every state) so the idle→on-path
+ * change tweens; the stroke PAINT swap (idle gradient → neon color) can't interpolate, but the
+ * bloom + width carry the "ignite". The reduced-motion blanket collapses this to ~0ms. */
+.react-flow__edge-path {
+  transition: filter 0.35s ease-out, stroke-width 0.35s ease-out;
+}

@@ -3,19 +3,20 @@ import { BaseEdge, getSmoothStepPath, getStraightPath, type EdgeProps } from '@x
 import { mix } from '../utils/tokens';
 import { markerIdForStroke } from './EdgeMarkers';
 import { useFlowStore } from '../stores/useFlowStore';
-import { selectEdgePathStatus, selectEdgeIsBranch } from '../stores/selectors/edgePath';
+import { selectEdgePathStatus, selectEdgeIsBranch, selectEdgeIsRunningFrontier } from '../stores/selectors/edgePath';
 import './animatededge.css';
 
 function AnimatedEdge(props: EdgeProps) {
-  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, source, style } = props;
+  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style } = props;
 
   const isRunning = useFlowStore((s) => s.isRunning);
-  const blockStates = useFlowStore((s) => s.blockStates);
   const reducedMotion = useFlowStore((s) => s.reducedMotion);
   // Path overlay status. Returns a string → referentially stable, no extra renders.
   const pathStatus = useFlowStore((s) => selectEdgePathStatus(s, id));
   // Branch arm (keeps its own hue) vs spine/plain/continuation (promotes to traversed cyan).
   const isBranch = useFlowStore((s) => selectEdgeIsBranch(s, id));
+  // The single live frontier for the run packet (boolean → stable). See selectEdgeIsRunningFrontier.
+  const isRunningFrontier = useFlowStore((s) => selectEdgeIsRunningFrontier(s, id));
 
   // Geometry (not data.branchPath / sourceHandle) is the discriminator: imported branch edges
   // carry no branchPath, so metadata would misclassify them. Aligned, downward edges (the
@@ -37,8 +38,15 @@ function AnimatedEdge(props: EdgeProps) {
   const color = (typeof style?.stroke === 'string' ? style.stroke : undefined) ?? 'var(--fc-edge-idle)';
   const markerId = markerIdForStroke(color);
 
-  const sourceState = blockStates.get(source);
-  const active = isRunning && (sourceState === 'success' || sourceState === 'running');
+  // The run packet is a single travelling FRONTIER dot: it rides only the edge into the DEEPEST
+  // running block (selectEdgeIsRunningFrontier). As control advances, the dot hops to the next
+  // running edge and the one it left becomes a solid on-path neon wire (selectEdgePathStatus) — so
+  // you watch the neon path BUILD behind a single moving dot. Keying on the TARGET (not the source)
+  // keeps the dot off undecided/untaken arms: a branch's child enters 'running' only when its arm is
+  // taken, with no dependency on the late branchTaken signal. A running container yields its incoming
+  // dot to its running child; completed/skipped/disabled targets carry no dot — the neon overlay
+  // keeps those segments of the trail continuous.
+  const active = isRunning && isRunningFrontier;
 
   const gradientId = `fc-grad-${id}`;
 

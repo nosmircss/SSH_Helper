@@ -77,6 +77,7 @@ function resetGraphSessionState(store: typeof useFlowStore): void {
   store.getState().clearExecution();
   store.getState().clearTimeline();
   store.getState().clearExportStatus();
+  store.getState().clearIterations();
 }
 
 function installFlowCanvasTestHooks(store: typeof useFlowStore): void {
@@ -128,7 +129,15 @@ export function initMessageBridge(): () => void {
     // Load graph from C# (YAML → graph conversion result)
     messageBus.on('load-graph', (msg) => {
       if (msg.nodes && msg.edges) {
-        store.getState().setNodes(msg.nodes as Node[]);
+        // "Default block state: Expanded" forces every loaded block open regardless of the
+        // preset's saved expansion. Stamp the carrier flag BEFORE setNodes so the layout below
+        // estimates expanded heights and the expanded-restore scan picks every block up.
+        let loadNodes = msg.nodes as Node[];
+        if (store.getState().defaultBlockExpanded) {
+          loadNodes = loadNodes.map((n) =>
+            n.type === 'block' ? { ...n, data: { ...(n.data ?? {}), expanded: true } } : n);
+        }
+        store.getState().setNodes(loadNodes);
         store.getState().setEdges(msg.edges as Edge[]);
         ensureStartNodeExists(store);
 
@@ -152,7 +161,11 @@ export function initMessageBridge(): () => void {
 
         resetGraphSessionState(store);
 
-        // Restore disabled block state from loaded node data
+        // Restore disabled/expanded block state from the loaded node data. ALWAYS restore —
+        // even with empty lists — so the previous preset's sets can't leak onto the new graph:
+        // preset node ids collide (node-1, node-2, …), and a stale expandedNodes set makes
+        // blocks RENDER expanded while the layout above estimated them collapsed → overlap
+        // when switching presets in an open canvas (fresh opens start with empty sets).
         const state = store.getState();
         const disabledIds: string[] = [];
         for (const node of state.nodes) {
@@ -161,15 +174,13 @@ export function initMessageBridge(): () => void {
             disabledIds.push(node.id);
           }
         }
-        if (disabledIds.length > 0) {
-          state.restoreDisabledBlocks(disabledIds);
-        }
+        state.restoreDisabledBlocks(disabledIds);
         const expandedIds: string[] = [];
         for (const node of state.nodes) {
           const data = node.data as Record<string, unknown> | undefined;
           if (data?.expanded === true) expandedIds.push(node.id);
         }
-        if (expandedIds.length > 0) state.restoreExpandedNodes(expandedIds);
+        state.restoreExpandedNodes(expandedIds);
       }
     }),
 
@@ -204,8 +215,10 @@ export function initMessageBridge(): () => void {
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.executionStarted, () => {
       store.getState().clearExecution();
       store.getState().clearTimeline();
+      store.getState().clearIterations();
       store.getState().setRunning(true);
       store.getState().clearExportStatus();
+      if (!store.getState().runOutputPoppedOut) store.getState().setOutputTab('run');
     }),
 
     // Execution finished
@@ -275,17 +288,69 @@ export function initMessageBridge(): () => void {
       if (typeof msg.branchTaken === 'string' && msg.branchTaken.trim().length > 0) {
         state.setBranchTaken(stepId, msg.branchTaken.trim());
       }
+
+      // Iteration attribution: every tagged event lands in the iteration log (transient,
+      // never written onto node.data, so export is unaffected).
+      if (Array.isArray(msg.iterationStack) && msg.iterationStack.length > 0) {
+        const isCompletion = execState === 'success' || execState === 'error' || execState === 'skipped';
+        state.recordIterationEvent(
+          stepId,
+          msg.iterationStack,
+          {
+            state: execState,
+            duration: msg.duration != null ? Number(msg.duration) : undefined,
+            branchTaken:
+              typeof msg.branchTaken === 'string' && msg.branchTaken.trim().length > 0
+                ? msg.branchTaken.trim()
+                : undefined,
+            suppressed: msg.suppressedError === true ? true : undefined,
+          },
+          isCompletion && msg.variables && typeof msg.variables === 'object'
+            ? (msg.variables as Record<string, unknown>)
+            : undefined,
+        );
+      }
     }),
 
     // Per-step output
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.stepOutput, (msg) => {
       if (msg.stepId && msg.output) {
+        const stepId = String(msg.stepId);
         store.getState().appendBlockOutput(
-          String(msg.stepId),
+          stepId,
           String(msg.output),
           msg.stepType ? String(msg.stepType) : undefined
         );
+        // Tie this output entry to its iteration so the stepper can recall it.
+        if (Array.isArray(msg.iterationStack) && msg.iterationStack.length > 0) {
+          const outputIdx = (store.getState().blockOutputs.get(stepId)?.length ?? 1) - 1;
+          store.getState().recordIterationEvent(stepId, msg.iterationStack, { outputIdx });
+        }
       }
+    }),
+
+    // Full run output — live mirror of the main form's output box
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.runOutput, (msg) => {
+      if (typeof msg.chunk === 'string' && msg.chunk.length > 0) {
+        const state = store.getState();
+        state.appendRunOutput(msg.chunk);
+        if (state.outputTab !== 'run' && !state.runOutputPoppedOut) {
+          state.setRunOutputUnread(true);
+        }
+      }
+    }),
+
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.runOutputClear, () => {
+      const state = store.getState();
+      state.clearRunOutput();
+      state.setRunOutputUnread(false); // clearing the buffer also clears any stale unread dot
+    }),
+
+    // The detached Run Output window was closed (by its own X) — dock the console back.
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.runOutputWindowClosed, () => {
+      const state = store.getState();
+      state.setRunOutputPoppedOut(false);
+      state.setOutputTab('run');
     }),
 
     // Test step result (single-step execution)
@@ -416,12 +481,20 @@ export function initMessageBridge(): () => void {
       if (typeof msg.snapToGrid === 'boolean') store.getState().restoreSnapToGrid(msg.snapToGrid);
       if (typeof msg.branchBandsEnabled === 'boolean') store.getState().restoreBranchBands(msg.branchBandsEnabled);
       if (typeof msg.compactCommentsEnabled === 'boolean') store.getState().restoreCompactComments(msg.compactCommentsEnabled);
+      store.getState().restoreRunOutputPrefs({
+        runOutputColor: typeof msg.runOutputColor === 'boolean' ? msg.runOutputColor : undefined,
+        runOutputWrap: typeof msg.runOutputWrap === 'boolean' ? msg.runOutputWrap : undefined,
+        runOutputFollow: typeof msg.runOutputFollow === 'boolean' ? msg.runOutputFollow : undefined,
+      });
     }),
 
     // Restore UI prefs from WinForms persisted settings (no echo back to host)
     messageBus.on(CANVAS_HOST_MESSAGES.incoming.prefRestore, (msg) => {
       if (typeof msg.reducedMotion === 'boolean') {
         store.getState().restoreReducedMotion(msg.reducedMotion);
+      }
+      if (typeof msg.iterationHistoryCap === 'number' && msg.iterationHistoryCap > 0) {
+        store.getState().restoreIterationHistoryCap(msg.iterationHistoryCap);
       }
     }),
   ];

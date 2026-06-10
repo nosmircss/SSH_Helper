@@ -99,6 +99,7 @@ export default function Toolbar() {
     }}>
       {/* Execution controls */}
       <button
+        data-testid="toolbar-run"
         onClick={handleRun}
         disabled={isRunning || exportStatus.hasErrors || !targetHost}
         style={btnStyle('var(--fc-state-success)', !isRunning && !exportStatus.hasErrors && !!targetHost)}

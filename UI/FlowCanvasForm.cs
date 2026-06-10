@@ -285,6 +285,14 @@ namespace SSH_Helper.UI
                         OnBrowsePath?.Invoke(msg);
                         break;
 
+                    case "open-run-output-window":
+                        OnOpenRunOutputWindow?.Invoke(msg);
+                        break;
+
+                    case "close-run-output-window":
+                        OnCloseRunOutputWindow?.Invoke(msg);
+                        break;
+
                     case "show-error":
                         var errorMsg = msg["message"]?.ToString() ?? "Unknown error";
                         BeginInvoke(() => DialogTheme.Show(this, errorMsg, "Flow Canvas", MessageBoxButtons.OK, MessageBoxIcon.Error));
@@ -308,6 +316,19 @@ namespace SSH_Helper.UI
         public void SetTargetHost(object? hostData)
         {
             SendMessage(new { type = "set-target-host", host = hostData });
+        }
+
+        /// <summary>Appends a raw chunk of the main-form run output to the canvas's Run Output tab.</summary>
+        public void SendRunOutputAppend(string chunk)
+        {
+            if (string.IsNullOrEmpty(chunk)) return;
+            SendMessage(new { type = "run-output", chunk });
+        }
+
+        /// <summary>Clears the canvas's Run Output buffer (mirrors Form1.ClearOutput).</summary>
+        public void SendRunOutputClear()
+        {
+            SendMessage(new { type = "run-output-clear" });
         }
 
         /// <summary>
@@ -376,6 +397,8 @@ namespace SSH_Helper.UI
         public event Action<JObject>? OnLayoutAutosave;
         public event Action<JObject>? OnSetLayoutMode;
         public event Action<JObject>? OnBrowsePath;
+        public event Action<JObject>? OnOpenRunOutputWindow;
+        public event Action<JObject>? OnCloseRunOutputWindow;
 
         private void ApplyTheme()
         {
@@ -410,10 +433,15 @@ namespace SSH_Helper.UI
                 branchBandsEnabled = ws.FlowCanvasBranchBands,
                 compactCommentsEnabled = ws.FlowCanvasCompactComments,
                 defaultLayoutMode = (ws.FlowCanvasDefaultLayoutMode ?? Models.LayoutMode.AutoFlow) == Models.LayoutMode.Manual ? "manual" : "auto",
+                runOutputColor = ws.FlowCanvasRunOutputColor,
+                runOutputWrap = ws.FlowCanvasRunOutputWrap,
+                runOutputFollow = ws.FlowCanvasRunOutputFollow,
             });
 
             var rm = ws.FlowCanvasReducedMotion;
-            if (rm.HasValue) SendMessage(new { type = "pref-restore", reducedMotion = rm.Value });
+            var iterCap = ws.FlowCanvasIterationHistoryCap;
+            if (rm.HasValue || iterCap.HasValue)
+                SendMessage(new { type = "pref-restore", reducedMotion = rm, iterationHistoryCap = iterCap });
         }
 
         private void SavePanelSizes(JObject? msg)
@@ -433,10 +461,14 @@ namespace SSH_Helper.UI
             var bands = msg["branchBandsEnabled"]?.Value<bool>();
             var compact = msg["compactCommentsEnabled"]?.Value<bool>();
             var defaultLayoutMode = msg["defaultLayoutMode"]?.ToString();
+            var runOutputColor = msg["runOutputColor"]?.Value<bool>();
+            var runOutputWrap = msg["runOutputWrap"]?.Value<bool>();
+            var runOutputFollow = msg["runOutputFollow"]?.Value<bool>();
 
             if (rightWidth == null && outputHeight == null && heatmap == null && blockWidth == null
                 && textScale == null && density == null && defaultExpanded == null && snap == null && bands == null
-                && compact == null && defaultLayoutMode == null)
+                && compact == null && defaultLayoutMode == null
+                && runOutputColor == null && runOutputWrap == null && runOutputFollow == null)
                 return;
 
             _configService.Update(c =>
@@ -455,6 +487,9 @@ namespace SSH_Helper.UI
                 if (defaultLayoutMode == "auto" || defaultLayoutMode == "manual")
                     c.WindowState.FlowCanvasDefaultLayoutMode =
                         defaultLayoutMode == "manual" ? Models.LayoutMode.Manual : Models.LayoutMode.AutoFlow;
+                if (runOutputColor.HasValue) c.WindowState.FlowCanvasRunOutputColor = runOutputColor.Value;
+                if (runOutputWrap.HasValue) c.WindowState.FlowCanvasRunOutputWrap = runOutputWrap.Value;
+                if (runOutputFollow.HasValue) c.WindowState.FlowCanvasRunOutputFollow = runOutputFollow.Value;
             });
         }
 
@@ -462,11 +497,13 @@ namespace SSH_Helper.UI
         {
             if (_configService == null) return;
             var v = msg["reducedMotion"]?.Value<bool>();
-            if (v == null) return;
+            var cap = msg["iterationHistoryCap"]?.Value<int>();
+            if (v == null && cap == null) return;
             _configService.Update(c =>
             {
                 c.WindowState ??= new Models.WindowState();
-                c.WindowState.FlowCanvasReducedMotion = v.Value;
+                if (v != null) c.WindowState.FlowCanvasReducedMotion = v.Value;
+                if (cap is > 0) c.WindowState.FlowCanvasIterationHistoryCap = cap.Value;
             });
         }
 

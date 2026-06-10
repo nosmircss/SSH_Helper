@@ -22,6 +22,10 @@ export const DEFAULT_PANEL_SIZES: PanelSizes = {
   outputHeight: 200,
 };
 
+/** Cap for the inverse-zoom UI scale: full screen-size compensation down to zoom ≈ 1/2.25,
+ *  then flow-space chrome shrinks gracefully instead of dwarfing the blocks it belongs to. */
+export const UI_SCALE_MAX = 2.25;
+
 export interface UISlice {
   theme: 'dark' | 'light';
   reducedMotion: boolean;
@@ -46,6 +50,13 @@ export interface UISlice {
     problems: boolean;
   };
   panelSizes: PanelSizes;
+  // Run Output tab view state
+  outputTab: 'block' | 'run';
+  runOutputColor: boolean;
+  runOutputWrap: boolean;
+  runOutputFollow: boolean;
+  runOutputUnread: boolean;
+  runOutputPoppedOut: boolean;
   exportStatus: {
     hasErrors: boolean;
     errors: string[];
@@ -53,6 +64,10 @@ export interface UISlice {
   };
   diagnostics: NodeDiagnostic[];
   connectionNotice: { message: string; nonce: number } | null;
+  /** Inverse-zoom scale (1 → UI_SCALE_MAX) keeping flow-space chrome (connection handles,
+   *  band pills, iteration steppers) a near-constant screen size as the viewport zooms out.
+   *  Quantized to 0.05 steps so pan/zoom frames don't churn subscribers. */
+  uiZoomScale: number;
 
   setTheme: (theme: 'dark' | 'light') => void;
   toggleTheme: () => void;
@@ -83,11 +98,22 @@ export interface UISlice {
   togglePanel: (panel: keyof UISlice['panelsVisible']) => void;
   setPanelSize: (key: keyof PanelSizes, value: number) => void;
   restorePanelSizes: (sizes: Partial<PanelSizes>) => void;
+  setOutputTab: (tab: 'block' | 'run') => void;
+  setRunOutputUnread: (unread: boolean) => void;
+  toggleRunOutputColor: () => void;
+  toggleRunOutputWrap: () => void;
+  toggleRunOutputFollow: () => void;
+  restoreRunOutputPrefs: (prefs: Partial<{ runOutputColor: boolean; runOutputWrap: boolean; runOutputFollow: boolean }>) => void;
+  openRunOutputWindow: () => void;
+  closeRunOutputWindow: () => void;
+  setRunOutputPoppedOut: (v: boolean) => void;
   setExportStatus: (status: UISlice['exportStatus']) => void;
   clearExportStatus: () => void;
   setDiagnostics: (d: NodeDiagnostic[]) => void;
   showConnectionNotice: (message: string) => void;
   clearConnectionNotice: () => void;
+  /** Feed the current viewport zoom (from ReactFlow onMove); derives + stores uiZoomScale. */
+  syncUiZoomScale: (zoom: number) => void;
 }
 
 export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get) => ({
@@ -114,6 +140,12 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     problems: false,
   },
   panelSizes: { ...DEFAULT_PANEL_SIZES },
+  outputTab: 'block',
+  runOutputColor: true,
+  runOutputWrap: false,
+  runOutputFollow: true,
+  runOutputUnread: false,
+  runOutputPoppedOut: false,
   exportStatus: {
     hasErrors: false,
     errors: [],
@@ -121,6 +153,7 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   },
   diagnostics: [],
   connectionNotice: null,
+  uiZoomScale: 1,
 
   setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
@@ -268,6 +301,49 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     }));
   },
 
+  setOutputTab: (tab) => set((s) => ({
+    outputTab: tab,
+    runOutputUnread: tab === 'run' ? false : s.runOutputUnread,
+  })),
+
+  setRunOutputUnread: (unread) => set({ runOutputUnread: unread }),
+
+  toggleRunOutputColor: () => set((s) => {
+    const next = !s.runOutputColor;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, runOutputColor: next });
+    return { runOutputColor: next };
+  }),
+
+  toggleRunOutputWrap: () => set((s) => {
+    const next = !s.runOutputWrap;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, runOutputWrap: next });
+    return { runOutputWrap: next };
+  }),
+
+  toggleRunOutputFollow: () => set((s) => {
+    const next = !s.runOutputFollow;
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, runOutputFollow: next });
+    return { runOutputFollow: next };
+  }),
+
+  restoreRunOutputPrefs: (prefs) => set((s) => ({
+    runOutputColor: prefs.runOutputColor ?? s.runOutputColor,
+    runOutputWrap: prefs.runOutputWrap ?? s.runOutputWrap,
+    runOutputFollow: prefs.runOutputFollow ?? s.runOutputFollow,
+  })),
+
+  openRunOutputWindow: () => {
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.openRunOutputWindow });
+    // The output is now visible in the separate window, so any pending unread dot is moot.
+    set({ runOutputPoppedOut: true, outputTab: 'block', runOutputUnread: false });
+  },
+  closeRunOutputWindow: () => {
+    messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.closeRunOutputWindow });
+    // Docking back to the Run tab; clear unread like setOutputTab('run') would.
+    set({ runOutputPoppedOut: false, outputTab: 'run', runOutputUnread: false });
+  },
+  setRunOutputPoppedOut: (v) => set({ runOutputPoppedOut: v }),
+
   setExportStatus: (status) => {
     set({ exportStatus: status });
   },
@@ -288,4 +364,10 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   showConnectionNotice: (message) =>
     set((s) => ({ connectionNotice: { message, nonce: (s.connectionNotice?.nonce ?? 0) + 1 } })),
   clearConnectionNotice: () => set({ connectionNotice: null }),
+
+  syncUiZoomScale: (zoom) => {
+    if (!Number.isFinite(zoom) || zoom <= 0) return;
+    const next = Math.round(Math.min(UI_SCALE_MAX, Math.max(1, 1 / zoom)) * 20) / 20;
+    if (get().uiZoomScale !== next) set({ uiZoomScale: next });
+  },
 });
