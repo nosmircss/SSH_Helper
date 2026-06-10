@@ -40,6 +40,8 @@ The gap is **iteration attribution**, not recording infrastructure.
 - Block Output jumps to k's entry (`historyIndex`) for the selected block.
 - Everything outside the loop's subtree keeps the aggregate view.
 
+**Iteration-scoped panels (follow-up).** While an iteration is selected, the side panels make the scoping explicit and honest. The **Variables panel** shows an `iter-vars-banner` (`⏱ Iteration p/total · label`, red when the iteration failed) with a **Live** button to drop back to live values; it displays that iteration's frozen end-of-iteration snapshot rather than live state. **Block Output** shows an `iter-output-chip` (`⏱ p/total · label`) whenever the panel is iteration-scoped, and — crucially — renders **"(no output in this iteration)"** for a block that was never reached in the selected iteration, instead of silently falling back to the block's latest output. Selecting the **loop container** itself (which owns the stepper, not a per-iteration output) shows a hint — *"(loop container — select a block inside the loop to see its per-iteration output)"* — when it has no carried output of its own.
+
 **Label.** Foreach shows the stringified item value (truncated for display, full value on hover); While/Repeat show `#k`. The `⚠ n` chip counts failed iterations, cycles through them on click, and is hidden when none failed.
 
 **Nesting.** Outer at iteration i → inner stepper ranges over the inner iterations recorded inside i. Outer at ALL → inner ranges over all its iterations in time order, and stepping it sets the outer selection to the containing iteration (outer cluster updates to match).
@@ -121,7 +123,7 @@ totalIterations: Map<loopNodeId, number>               // survives eviction, for
 ## Out of scope (noted for later)
 
 - Live mid-run iteration browsing (the recording model built here supports it if ever wanted).
-- Variables-panel time-travel per iteration (the existing timeline scrub could be tied to iteration boundaries later).
+- **Variables-panel time-travel per iteration — shipped in the follow-up** (aad7deb / 6c0bfc8). Each `IterationRecord` carries an end-of-iteration variable snapshot (last completion within the iteration wins; for a failed iteration, the state at the failure). Snapshots are sanitized: heavy synthetic keys `_output` / `_outputwindow` are stripped and string values over 2000 chars are truncated. The Variables panel reads the snapshot of the globally-active iteration context (`selectActiveIterationContext`) and shows an `iter-vars-banner` with a Live button to return to live values.
 - Keyboard arrow-key stepping when the cluster is focused — nice-to-have, not required.
 
 ## Risks
