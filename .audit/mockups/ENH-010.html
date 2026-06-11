@@ -1,0 +1,75 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap b{font-weight:600}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.win{border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden}
+.bar{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #1c2330;background:#10151e;font-size:11px}
+.sel{border:1px solid #1c2330;border-radius:4px;padding:2px 6px;background:#0b0e13;color:#c9d4e3;white-space:nowrap}
+.sel small{color:#8294a8}
+.run{margin-left:auto;border:1px solid #2bd97c;border-radius:4px;padding:2px 10px;color:#2bd97c;background:rgba(43,217,124,.08)}
+.yaml{padding:8px 10px;line-height:1.55;font-size:11px}
+.yaml .c{color:#8294a8}.yaml .k{color:#4cc9f0}.yaml .v{color:#c9d4e3}
+.envline{background:rgba(255,92,92,.10);outline:1px dashed rgba(255,92,92,.45);border-radius:3px;padding:0 3px}
+.status{border-top:1px solid #1c2330;background:#10151e;padding:5px 8px;color:#8294a8;font-size:11px}
+.banner{margin:8px;border:1px solid rgba(255,180,84,.55);background:rgba(255,180,84,.10);border-radius:5px;padding:7px 9px;font-size:11px;color:#ffb454;line-height:1.5}
+.banner a{color:#4cc9f0;text-decoration:underline;cursor:pointer}
+.note{font-size:10px;color:#8294a8;margin:6px 2px 0;line-height:1.5}
+.bad{color:#ff5c5c}.good{color:#2bd97c}
+.dlg{margin-top:12px;border:1px solid #1c2330;border-radius:6px;background:#0e1219;padding:10px 12px}
+.dlg h4{margin:0 0 6px;font-size:11px;color:#c9d4e3;font-weight:600}
+.dlg ul{margin:6px 0;padding-left:18px;color:#8294a8;font-size:11px;line-height:1.6}
+.dlg ul b{color:#c9d4e3;font-weight:500}
+.btns{display:flex;gap:8px;margin-top:8px}
+.btn{border:1px solid #1c2330;border-radius:4px;padding:3px 10px;font-size:11px;color:#8294a8}
+.btn.pri{border-color:#4cc9f0;color:#4cc9f0;background:rgba(76,201,240,.08)}
+.arrow{color:#4cc9f0}
+</style></head><body>
+
+<div class="cols">
+  <div>
+    <p class="cap"><b>Before</b> — preset load after env "prod" was renamed</p>
+    <div class="win">
+      <div class="bar"><span class="sel">Preset: fw-session-timeout ▾</span><span class="sel">Env: Default ▾ <small>· 212 hosts</small></span><span class="run">▶ Run</span></div>
+      <div class="yaml">
+        <span class="c"># Tighten SSH timeouts on edge firewalls</span><br>
+        <span class="envline"><span class="k">environment:</span> <span class="v">prod</span></span> <span class="c"># ← renamed to "production"</span><br>
+        <span class="k">steps:</span><br>
+        &nbsp;&nbsp;- <span class="k">send:</span> <span class="v">config system global</span><br>
+        &nbsp;&nbsp;- <span class="k">send:</span> <span class="v">set admin-ssh-timeout 120</span>
+      </div>
+      <div class="status">Preset 'fw-session-timeout' requested environment 'prod', but it was not found.</div>
+    </div>
+    <p class="note"><span class="bad">●</span> Only feedback is one transient status-bar line — replaced by the next message. Run executes against <b>Default's 212 hosts</b> (10.20.0.0/16 lab fleet, not the prod firewalls) with no further check.</p>
+  </div>
+
+  <div>
+    <p class="cap"><b>After</b> — persistent banner at the Run button</p>
+    <div class="win">
+      <div class="bar"><span class="sel">Preset: fw-session-timeout ▾</span><span class="sel">Env: Default ▾ <small>· 212 hosts</small></span><span class="run">▶ Run</span></div>
+      <div class="banner">⚠ Declared environment <b>'prod'</b> not found — currently targeting <b>'Default'</b> (212 hosts: 10.20.1.1 …&nbsp;10.20.4.250).&ensp;<a>Pick environment…</a></div>
+      <div class="yaml">
+        <span class="c"># Tighten SSH timeouts on edge firewalls</span><br>
+        <span class="k">environment:</span> <span class="v">prod</span><br>
+        <span class="k">steps:</span><br>
+        &nbsp;&nbsp;- <span class="k">send:</span> <span class="v">config system global</span><br>
+        &nbsp;&nbsp;- <span class="k">send:</span> <span class="v">set admin-ssh-timeout 120</span>
+      </div>
+      <div class="status">Ready.</div>
+    </div>
+    <p class="note"><span class="good">●</span> Banner stays until the env mismatch is resolved — the wrong-fleet risk is visible right where Run is clicked.</p>
+  </div>
+</div>
+
+<p class="cap" style="margin-top:14px"><b>After</b> — rename also offers to cascade YAML headers (folder overrides already cascade)</p>
+<div class="dlg">
+  <h4>Rename environment&ensp;'prod' <span class="arrow">→</span> 'production'</h4>
+  <ul>
+    <li><b>3 presets</b> declare <b>environment: prod</b> in their YAML header — update them to 'production'?</li>
+    <li>fw-session-timeout&ensp;·&ensp;core-bgp-audit&ensp;·&ensp;cert-rotate-edge</li>
+  </ul>
+  <div class="btns"><span class="btn pri">Update 3 presets</span><span class="btn">Rename only</span><span class="btn">Cancel</span></div>
+</div>
+
+</body></html>

@@ -1,0 +1,41 @@
+{
+ "id": "UX-035",
+ "title": "First run is a blank dead-end: empty host grid with no empty-state guidance or onboarding path",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "cross-startup",
+ "lens": "ux",
+ "existing_state": "On a true first launch (no config.json), ConfigurationService.Load() silently writes defaults (Services/ConfigurationService.cs:48-54) and the main window opens with a host grid containing only the checkbox column and Host_IP (InitializeDataGridView, Form1.cs:602-652) — no placeholder text, no 'add a host or open a CSV' hint, and no explanation that extra columns become {{variable}}s (the app's core mechanic). RestoreInitialEnvironmentState (Form1.cs:1683-1705) has no first-run branch: with no environments and no saved state, neither restore path fires, so nothing is loaded and nothing is suggested. The only 'first adoption' affordance — creating the Default environment from the current grid — is buried inside Manage Environments (EnsureDefaultEnvironmentForFirstAdoption, Form1.cs:2219-2228, only reached via TsbManageEnvironments_Click at 1937). The only guidance is reactive error dialogs after a failed run attempt ('No hosts selected...', Form1.cs:12764-12768, 12784-12788); the status bar just says 'Ready' (Form1.cs:402). Notably the codebase already has the empty-state pattern — the Favorites tab shows 'No favorites yet. Right-click a preset...' (Form1.Designer.cs:605) — it just was never applied to the primary surface.",
+ "recommendation": "Paint an empty-state overlay on the host grid area whenever it has zero host rows (matching the lblFavoritesEmpty pattern, so it also helps after clearing): a short headline ('No hosts yet — type an IP below, or File > Open CSV. Any extra column becomes a {{variable}} in your commands.') with 2-3 action buttons wired to existing handlers — 'Import hosts from CSV…' (OpenCsvFile, Form1.cs:9191), 'Add host manually' (focus the first Host_IP cell), and 'Load a sample script' (one of ScriptSamples/). Hide it as soon as a row exists. Optionally add a one-time first-run tip strip pointing at Environments, the Scheduler, and the Flow Canvas (config flag).",
+ "user_benefit": "A brand-new user (or a colleague the owner shares the exe with) gets from launch to a first successful multi-host command in 30 seconds instead of discovering the CSV-driven workflow by trial and error from a dark, silent window.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "1683-1705",
+   "note": "first run: environments empty and SavedState null, so neither restore branch runs — grid stays empty"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "602-652",
+   "note": "grid initialized with Select + Host_IP columns only; no empty-state UI"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "2219-2228, 1937",
+   "note": "Default-environment adoption only reachable via Manage Environments click"
+  },
+  {
+   "file": "Form1.Designer.cs",
+   "lines": "605",
+   "note": "lblFavoritesEmpty proves the empty-state pattern already exists in this codebase"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "12764-12768, 12784-12788",
+   "note": "only guidance today is reactive 'No hosts selected/available' dialogs after a failed run attempt"
+  }
+ ],
+ "mockup_idea": "Before/after of the main window's host-grid quadrant on first launch: before = empty grid with lone Host_IP header; after = centered empty-state card with app glyph, 'No hosts yet — add devices to run commands against', a one-line {{variable}} explainer with a tiny 3-column example table, and three buttons: [Import CSV…] [Add host manually] [Load sample script].",
+ "merged_from": 2
+}

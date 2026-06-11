@@ -1,0 +1,36 @@
+{
+ "id": "UX-042",
+ "title": "Export diagnostics are miscalibrated: routine round-trip notices spam the Problems panel while real warnings are invisible",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-bridge",
+ "lens": "ux",
+ "existing_state": "Every imported container that takes the (good, lossless) snippet round-trip path on export adds a Warning diagnostic 'Container block <x> is exported from its stored YAML snippet' (Services/FlowCanvasBridge.cs:1330-1334) — so any Apply/Run on an unmodified imported script with N containers produces N warnings, every time. Meanwhile genuinely consequential warnings (parallel truncation at 2266-2272, unreachable-node exclusion at ~1140-1152) share the same severity. React-side, success-path warnings go only to console.warn (FlowCanvas/src/stores/messageBridge.ts:209-211), the Problems panel defaults hidden (uiSlice.ts:140), and the toolbar badge counts errors only (Toolbar.tsx:21, 257-269). So the user either never sees warnings at all, or opens the Problems panel and finds it dominated by no-op snippet notices that train them to ignore the list.",
+ "recommendation": "In FlowCanvasBridge: drop the snippet round-trip diagnostic (or add an Info severity and demote it) — it describes the intended default path, not a problem. Keep Warning for anything that changes the emitted YAML relative to what's on the canvas. In Toolbar.tsx, extend the Problems badge to show warning count (amber) alongside error count (red), and auto-open or toast the panel when a new YAML-affecting warning arrives after Apply/Run.",
+ "user_benefit": "Warnings become trustworthy: an amber badge means 'the YAML you just exported differs from the canvas', not 'business as usual'. This is the cheap half of making the parallel-truncation class of problems visible.",
+ "evidence": [
+  {
+   "file": "Services/FlowCanvasBridge.cs",
+   "lines": "1326-1341",
+   "note": "Unconditional warning on the normal snippet round-trip path"
+  },
+  {
+   "file": "FlowCanvas/src/stores/slices/uiSlice.ts",
+   "lines": "135-141",
+   "note": "problems panel default hidden"
+  },
+  {
+   "file": "FlowCanvas/src/panels/ProblemsPanel.tsx",
+   "lines": "12-52",
+   "note": "Panel renders nothing unless toggled; errors-before-warnings list"
+  },
+  {
+   "file": "FlowCanvas/src/panels/Toolbar.tsx",
+   "lines": "21, 256-269",
+   "note": "Badge shows errorCount only"
+  }
+ ],
+ "mockup_idea": "Before/after of the toolbar Problems button and panel: before — plain 'Problems' with a hidden panel containing five identical 'exported from its stored YAML snippet' rows; after — 'Problems 1' amber badge, panel showing the single actionable 'Parallel branch ... first node only' row with click-to-focus.",
+ "merged_from": 1
+}

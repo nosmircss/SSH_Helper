@@ -1,0 +1,36 @@
+{
+ "id": "BUG-010",
+ "title": "A misspelled function name in value position silently becomes the literal call text — which then gets sent to hosts or compared in conditions",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-functions",
+ "lens": "correctness",
+ "existing_state": "Function dispatch in value contexts falls through on unknown names instead of erroring. For `- set: cmd = uper(name)`: SetCommand tries TryEvaluateFunctionExpression (Services/Scripting/Commands/SetCommand.cs:178), which parses the call but hits the legacy switch's `default: return false` (Services/Scripting/JsonUtilities.cs:562-563); the chain then ends at ValueResolver.ResolveExpressionValue, which returns the raw expression text as a string (Services/Scripting/ValueResolver.cs:288). The variable now holds the literal string \"uper(name)\", and a later `- send: {{cmd}}` executes that literal on every host. The same fall-through exists in JsonUtilities.ResolveJsonValue (JsonUtilities.cs:312-333) and in inline substitution `{{uper(name)}}` via ScriptContext.ResolveVariableExpression (ScriptContext.cs:687-704). By contrast, the SAME typo inside an if:/while:/assert: condition throws FormatException(\"Unknown function: ...\") (Services/Scripting/ExpressionParser.cs:422-437) — so the engine already knows how to fail, just inconsistently. ScriptParser performs no static validation of function names, so nothing catches this before runtime either.",
+ "recommendation": "In the value-resolution chain (ValueResolver.ResolveExpressionValue and JsonUtilities.ResolveJsonValue), when TryParseFunctionCall succeeds (the expression is unambiguously a single name(...) call with an identifier name) but neither the registry, the legacy switch, nor json.* claims the name, throw the same FormatException the ExpressionParser throws instead of falling through to the literal. Additionally, add a parse-time validation warning in ScriptParser that checks called names against the union of FunctionRegistry.RegisteredNames + the legacy switch names + the json.* set, so typos surface in the editor before a fleet run.",
+ "user_benefit": "A one-character typo currently changes behavior silently: garbage commands run on every host, or a condition variable holds a non-empty literal string that is always truthy. Failing at parse/eval time turns a silent fleet-wide misfire into an immediate, pinpointed error.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ValueResolver.cs",
+   "lines": "252-288",
+   "note": "ResolveExpressionValue final fallback `return expr;` returns the literal call text"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\JsonUtilities.cs",
+   "lines": "312-333, 562-563",
+   "note": "value-position fall-through past TryEvaluateFunctionExpression; legacy switch default returns false"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SetCommand.cs",
+   "lines": "178-197",
+   "note": "set: resolution chain ends in ResolveExpressionValue"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionParser.cs",
+   "lines": "422-437",
+   "note": "condition context throws 'Unknown function' — the engine is inconsistent, not incapable"
+  }
+ ]
+}

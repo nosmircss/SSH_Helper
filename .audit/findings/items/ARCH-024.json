@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-024",
+ "title": "Retry temporarily mutates shared step.OnError on the parsed script tree — races under parallel+call, and blocks parallel multi-host execution",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "perf",
+ "existing_state": "The retry wrapper writes the per-attempt on_error policy directly onto the parsed step object: `step.OnError = onErrorForAttempt` forcing \"stop\" on non-final attempts, restored in a finally (Services/Scripting/ScriptExecutor.cs:456-471). ScriptStep instances are shared, not per-execution: the multi-host script path parses once and reuses the same Script object for every host (\"Parse the script once\", Services/SshExecutionService.cs:505-511, host loop 584-597), loops re-run the same step instances each iteration, ParallelCommand runs child steps concurrently on one context via Task.Run (Services/Scripting/Commands/ParallelCommand.cs:40-61), and ExecuteSubroutineAsync executes the same `definition.Subroutine.Steps` list on every call (ScriptExecutor.cs:656, invoked from CallCommand). So two parallel branches that `call` the same subroutine execute identical ScriptStep objects concurrently — if a step in that subroutine has `retry:` plus `on_error: continue`, one branch's mid-retry \"stop\" override is visible to the other branch's failure check (~43 commands read the policy via the static `CommandResult.ApplyOnError(step, …)` funnel, IScriptCommand.cs:136-141), silently turning a continue into an abort. AssignStepPaths also writes into the shared tree at every ExecuteAsync start (ScriptExecutor.cs:209-219). Today multi-host runs are sequential (584-597), which masks the cross-host hazard — but this shared-mutable-parse-tree design is exactly what stands in the way of parallelizing fleet runs, the most obvious scaling feature for this app.",
+ "recommendation": "Stop mutating parsed state. Carry the per-attempt effective on_error out-of-band: e.g., an `AsyncLocal<string?>` override set by ExecuteStepAsync around ExecuteStepCoreAsync and consulted inside `CommandResult.ApplyOnError` (single funnel, so one change covers all ~43 commands), or thread an `effectiveOnError` argument through. For the parallel-multi-host future, add a Script.Clone()/per-host deep copy at run start so each host executes a private tree — that single primitive makes both the retry race and future concurrent host runs safe.",
+ "user_benefit": "Eliminates a silent error-handling flip (script aborts despite on_error: continue) in parallel+call+retry scripts, and removes the structural landmine standing between this app and parallel multi-host execution.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptExecutor.cs",
+   "lines": "456-471",
+   "note": "step.OnError = onErrorForAttempt mutates the shared parsed step during retry attempts"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ParallelCommand.cs",
+   "lines": "40-61",
+   "note": "parallel branches execute on one shared context via Task.Run; comment at 45 acknowledges shared state"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptExecutor.cs",
+   "lines": "656, 209-219, 517-531",
+   "note": "ExecuteSubroutineAsync runs the same ScriptStep instances on every call; AssignStepPaths writes the shared tree each run; ApplyOnError reads step.OnError"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "505-511, 584-597",
+   "note": "one parsed Script reused across all hosts; hosts currently sequential (masks the cross-host hazard)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/IScriptCommand.cs",
+   "lines": "136-141",
+   "note": "CommandResult.ApplyOnError — the single funnel where an override could be consulted instead"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

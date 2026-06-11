@@ -1,0 +1,36 @@
+{
+ "id": "BUG-052",
+ "title": "Capture-mode 'natural completion' can fire early on prompt-like output, killing the still-running remote command",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "M",
+ "area": "terminal",
+ "lens": "correctness",
+ "existing_state": "Capture mode (interactive with `command:`) decides the command is finished per received chunk: after dispatch, `ShouldArmCaptureNaturalCompletion` arms on the first chunk that contains the command text as a case-insensitive substring of any line (Services/Terminal/InteractiveTerminalService.cs:2690-2712) OR simply isn't prompt-terminated (2674-2683) — i.e., effectively any output arms it. Completion then triggers when the last non-empty line of a chunk matches the detected prompt regex, falling back to `PromptDetector.IsLikelyPrompt` heuristics when startup prompt detection failed (2714-2734; call sites 800-814 windowed, 1390-1404 headless). Chunk boundaries are arbitrary network reads, so a mid-output chunk ending on a prompt-looking line (device status dumps echoing `hostname #`, log lines ending in `$`/`>`, cat of a session log) completes the capture early. On `natural_complete` the step returns Ok with the truncated transcript (563) and the `finally` block disconnects the separate SSH session (573-575) — terminating the still-running remote command (the canonical use case is long-running operations like upgrades), while the step and any `capture:` variable report success.",
+ "recommendation": "Make completion stricter: require the prompt match to be anchored at the true end of accumulated output (carry an incomplete-final-line buffer like the transcript path already does, rather than testing each raw chunk), require the detected prompt regex when available instead of `IsLikelyPrompt`, and debounce — confirm the prompt persists across a short quiet window (e.g. 300-500 ms with no further output) before declaring `natural_complete`. Keep `max_seconds`/`max_lines` as the hard caps.",
+ "user_benefit": "Prevents the worst capture failure mode: a long-running command (firmware upgrade, migration) being SIGHUP-killed mid-flight because its own output happened to look like a prompt, while the script reports the step as successfully completed with a truncated transcript.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "2674-2683",
+   "note": "arming returns true for any non-prompt chunk or any line containing the command substring"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "2690-2734",
+   "note": "case-insensitive substring echo match; completion tests only the last line of the current chunk; IsLikelyPrompt fallback"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "800-814, 1390-1404",
+   "note": "per-chunk arm/complete in both windowed and headless capture loops"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "563, 573-575",
+   "note": "natural_complete returns Ok; finally disconnects the session, killing the remote command"
+  }
+ ]
+}

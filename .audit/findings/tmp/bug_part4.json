@@ -1,0 +1,157 @@
+[
+ {
+  "id": "BUG-025",
+  "title": "Pool lease race: parallel presets on one host release the wrong lease and leak standalone SSH connections",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "ssh-execution",
+  "lens": "reliability",
+  "existing_state": "`SshConnectionPool.CreateSessionAsync` leases a key with `_leasedKeys.TryAdd(key, true)`; if the key is already leased it builds a standalone client via `CreateConnectionAsync` (`SshConnectionPool.cs:244-252`) that is never put into `_connections`. Every caller's `finally` then unconditionally calls `ReleaseSession(host, username, password)` (`SshExecutionService.cs:1570`, `:2154`), which does `_leasedKeys.TryRemove(key, ...)` (`SshConnectionPool.cs:275`) — removing the *single* lease entry regardless of which caller owns it. This is reachable today: the folder-run \"Run presets in parallel\" option (`ExecuteFolderAsync`, runPresetsInParallel at `:713`) runs multiple presets against the *same* host concurrently, each calling `ExecutePresetOnHostAsync`->`ExecuteWithPool`/`ExecuteScriptWithPool`->`CreateSessionAsync` with an identical key. Sequence: preset A leases and uses the pooled connection; B and C get standalone connections; B finishes first and `ReleaseSession` clears A's lease; a later preset D then re-leases and reuses the pooled connection that A is *still actively driving* — two callers issuing commands on the same Rebex scripting stream -> interleaved/garbled output and wrong per-preset results. Separately, the standalone clients (B, C) are leaked: `SshShellSession.Dispose` (`:1446-1474`) disposes only the scripting/terminal owners, never the `Ssh` client, and these standalone clients are not in the pool to be swept, so each collision leaks a live SSH connection until process exit.",
+  "recommendation": "Track lease ownership per session instance, not per key: return a lease token/handle from `CreateSessionAsync` and have `ReleaseSession` only clear the lease it actually created (e.g. only the caller that won `TryAdd`). For the standalone-collision path, either dispose the standalone `Ssh` client explicitly when its session ends (have the session own and disconnect it), or serialize same-key sessions so a second concurrent caller waits rather than spawning an untracked connection. Add a regression test that runs two concurrent `CreateSessionAsync` calls for the same key and asserts the pooled connection is never handed to two live sessions and that standalone clients are disconnected.",
+  "user_benefit": "Stops corrupted/mixed-up output when running multiple presets in parallel against one host, and stops the app from leaking live SSH sessions to that host on every collision.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs", "lines": "244-252", "note": "already-leased key creates an untracked standalone client"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs", "lines": "272-280", "note": "ReleaseSession removes the only lease entry regardless of owner"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs", "lines": "1446-1474", "note": "Dispose never disposes the Ssh client -> standalone client leaks"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "713-741", "note": "parallel-preset folder run drives same-key concurrent CreateSessionAsync"}
+  ]
+ },
+ {
+  "id": "BUG-026",
+  "title": "Pool health check sends `echo 1` and uses a prompt regex missing arrow terminators — permanent connection churn for some devices",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "ssh-execution",
+  "lens": "reliability",
+  "existing_state": "`IsConnectionHealthyAsync` actively probes a pooled connection at most every 30s by `scripting.Send(\"echo 1\\r\")` and waiting for `ScriptEvent.FromRegex(@\"[#$>%]\\s*$\")` with a 5s timeout (`SshConnectionPool.cs:552-558`). That terminator set omits the arrow-style prompt terminators the rest of the engine explicitly supports — `PromptDetector.PromptTerminators` includes arrow glyphs (`Utilities/PromptDetector.cs:11`) and `SshShellSession.Patterns.ShellPrompt` matches them (`SshShellSession.cs:123`). So a host with a starship/oh-my-zsh arrow prompt never matches the health-check regex; `ReadUntil` times out at 5s, the catch returns false, and the connection is removed and recreated (`GetOrCreateAsync :156-160`). Every reuse after the 30s window therefore tears down and re-handshakes the connection, defeating pooling entirely for those hosts. Additionally `echo 1` is a literal command injected into every pooled host's session — on network appliances (FortiGate/Cisco) `echo` is often invalid and may be logged as a failed command on the device.",
+  "recommendation": "Use the same prompt-terminator class the engine already standardized on (include the arrow glyphs, ideally reuse `PromptDetector`/`Patterns.ShellPromptPattern`) for the health probe, and prefer a no-op that doesn't pollute device logs — send a bare CR (or the session's keepalive) and wait for the known prompt regex rather than `echo 1`. Better, reuse the connection's already-detected `_promptPattern` instead of a hardcoded regex.",
+  "user_benefit": "Pooling actually works for hosts with modern arrow prompts instead of silently re-connecting on every command batch, and stops injecting bogus `echo` commands into appliance logs.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs", "lines": "554-557", "note": "echo 1 probe + regex [#$>%] omits arrow terminators"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\PromptDetector.cs", "lines": "11", "note": "engine's prompt terminators include arrow glyphs the probe ignores"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs", "lines": "156-160", "note": "failed health check removes+recreates the connection"}
+  ]
+ },
+ {
+  "id": "BUG-027",
+  "title": "Host CSV save truncates the file in place — a failed save destroys the host inventory with no backup",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "persistence-config",
+  "lens": "data-integrity",
+  "existing_state": "CsvManager.SaveToFile opens the target with `new StreamWriter(filePath, false, ...)` (Services/CsvManager.cs:78), which truncates the existing file immediately, then streams the grid out row by row (:83-102). There is no temp-file swap and no backup copy anywhere in the path (Form1.SaveCsvToFile at Form1.cs:9310-9325 calls it directly). If the process dies or the disk fills mid-write, the operator's source-of-truth host list is gone; the catch in TrySaveCsvToPath (Form1.cs:9303-9306) shows \"Failed to save file\" after the original content has already been destroyed. This is the file driving which hosts every command and scheduled job targets.",
+  "recommendation": "Write to filePath + \".tmp\" and finish with File.Replace (mirroring JsonFileWriter.WriteJsonAtomic, Utilities/JsonFileWriter.cs:21-88 — extract a text variant or generalize it), optionally keeping a .bak of the previous CSV. One method change in CsvManager.SaveToFile plus a unit test for the interrupted-write case.",
+  "user_benefit": "A crash or full disk during Save can no longer delete the entire host inventory; the worst case becomes \"old file still intact\".",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\CsvManager.cs", "lines": "76-103", "note": "StreamWriter(filePath, false) truncate-in-place, no temp/backup"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "9288-9325", "note": "TrySaveCsvToPath/SaveCsvToFile call it directly; error dialog fires after truncation"}
+  ]
+ },
+ {
+  "id": "BUG-028",
+  "title": "Installing an update exits via Environment.Exit, skipping the shutdown save — session state lost and stale shutdown anchor fabricates 'missed run' history",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "cross-startup",
+  "lens": "data-integrity",
+  "existing_state": "UpdateService.LaunchUpdaterAndExit starts the PowerShell updater and calls Environment.Exit(0) (Services/UpdateService.cs:423-424), invoked from UpdateDialog after install confirmation (UpdateDialog.cs:576). Environment.Exit does not raise FormClosing, so Form1_FormClosing (Form1.cs:3932-3948) never runs: SaveConfiguration is skipped — losing window geometry/splitters, the active environment's grid snapshot, SavedState (host grid/selection/preset), recent files, sort order, username, and the host-password-to-Credential-Manager migration (Form1.cs:14625-14702) — _jobExecutionService.Stop() is never called, and LastAppShutdownUtc is never written (Form1.cs:3946). On the next launch, RecordMissedSchedulerRunsOnStartup (Form1.cs:15258-15283) anchors missed-run detection to the PREVIOUS clean shutdown, and DetectMissedRunSummaries counts every cron occurrence since that anchor with no check that the job actually ran (Services/SchedulingService.cs:148-181) — so every recurring run that genuinely executed during the pre-update session gets a false 'skipped N runs' summary written into job history. The pre-install ConfirmExitWorkflow hook (UpdateDialog.cs:563 -> Form1.cs:14891-14917) only resolves dirty CSV/preset prompts; it does not save config.",
+  "recommendation": "Before calling LaunchUpdaterAndExit in UpdateDialog (or inside the _confirmExitBeforeInstall callback in Form1), run the same shutdown sequence as Form1_FormClosing: stop the job execution service, set LastAppShutdownUtc, and call SaveConfiguration — then exit. Alternatively have LaunchUpdaterAndExit accept a pre-exit callback, or set _exitConfirmed and call the main form's Close() so the normal FormClosing path runs, starting the updater from FormClosed.",
+  "user_benefit": "Updating the app stops silently discarding the session's layout/host-grid state and stops polluting job history with bogus 'skipped run' records for jobs that actually ran.",
+  "mockup_idea": "",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\UpdateService.cs", "lines": "388-425", "note": "LaunchUpdaterAndExit ends with Environment.Exit(0) — FormClosing never fires"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "3932-3948", "note": "the only place LastAppShutdownUtc is set and SaveConfiguration is called on shutdown"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "15258-15283", "note": "RecordMissedSchedulerRunsOnStartup trusts LastAppShutdownUtc as the downtime start"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SchedulingService.cs", "lines": "148-181", "note": "DetectMissedRunSummaries counts every cron occurrence since the anchor with no run-history cross-check"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UpdateDialog.cs", "lines": "563-576", "note": "confirm-exit hook covers only dirty CSV/presets, then LaunchUpdaterAndExit"}
+  ]
+ },
+ {
+  "id": "BUG-029",
+  "title": "Renaming an environment silently breaks script environment pins and folder overrides — presets then run against whatever environment is active",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "persistence-config",
+  "lens": "correctness",
+  "existing_state": "EnvironmentService.RenameEnvironment (Services/EnvironmentService.cs:216-255) re-keys the map and follows the active/base pointers, but nothing cascades to the two other places environment names are stored: YAML scripts' `environment:` headers (preset content) and per-folder FolderInfo.BaseEnvironment overrides (Models/FolderInfo.cs:12). After a rename, loading a preset that declares the old name hits the missing-environment branch in ApplyPresetEnvironmentOnPresetLoad (Form1.cs:2186-2192): a status-bar message is shown, the auto-switch is skipped, and the preset remains loaded against the CURRENTLY ACTIVE environment's host grid. In a multi-host fleet tool this means a script pinned to e.g. \"staging\" can be executed against the production host list with only a transient status-bar hint, and folder base-environment overrides dangle silently.",
+  "recommendation": "On rename, cascade: update FolderInfo.BaseEnvironment entries matching the old name (Services/PresetManager folders via the same config Update), and scan preset Commands for a YAML `environment:` header equal to the old name, offering a one-click rewrite (the parser already exposes TryGetScriptDeclaredEnvironment, Form1.cs:2201+). Independently, harden the failure mode: when a preset's declared environment is missing, raise a modal/blocking confirmation before run rather than a status-bar note.",
+  "user_benefit": "Eliminates a wrong-target hazard: renaming an environment can currently cause environment-pinned scripts to run against the wrong host fleet with effectively no warning.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\EnvironmentService.cs", "lines": "216-255", "note": "rename updates only the map + active/base pointers"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\FolderInfo.cs", "lines": "8-12", "note": "folder BaseEnvironment override stores the name, never rewritten"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "2186-2192", "note": "missing environment -> status-bar message only; preset stays loaded on active environment"}
+  ]
+ },
+ {
+  "id": "BUG-030",
+  "title": "Interactive window errors vanish into a deliberate no-op and the step still reports success",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "terminal",
+  "lens": "correctness",
+  "existing_state": "When the terminal pump crashes or the connection drops in window mode (shared or separate, no `command:`), the error is invisible and the script step succeeds anyway. The chain: every `[interactive-error] {ex.Message}` is routed through `AppendOutputSafe` (Services/Terminal/InteractiveTerminalService.cs:1940, 2123, 2246, 1037) into `InteractiveTerminalForm.AppendOutput`, which is an intentional no-op (Forms/InteractiveTerminalForm.cs:168-172) — the window just closes with no explanation. The close reason is set to error/disconnected (InteractiveTerminalService.cs:1935-1943, 1687-1704, 1990-1993), but `RunSeparateAsync` returns `InteractiveTerminalRunResult.Ok(transcript, closeReason)` regardless of that reason (InteractiveTerminalService.cs:416), as does `RunSharedAsync` (line 310). `InteractiveCommand` then maps `Success == true` to `CommandResult.Ok()` (Services/Scripting/Commands/InteractiveCommand.cs:29-48), so the script continues as if the session completed normally. Capture mode does check error/disconnected (InteractiveTerminalService.cs:553-561) — window mode is the gap. The only trace is the `close_reason` field buried in the history's Interactive tab. The headless pump even discards the exception object entirely (`catch (Exception)` without binding, InteractiveTerminalService.cs:2090-2093).",
+  "recommendation": "Two small changes: (1) in `RunSeparateAsync`/`RunSharedAsync`, treat close reason `error` as a step failure (and at minimum emit a `ScriptOutputType.Error` line for `disconnected` so it appears in the run output), mirroring the capture-mode checks at 553-561; (2) surface the error text — either implement `AppendOutput` as a one-line status overlay/message box before close, or route the `[interactive-error]` string into `context.EmitOutput(..., Error)` since the form path is dead. Thread the actual exception message into the failure result instead of the generic strings.",
+  "user_benefit": "Today a mid-session SSH failure makes the terminal window silently disappear and the rest of the script keeps running against a fiction of success — later steps then fail confusingly or, worse, the run is recorded green. Users get the real error at the moment it happens and a correctly failed step.",
+  "mockup_idea": "Before: terminal window simply gone, run output shows nothing. After: run output shows 'interactive step failed: <Rebex message> (connection lost)' in red and the step is marked failed.",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs", "lines": "168-172", "note": "AppendOutput is a documented no-op — the only sink for interactive error text"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "1935-1943", "note": "pump exception: close reason Error, message sent to the no-op, window closed"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "310, 416", "note": "RunSharedAsync/RunSeparateAsync return Ok() regardless of error/disconnected close reason"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\InteractiveCommand.cs", "lines": "29-48", "note": "Success==true maps straight to CommandResult.Ok()"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "553-561, 2090-2093", "note": "capture mode correctly fails on disconnected/error — window mode lacks the same check; headless pump discards the exception detail"}
+  ]
+ },
+ {
+  "id": "BUG-031",
+  "title": "Password-only Vault secrets can never authenticate (all-or-nothing username+password read)",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "integrations",
+  "lens": "correctness",
+  "existing_state": "VaultCredentialProvider always requests BOTH keys: `var keys = new[] { usernameKey, passwordKey }` with defaults username/password (Services/Vault/VaultCredentialProvider.cs:47, 86-87). VaultService.ReadSecretKeysAsync is all-or-nothing: if ANY requested key is absent from the secret it throws a VaultException 'Secret ... has no key ...' (Services/Vault/VaultService.cs:132-139). That exception is then swallowed by the provider's catch (line 59-63) -> returns false -> silent fallback to the toolbar default password. Net effect: a very common Vault layout where the secret stores only `password` (and the username comes from the grid's username column) is impossible to use via vault_path — the read always throws on the missing `username` key, and the user gets no message explaining why. The `result.TryGetValue(usernameKey,...)` tolerance at lines 51-52 is unreachable because the read already threw.",
+  "recommendation": "Make the username key optional. Either (a) read keys independently so a missing username key yields a null username instead of failing the whole read, or (b) when usernameKey wasn't explicitly specified via the `#user,pass` suffix, request only the password key and let host.Username keep the grid value. Add a ReadSecretKeysAsync overload (or a `requiredKeys` set) so the provider can tolerate a missing username while still requiring the password.",
+  "user_benefit": "Lets operators store just a password in Vault (the most common pattern) with the username coming from the host grid, instead of being forced to duplicate usernames into every secret or silently failing.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultCredentialProvider.cs", "lines": "47-57", "note": "always asks for username+password; success requires non-empty password"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs", "lines": "132-139", "note": "throws if any requested key missing -> whole read fails"}
+  ]
+ },
+ {
+  "id": "BUG-032",
+  "title": "JsonFileWriter's fallback path can destroy both the old and the new file when File.Replace fails",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "ui-utilities",
+  "lens": "data-integrity",
+  "existing_state": "When File.Replace throws (classic Windows trigger: antivirus/indexer briefly locks the just-written .tmp or the target), WriteJsonAtomic falls back to File.Delete(path) at Utilities/JsonFileWriter.cs:69 followed by File.Move(tempPath, path) at :72. Two failure modes: (1) a crash between Delete and Move leaves no file at all; (2) if Delete succeeds but Move throws (the same transient lock on the .tmp that made Replace fail), the finally block at :74-87 deletes the temp file — the original is already gone and the new content is actively destroyed. For history run payloads written with createBackup: false (Services/HistoryStorageService.cs:468, Services/JobHistoryService.cs:227) there is no .bak to recover from. The bare catch blocks at :43 and :63 also discard the reason Replace failed, so the destructive fallback engages on any exception including UnauthorizedAccessException.",
+  "recommendation": "Restructure the fallback so the live file is never deleted: move the original to {path}.bak (atomic rename on same volume) instead of File.Delete, then move the temp into place; on failure, move the .bak back and rethrow or report. In the finally block, only delete the temp file if the swap succeeded — when it failed, leave the .tmp on disk as the surviving copy of the data. Narrow the catch around File.Replace to IOException/UnauthorizedAccessException and log the exception so repeat failures are diagnosable.",
+  "user_benefit": "Eliminates a silent data-destruction path in the primitive that guards execution history and job history — an AV scan racing a save should never be able to delete a history file outright.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JsonFileWriter.cs", "lines": "30-88", "note": "Replace-fail fallback: Delete(path) :69, Move(temp) :72, finally deletes temp :74-87 even when Move failed; bare catch :43,:63"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\HistoryStorageService.cs", "lines": "468", "note": "Per-run history payloads written with createBackup: false — total loss if the fallback misfires"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobHistoryService.cs", "lines": "227,280", "note": "Job history payloads also createBackup: false"}
+  ]
+ }
+]

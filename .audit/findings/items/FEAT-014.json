@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-014",
+ "title": "Terminal has no find-in-scrollback, and the only buffer actions hide in the invisible system menu",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "M",
+ "area": "terminal",
+ "lens": "ux",
+ "existing_state": "There is no search capability anywhere in the terminal (grep for find/search across Forms/InteractiveTerminalForm.cs and UI/InteractiveTerminalViewportControl.cs: zero hits) — to locate an error in 10,000 lines of device output the user must scroll manually or Copy All into another editor. The three buffer actions that do exist (\"Copy All to Clipboard\", \"Clear Scrollback\", \"Reset Terminal\") are appended to the Win32 system menu via AppendMenu P/Invoke (Forms/InteractiveTerminalForm.cs:545-558, dispatched in WndProc 235-258) — reachable only by clicking the window icon or Alt+Space, an affordance new users will never discover. There is also no \"Save buffer to file\": full transcripts land in history's Interactive tab after the fact, but nothing exports the live buffer (CopyAllToClipboard at form 488-507 is clipboard-only).",
+ "recommendation": "Add a Ctrl+F find bar (small overlay docked top-right of the viewport) that searches the full Rebex buffer including history — the data access already exists via the same path BuildClipboardText uses (InteractiveTerminalService.cs Copy All provider) — with next/previous, highlight via the existing selection mechanism, and Esc to dismiss. Move/duplicate Copy All, Clear Scrollback, Reset Terminal, plus a new \"Save Buffer As…\", into a normal right-click context menu (relocating paste to a menu item alongside, which also makes paste discoverable) or a slim toolbar.",
+ "user_benefit": "Finding one failed interface in a wall of 'show interface' output goes from copy-everything-into-Notepad to two keystrokes; the buffer actions users already paid for become discoverable.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs",
+   "lines": "545-558",
+   "note": "Buffer actions only exist as system-menu (Alt+Space) entries via AppendMenu P/Invoke"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs",
+   "lines": "488-507",
+   "note": "CopyAllToClipboard is clipboard-only; no save-to-file"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\InteractiveTerminalViewportControl.cs",
+   "lines": "1-810",
+   "note": "No find/search code exists in the viewport or form (verified by grep)"
+  }
+ ],
+ "mockup_idea": "Terminal with a compact find bar overlay top-right ('error|  3/17  ^ v  Aa  x') with matches highlighted in the buffer; alongside, a right-click menu: Paste / Copy All / Save Buffer As… / Clear Scrollback / Reset Terminal.",
+ "merged_from": 1
+}

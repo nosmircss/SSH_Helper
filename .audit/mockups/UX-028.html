@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>UX-028 — Themed input prompt</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  h1{font-size:13px;margin:0 0 4px;color:#c9d4e3;font-weight:600}
+  .sub{color:#8294a8;font-size:11px;margin:0 0 12px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 6px}
+  .cap.before{color:#ff5c5c}.cap.after{color:#2bd97c}
+  .stage{position:relative;height:218px;border:1px solid #1c2330;border-radius:6px;overflow:hidden;background:#1a1a1b}
+  .rows{position:absolute;inset:0;padding:26px 12px;opacity:.35;font-size:10px;color:#9aa7b5;line-height:1.9}
+  .bar{position:absolute;top:0;left:0;right:0;height:18px;background:#252526;border-bottom:1px solid #303030;
+       color:#808080;font-size:9px;line-height:18px;padding:0 8px}
+  .dlg{position:absolute;left:50%;top:54%;transform:translate(-50%,-50%);width:286px;border-radius:4px;
+       box-shadow:0 10px 28px rgba(0,0,0,.65)}
+  /* BEFORE: stock VB6 InputBox */
+  .vb{background:#f0f0f0;color:#000;border:1px solid #999}
+  .vb .tb{background:#fff;color:#000;height:22px;line-height:22px;padding:0 6px;border-bottom:1px solid #999;
+          display:flex;justify-content:space-between;font-size:11px}
+  .vb .x{color:#000;padding:0 4px}
+  .vb .body{display:flex;gap:8px;padding:10px}
+  .vb .msg{flex:1;font-size:11px;line-height:1.45}
+  .vb .btns{display:flex;flex-direction:column;gap:6px}
+  .vb button{width:72px;height:22px;background:#e1e1e1;border:1px solid #adadad;color:#000;font:11px inherit}
+  .vb input{display:block;width:calc(100% - 22px);margin:2px 10px 12px;height:20px;border:1px solid #7a7a7a;
+            background:#fff;color:#000;font:11px inherit;padding:0 4px}
+  /* AFTER: DialogTheme.Prompt */
+  .dt{background:#1e1e1e;color:#ccc;border:1px solid #303030}
+  .dt .tb{background:#252526;color:#ccc;height:22px;line-height:22px;padding:0 8px;border-bottom:1px solid #303030;
+          display:flex;justify-content:space-between;font-size:11px}
+  .dt .x{color:#808080;padding:0 4px}
+  .dt .body{padding:12px 12px 6px;font-size:11px;line-height:1.45;color:#ccc}
+  .dt input{display:block;width:calc(100% - 34px);margin:8px 12px 4px;height:20px;background:#3c3c3c;color:#ccc;
+            border:1px solid #ffb454;font:11px inherit;padding:0 5px;border-radius:2px}
+  .dt .err{margin:0 12px;font-size:10px;color:#ffb454}
+  .dt .foot{display:flex;justify-content:flex-end;gap:8px;padding:10px 12px 12px}
+  .dt button{width:72px;height:24px;font:11px inherit;border-radius:2px}
+  .dt .ok{background:#0078d4;border:1px solid #0078d4;color:#fff}
+  .dt .cancel{background:#3c3c3c;border:1px solid #555;color:#ccc}
+  ul.notes{margin:8px 0 0;padding:0;list-style:none;font-size:10.5px;line-height:1.6}
+  .notes li{padding-left:14px;position:relative;color:#8294a8}
+  .notes li::before{content:"✕";position:absolute;left:0;color:#ff5c5c}
+  .after-notes li::before{content:"✓";color:#2bd97c}
+  .notes b{color:#c9d4e3;font-weight:600}
+  .footer{margin-top:14px;padding-top:8px;border-top:1px solid #1c2330;color:#8294a8;font-size:10px}
+  code{color:#4cc9f0}
+</style></head><body>
+<h1>UX-028 · Replace the legacy VB6 InputBox with <code>DialogTheme.Prompt()</code></h1>
+<p class="sub">8 call sites still pop an unthemed Microsoft.VisualBasic InputBox — and Cancel is indistinguishable from empty.</p>
+
+<div class="grid">
+  <div>
+    <p class="cap before">Before — stock VB InputBox over dark mode</p>
+    <div class="stage">
+      <div class="bar">SSH_Helper — fw-lab environment</div>
+      <div class="rows">
+        192.168.10.21&nbsp;&nbsp;fw-edge-01&nbsp;&nbsp;&nbsp;port 22<br>
+        192.168.10.22&nbsp;&nbsp;sw-core-02&nbsp;&nbsp;&nbsp;port 22<br>
+        192.168.10.30&nbsp;&nbsp;fgt-branch-07&nbsp;port 8022<br>
+        192.168.10.41&nbsp;&nbsp;rtr-wan-01&nbsp;&nbsp;&nbsp;port 22
+      </div>
+      <div class="dlg vb">
+        <div class="tb"><span>Add Column</span><span class="x">✕</span></div>
+        <div class="body">
+          <div class="msg">Enter the name of the new column:</div>
+          <div class="btns"><button>OK</button><button>Cancel</button></div>
+        </div>
+        <input value="location">
+      </div>
+    </div>
+    <ul class="notes">
+      <li>Always light — ignores dark mode <b>and</b> the configured dialog font</li>
+      <li>Returns <b>""</b> for both Cancel and cleared text</li>
+      <li>At "Import Destination Folder": <b>Cancel imports all presets to root</b></li>
+    </ul>
+  </div>
+
+  <div>
+    <p class="cap after">After — DialogTheme.Prompt (same ShowCore styling)</p>
+    <div class="stage">
+      <div class="bar">SSH_Helper — fw-lab environment</div>
+      <div class="rows">
+        192.168.10.21&nbsp;&nbsp;fw-edge-01&nbsp;&nbsp;&nbsp;port 22<br>
+        192.168.10.22&nbsp;&nbsp;sw-core-02&nbsp;&nbsp;&nbsp;port 22<br>
+        192.168.10.30&nbsp;&nbsp;fgt-branch-07&nbsp;port 8022<br>
+        192.168.10.41&nbsp;&nbsp;rtr-wan-01&nbsp;&nbsp;&nbsp;port 22
+      </div>
+      <div class="dlg dt">
+        <div class="tb"><span>Add Column</span><span class="x">✕</span></div>
+        <div class="body">Enter the name of the new column:</div>
+        <input value="Host_IP">
+        <div class="err">⚠ A column named "Host_IP" already exists</div>
+        <div class="foot"><button class="ok">OK</button><button class="cancel">Cancel</button></div>
+      </div>
+    </div>
+    <ul class="notes after-notes">
+      <li>Dark title bar, themed surface, honors <code>SetDialogFont</code></li>
+      <li>Returns <b>string?</b> — <b>null = cancelled</b>, so the import aborts</li>
+      <li>Optional inline validator: duplicate/invalid names flagged in-place</li>
+    </ul>
+  </div>
+</div>
+
+<div class="footer">Call sites: Form1 rename-folder · add/rename column · import destination · ShowInputBox helper · JobEditorDialog ×2 · EnvironmentDialog new/duplicate/rename. Colors above are the real DialogTheme dark palette (#1e1e1e / #3c3c3c / #0078d4).</div>
+</body></html>

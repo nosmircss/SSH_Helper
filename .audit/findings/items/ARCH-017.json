@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-017",
+ "title": "Breakpoints/disabled/expanded live in three places at once (slice Sets + node.data flags + host) with no single source of truth",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-ui",
+ "lens": "perf",
+ "existing_state": "Block view-state is triple-represented: `debugSlice` keeps `breakpoints`/`disabledBlocks`/`expandedNodes` Sets, every toggle also mirrors a flag into node.data (`breakpoint`, `execState:'disabled'`, `expanded`) and notifies the C# host (stores/slices/debugSlice.ts:41-108). The copies already desynchronize through two concrete mechanisms: (1) `load-graph` restores the disabled and expanded Sets from node.data but never clears or restores `breakpoints` (stores/messageBridge.ts:162-183), and `resetGraphSessionState` doesn't touch them either (messageBridge.ts:74-81) — since preset node ids collide (`node-1`, `node-2`, …), switching presets in an open canvas silently carries the previous preset's breakpoints onto unrelated blocks of the next one (a known-but-unfixed leak; the disabled/expanded half of this exact bug class was already fixed once). (2) Undo/redo restores `nodes`/`edges` only (stores/slices/undoSlice.ts:30-98), so undoing past a breakpoint or expand toggle restores `data.breakpoint`/`data.expanded` while the Sets — which drive the gutter dot via `hasBreakpoint`, layout height estimation via `isExpanded`, and host notifications — keep the newer values: visuals, layout, and the C# executor's breakpoint list now disagree.",
+ "recommendation": "Pick node.data as the single source: derive `hasBreakpoint`/`isDisabled`/`isExpanded` from node.data via selectors, delete the Sets, and recompute+resend the host's breakpoint list whenever nodes are replaced wholesale (load-graph, undo, redo). Short of the full refactor, the two-line mitigations are: clear `breakpoints` in `resetGraphSessionState` (re-notifying the host per removed id), and re-derive all three Sets from node.data after every undo/redo.",
+ "user_benefit": "Eliminates a whole class of 'the canvas and the debugger disagree' bugs: phantom breakpoints pausing the wrong preset's blocks, gutter dots that don't match what the executor will actually stop on, and expanded-vs-layout overlap after undo.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/debugSlice.ts",
+   "lines": "41-108,141-143",
+   "note": "each toggle writes Set + node.data flag + host message; hasBreakpoint/isDisabled/isExpanded read the Sets"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/messageBridge.ts",
+   "lines": "74-81,162-183",
+   "note": "load-graph restores disabled+expanded Sets from node.data; breakpoints never cleared or restored; resetGraphSessionState doesn't touch them"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/undoSlice.ts",
+   "lines": "30-98",
+   "note": "snapshots/restores nodes+edges only — Sets survive undo unchanged, node.data flags roll back"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

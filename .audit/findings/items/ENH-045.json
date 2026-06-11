@@ -1,0 +1,26 @@
+{
+ "id": "ENH-045",
+ "title": "Script library imports demand machine-specific absolute paths, making presets with imports unshareable",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "models-samples-build",
+ "lens": "ux",
+ "existing_state": "The subroutine-library feature hard-rejects any non-rooted import: ScriptSubroutineRegistryBuilder adds the validation error 'import path must be absolute' for anything failing Path.IsPathRooted (Services/Scripting/ScriptSubroutineRegistryBuilder.cs:82-86), then requires the file to exist at that exact path (94-98). The shipped demo openly works around this — ScriptSamples/generic/library_import_demo.yaml:6-7 imports \"C:\\\\Path\\\\To\\\\SSH_Helper\\\\ScriptSamples\\\\libraries\\\\string_sections.yaml\" with the comment 'Update this absolute path before running the sample.' Consequence: any preset using imports: breaks the moment it moves to another machine, another user, or the portable build on a USB stick — undermining the entire point of reusable libraries, and conflicting with the app's own AppDataPaths single-storage-root convention.",
+ "recommendation": "Introduce a managed libraries directory under the storage root (AppDataPaths, e.g. %LocalAppData%\\SSH_Helper\\libraries\\) and resolve import paths against it: accept either a bare relative path ('string_sections.yaml' → libraries dir) or explicit tokens like {{app}}/... resolved at registry-build time in ScriptSubroutineRegistryBuilder before the IsPathRooted check, keeping ScriptFileAccessValidator in the loop. Add a Settings link/button to open the libraries folder, and update library_import_demo.yaml to use the portable form. Editor validation (the inline 'must be absolute' error) should be updated in the same pass so autocomplete/validation match the new rule.",
+ "user_benefit": "Teams can share presets and a common library folder without hand-editing Windows paths per machine; the portable build's libraries survive drive-letter changes; the library feature becomes usable for its intended reuse purpose.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptSubroutineRegistryBuilder.cs",
+   "lines": "82-98",
+   "note": "Path.IsPathRooted gate → 'import path must be absolute' + File.Exists on the literal path"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples\\generic\\library_import_demo.yaml",
+   "lines": "5-8",
+   "note": "shipped demo requires hand-editing a hardcoded C:\\Path\\To\\... placeholder"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

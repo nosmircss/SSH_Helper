@@ -1,0 +1,41 @@
+{
+ "id": "PERF-026",
+ "title": "Open completion popup re-runs two synchronous full-document analyses per keystroke",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "editor",
+ "lens": "perf",
+ "existing_state": "While the completion popup is visible, each typed character triggers ShowCompletionPopup synchronously inside Editor_TextChanged (UI/ScintillaScriptEditorControl.cs:603-608) AND again via the selection-change branch of Editor_UpdateUI (715-740 -> RefreshVisibleCompletionPopup 1168-1176) — both land in ShowCompletionPopupCore which marshals the entire document out of the native control (_editor.Text, 1036-1039) and runs ScriptAutocompleteProvider.GetCompletion. In interpolation context (typing inside ${...} or {{...}}), GetCompletion (Services/Editor/ScriptAutocompleteProvider.cs:311-319) calls BuildInterpolationCompletion -> GetInterpolationSymbols (450-468) -> ExtractDynamicSymbols (640-794), which scans every line of the script with ~7 regex matches per line, one of which is an inline NON-compiled Regex.Match constructed fresh for each vars line (line 691). So one keystroke with the popup open costs 2 full text marshals + 2 full-document regex scans on the UI thread, on top of the refresh pipeline. The same ExtractDynamicSymbols full scan plus a complete ScriptParser.Parse also runs on every hover dwell (Form1.cs:690-722). The completion perf budget is 120ms p95 at only 500 lines (SSH_Helper.Tests/UI/ScintillaScriptEditorPerformanceTests.cs:45,57).",
+ "recommendation": "Three cheap fixes: (1) coalesce the popup re-query into the existing per-tick queue (QueueRefreshAndValidation pattern) so TextChanged + UpdateUI collapse to one GetCompletion per keystroke, sharing a single text snapshot; (2) hoist the inline vars regex at ScriptAutocompleteProvider.cs:691 into a static compiled field like every other regex in the file; (3) memoize ExtractDynamicSymbols on (text length, hash or document version) — the result is identical between the popup query and the hover resolver, so Form1's dwell path (Form1.cs:717) gets the cached list too.",
+ "user_benefit": "Autocomplete stays responsive while typing inside variables on big scripts; today the most interactive moment (popup open, mid-word) is exactly when the editor does double full-document scans per character.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+   "lines": "603-608",
+   "note": "TextChanged re-queries the popup synchronously while visible"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+   "lines": "715-740",
+   "note": "UpdateUI selection change triggers a second ShowCompletionPopupCore for the same keystroke"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+   "lines": "1036-1039",
+   "note": "ShowCompletionPopupCore marshals full _editor.Text per query"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptAutocompleteProvider.cs",
+   "lines": "640-794",
+   "note": "ExtractDynamicSymbols scans all lines, ~7 regexes per line; uncompiled inline Regex.Match at 691"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "690-722",
+   "note": "hover dwell re-parses the whole script and re-runs ExtractDynamicSymbols with no caching"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

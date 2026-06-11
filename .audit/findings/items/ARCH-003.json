@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-003",
+ "title": "SchedulingService has no canonical timezone semantics — UI previews use local-time cron interpretation while the execution engine fires in UTC",
+ "category": "ARCH",
+ "severity": "high",
+ "effort": "M",
+ "area": "jobs-scheduling",
+ "lens": "perf",
+ "existing_state": "The same service exposes two incompatible interpretations of the same cron expression and callers picked different ones. GetNextRunLocal (Services/SchedulingService.cs:53-63) passes TimeZoneInfo.Local to Cronos, so cron fields mean local wall-clock time; GetMissedOccurrences (SchedulingService.cs:89-100) uses the zone-less Cronos overload, so the same fields mean UTC. Every user-facing surface uses the local interpretation: the Job List 'Next Run' column (JobListDialog.cs:741), the main-form status-bar countdown (Form1.cs:15230), and the cron builder's live preview in the job editor (UI/CronBuilderControl.cs:622). But the actual due-check that fires jobs uses the UTC interpretation (JobExecutionService.IsJobDue, Services/JobExecutionService.cs:1028 → GetMissedOccurrences), as does startup missed-run detection (SchedulingService.cs:126, 165). On any machine not running UTC, a job built as 'Daily at 9:00 AM' previews 9:00 AM local in three places and then fires at 9:00 AM UTC — hours off. The structure (parallel Local/Utc methods with no designated source of truth, callers choosing ad hoc) is what bred the defect, and nothing prevents the next caller from picking the wrong one again.",
+ "recommendation": "Make one interpretation canonical and funnel all occurrence math through it. Decide that cron fields mean local wall-clock time (what every preview already promises users), change GetMissedOccurrences to call cron.GetOccurrences with TimeZoneInfo.Local (Cronos supports a zone-aware overload), and delete or internalize GetNextRunUtc so there is a single occurrence API the executor, missed-run detector, and all UI surfaces share. Add a regression test asserting next-run preview and IsJobDue agree on a non-UTC TimeZoneInfo.",
+ "user_benefit": "Scheduled jobs run at the time the UI told you they would. Today every preview lies by your UTC offset, which for a fleet-automation tool means commands hitting production hosts at the wrong hour.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SchedulingService.cs",
+   "lines": "53-63, 89-100",
+   "note": "GetNextRunLocal interprets cron in TimeZoneInfo.Local; GetMissedOccurrences uses the zone-less (UTC) overload"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobExecutionService.cs",
+   "lines": "1023-1028",
+   "note": "IsJobDue fires recurring jobs from GetMissedOccurrences (UTC interpretation)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobListDialog.cs",
+   "lines": "734-743",
+   "note": "'Next Run' column shows GetNextRunLocal"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "15230",
+   "note": "Status-bar countdown also from GetNextRunLocal"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/CronBuilderControl.cs",
+   "lines": "622",
+   "note": "Job editor next-run preview also local"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

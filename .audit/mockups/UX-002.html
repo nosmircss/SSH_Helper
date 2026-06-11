@@ -1,0 +1,105 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace;margin:12px}
+.row{display:flex;gap:14px;align-items:flex-start}
+.col{flex:1;min-width:0}
+.cap{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap b{color:#ff5c5c;font-weight:normal}.cap i{color:#2bd97c;font-style:normal}
+.dlg{background:#11151d;border:1px solid #1c2330;border-radius:6px;overflow:hidden}
+.tb{background:#161b25;border-bottom:1px solid #1c2330;padding:4px 8px;font-size:10px;color:#8294a8;display:flex;justify-content:space-between}
+.tb span{letter-spacing:2px}
+.bd{padding:8px}
+.lbl{color:#8294a8;font-size:10px;margin:6px 0 3px}
+.list{background:#0d1118;border:1px solid #1c2330;border-radius:3px;position:relative;overflow:hidden}
+.li{padding:1px 6px;white-space:nowrap;overflow:hidden}
+.li .ck{color:#4cc9f0}.li .un{color:#3a4656}
+.li .dev{color:#8294a8}
+.sb{position:absolute;right:1px;top:1px;bottom:1px;width:5px;background:#161b25}
+.sb i{position:absolute;left:0;right:0;background:#2a3447;border-radius:2px}
+.inp{background:#0d1118;border:1px solid #1c2330;border-radius:3px;padding:1px 6px;display:inline-block;color:#c9d4e3}
+.bad{border-color:#ff5c5c;color:#ff5c5c}
+.good{border-color:#2bd97c;color:#2bd97c}
+.btn{background:#1b2230;border:1px solid #2a3447;border-radius:3px;padding:3px 12px;display:inline-block;color:#c9d4e3}
+.btn.p{background:#15323d;border-color:#4cc9f0;color:#4cc9f0}
+.note{font-size:10px;margin-top:2px}
+.r{color:#ff5c5c}.g{color:#2bd97c}.a{color:#ffb454}.c{color:#4cc9f0}
+.links a{color:#4cc9f0;text-decoration:none}
+.chk{font-size:10px;margin-top:6px}
+.cnt{color:#2bd97c}
+.foot{border-top:1px solid #1c2330;margin-top:8px;padding-top:7px;display:flex;justify-content:space-between;align-items:center}
+.grip{position:absolute;right:2px;bottom:2px;color:#3a4656;font-size:9px}
+.filter{display:flex;gap:6px;align-items:center;margin-bottom:4px}
+</style></head><body>
+<div class="row">
+
+<div class="col">
+<p class="cap">Before — fixed 420×580, shown on <b>every</b> multi-host run</p>
+<div class="dlg">
+<div class="tb">Run Folder: Daily Health Checks <span>— ✕</span></div>
+<div class="bd">
+<div class="lbl">Presets to run:</div>
+<div class="list" style="height:42px">
+<div class="li"><span class="ck">☑</span> Backup Running Config</div>
+<div class="li"><span class="ck">☑</span> Check NTP / Clock Drift</div>
+<div class="li"><span class="ck">☑</span> Interface Error Counters</div>
+<div class="sb"><i style="top:1px;height:30px"></i></div>
+</div>
+<div class="lbl">Target hosts (200):</div>
+<div class="list" style="height:56px">
+<div class="li"><span class="un">☐</span> 192.168.10.13 <span class="dev">dist-sw-03</span></div>
+<div class="li"><span class="ck">☑</span> 192.168.10.14 <span class="dev">dist-sw-04</span></div>
+<div class="li"><span class="ck">☑</span> 192.168.10.15 <span class="dev">dist-sw-05</span></div>
+<div class="li"><span class="ck">☑</span> 192.168.10.16 <span class="dev">dist-sw-06</span></div>
+<div class="li"><span class="ck">☑</span> 192.168.10.17 <span class="dev">dist-sw-07</span></div>
+<div class="sb"><i style="top:2px;height:4px"></i></div>
+</div>
+<div class="note r">↑ ~5 rows visible · host 4 of 200 · no filter, no Select All — uncheck 10 devices by scroll-and-click, daily</div>
+<div class="lbl" style="margin-top:8px">Parallel hosts: <span class="inp bad">1</span> <span class="r">← resets to 1 every run → forgotten = 200 hosts run one at a time</span></div>
+<div class="chk"><span class="un">☐</span> Stop on first error <span class="a">← also forgotten</span></div>
+<div class="foot"><span></span><span><span class="btn p">Run 1 Presets</span> <span class="btn">Cancel</span></span></div>
+<div class="note a" style="text-align:right">“1 Presets” never pluralizes ↑</div>
+</div>
+</div>
+</div>
+
+<div class="col">
+<p class="cap">After — resizable, filter + bulk select, options <i>remembered</i></p>
+<div class="dlg" style="position:relative">
+<div class="tb">Run Folder: Daily Health Checks <span>— □ ✕</span></div>
+<div class="bd">
+<div class="lbl">Presets to run: <span class="dev">(3 of 3)</span></div>
+<div class="list" style="height:42px">
+<div class="li"><span class="ck">☑</span> Backup Running Config</div>
+<div class="li"><span class="ck">☑</span> Check NTP / Clock Drift</div>
+<div class="li"><span class="ck">☑</span> Interface Error Counters</div>
+</div>
+<div class="lbl">Target hosts <span class="cnt">(187 of 200)</span></div>
+<div class="filter">
+<span class="inp" style="flex:1">192.168.10<span style="color:#4cc9f0">▏</span></span>
+<span class="links">All&nbsp;|&nbsp;None&nbsp;|&nbsp;Invert</span>
+</div>
+<div class="list" style="height:108px">
+<div class="li"><span class="ck">☑</span> 192.168.10.11 <span class="dev">core-sw-01</span></div>
+<div class="li"><span class="ck">☑</span> 192.168.10.12 <span class="dev">core-sw-02</span></div>
+<div class="li"><span class="un">☐</span> 192.168.10.13 <span class="dev">dist-sw-03 (maintenance)</span></div>
+<div class="li"><span class="ck">☑</span> 192.168.10.14 <span class="dev">dist-sw-04</span></div>
+<div class="li"><span class="ck">☑</span> 192.168.10.15 <span class="dev">dist-sw-05</span></div>
+<div class="li"><span class="un">☐</span> 192.168.10.21 <span class="dev">edge-fw-01 (maintenance)</span></div>
+<div class="li"><span class="ck">☑</span> 192.168.10.22 <span class="dev">edge-fw-02</span></div>
+<div class="li"><span class="ck">☑</span> 192.168.10.31 <span class="dev">acc-sw-101</span></div>
+<div class="sb"><i style="top:2px;height:38px"></i></div>
+</div>
+<div class="note c">↑ list fills the dialog &amp; grows on resize · filter narrows view, selection keeps original indices</div>
+<div class="lbl" style="margin-top:8px">Parallel hosts: <span class="inp good">20</span> <span class="g">← prefilled from last run</span> &nbsp; <span class="ck">☑</span> Stop on first error</div>
+<div class="foot">
+<span class="chk" style="margin:0"><span class="ck">☑</span> Remember these options <span class="dev">(Shift+Run to show again)</span></span>
+<span><span class="btn p">Run 3 Presets</span> <span class="btn">Cancel</span></span>
+</div>
+<div class="note g" style="text-align:right">pluralized ↑</div>
+</div>
+<div class="grip">◢</div>
+</div>
+</div>
+
+</div>
+</body></html>

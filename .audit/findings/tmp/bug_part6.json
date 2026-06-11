@@ -1,0 +1,223 @@
+[
+ {
+  "id": "BUG-041",
+  "title": "while/repeat loops that hit max_iterations report success, silently truncating the run",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-commands-b",
+  "lens": "correctness",
+  "existing_state": "Both loop containers stop at max_iterations (default 10000: Services/Scripting/Commands/WhileCommand.cs:14, RepeatCommand.cs:15) and then return `new CommandResult { Success = true, ... }` after emitting only a Warning-level line (WhileCommand.cs:105-110, RepeatCommand.cs:85-90). The triggering condition is exactly the dangerous one: the `while`/`until` expression is stuck (typo'd variable name evaluating to a constant, a `send`-captured value that never changes, etc.). The script burns up to 10000 iterations of real SSH commands against the host, abandons the loop mid-work, and then continues to the following steps — and the overall run is recorded as successful in history and job results. Nothing sets _last_error, the result is not marked SuppressedError, and `on_error` has no effect since nothing failed.",
+  "recommendation": "Make hitting the cap a failure by default (CommandResult.ApplyOnError with a clear message, so `on_error: continue` still allows opting out), or add an explicit `on_max_iterations: fail|continue` option on while/repeat with fail as default. At minimum set _last_error and mark the result SuppressedError so post-run checks and notifications can see the truncation.",
+  "user_benefit": "A stuck loop condition surfaces as a failed step instead of a quietly truncated run that history marks green — critical when the loop is doing real work against production hosts.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WhileCommand.cs", "lines": "105-110", "note": "cap reached -> Warning emit only, then Success=true returned"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\RepeatCommand.cs", "lines": "85-90", "note": "identical silent-success pattern in repeat"}
+  ]
+ },
+ {
+  "id": "BUG-042",
+  "title": "switch silently treats an invalid 'matches' regex as no-match",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-commands-b",
+  "lens": "correctness",
+  "existing_state": "A switch case written as `value: \"matches <pattern>\"` compiles the pattern at runtime; if the regex is invalid (typo like an unclosed paren, or a variable substituted into the pattern producing bad syntax), the bare `catch { matches = false; }` at Services/Scripting/Commands/SwitchCommand.cs:47-50 swallows the ArgumentException and the case simply never matches — no warning, no error, nothing in the output. Execution falls through to the default branch (or no-op at :83-84), so the script takes the wrong path on every host with zero diagnostics. There is also no parse-time validation of `matches` patterns in ScriptParser, so the mistake survives editing, canvas round-trips, and scheduled runs indefinitely.",
+  "recommendation": "In the catch block, emit a Warning (\"switch case N: invalid regex '<pattern>': <message>\") via context.EmitOutput so the misroute is visible, and add a validation-time check in ScriptParser.ValidateSteps that attempts Regex construction for case values starting with 'matches ' and reports a script error before the run starts.",
+  "user_benefit": "A typo in one regex no longer silently reroutes every host down the default branch — the author finds out at validation time instead of discovering wrong actions were taken fleet-wide.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SwitchCommand.cs", "lines": "38-51", "note": "regex branch: catch { matches = false; } with no emit — invalid pattern is indistinguishable from a legitimate non-match"}
+  ]
+ },
+ {
+  "id": "BUG-043",
+  "title": "int()/float() return 0 on unparseable input, making 'parse failed' indistinguishable from a genuine zero in threshold logic",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-functions",
+  "lens": "correctness",
+  "existing_state": "TypeFunctions.ToInt returns 0 when the input cannot be parsed as a number (Services/Scripting/Functions/TypeFunctions.cs:27-46 — the final `return 0;` at line 45 covers any non-numeric string); ToFloat returns 0.0 the same way (TypeFunctions.cs:48-62). Combined with regex_match returning \"\" on no-match (StringFunctions.cs:197), a common monitoring pattern like `if: int(regex_match(output, \"(\\\\d+)% used\", 1)) > 90` silently evaluates to `0 > 90` = false whenever the device output format shifts — the alert branch simply never fires, on every host, with no signal. Conversely `if: int(x) == 0` fires the zero-branch on garbage input. There is no way for a script to distinguish these cases today.",
+  "recommendation": "Return null on parse failure instead of 0 (the engine already handles null values distinctly throughout ValueResolver/comparison logic), and/or add an optional second argument `int(x, default)` so scripts can opt into a fallback explicitly. If backward compatibility forbids changing the return, at minimum emit a runtime warning through the step output so multi-host runs show that a conversion failed.",
+  "user_benefit": "Threshold and health-check scripts are this app's bread and butter; today a format change in device output silently disables alerts fleet-wide. Distinguishing parse failure from zero makes those scripts trustworthy.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\TypeFunctions.cs", "lines": "27-46", "note": "ToInt: non-numeric string falls through to `return 0;`"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\TypeFunctions.cs", "lines": "48-62", "note": "ToFloat: same pattern, returns 0.0"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs", "lines": "194-208", "note": "regex_match returns \"\" on no-match — composes with int() into a silent false condition"}
+  ]
+ },
+ {
+  "id": "BUG-044",
+  "title": "regex_replace() silently returns the unmodified source on an invalid pattern — sanitization/redaction steps can no-op with zero signal",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-functions",
+  "lens": "security",
+  "existing_state": "RegexReplace catches both RegexMatchTimeoutException and ArgumentException (invalid pattern) and returns the original source string unchanged (Services/Scripting/Functions/StringFunctions.cs:165-176). A script using regex_replace to strip secrets, ANSI codes, or sensitive fields from device output before logging/notifying — the docs themselves recommend a regex_replace incantation for ANSI stripping — gets the raw, unsanitized text back if the pattern has a typo or a variable-built pattern is malformed, with no error, no warning, nothing in output. regex_match has the related problem that an invalid pattern and a legitimate no-match are both \"\" (StringFunctions.cs:194-208), so a script cannot tell 'pattern broken' from 'value absent'.",
+  "recommendation": "Distinguish the two failure modes in StringFunctions: an ArgumentException (user wrote a bad pattern — deterministic, will fail on every host) should fail the step or at minimum set _last_error and emit a warning; a RegexMatchTimeoutException can keep the soft fallback but should still warn. Apply the same treatment to regex_match/regex_match_all/regex_groups, which currently swallow ArgumentException into empty results (StringFunctions.cs:224-225, 248-249).",
+  "user_benefit": "When a redaction or extraction pattern is broken, the owner finds out immediately instead of discovering unsanitized output in logs/notifications, or extraction silently yielding empty values across an entire fleet run.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs", "lines": "165-176", "note": "catch (ArgumentException) { return source; } — invalid pattern returns input unchanged"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs", "lines": "194-208", "note": "regex_match: invalid pattern and no-match both return \"\""},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs", "lines": "224-225, 248-249", "note": "regex_match_all/regex_groups swallow ArgumentException into empty lists"}
+  ]
+ },
+ {
+  "id": "BUG-045",
+  "title": "iif() bare catch turns a broken condition into 'always take the then-branch'",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-functions",
+  "lens": "correctness",
+  "existing_state": "Iif evaluates its condition with ExpressionEvaluator inside a bare `catch` (Services/Scripting/Functions/MathFunctions.cs:184-193): when evaluation throws — e.g. `iif(lenght(x) > 0, \"up\", \"down\")` where the unknown function makes ExpressionParser throw FormatException (ExpressionParser.cs:436) — the fallback re-resolves the ENTIRE condition string as a plain value via JsonUtilities.ResolveJsonValue (MathFunctions.cs:191). That resolution falls through to the literal string \"lenght(x) > 0\" (per the fall-through at JsonUtilities.cs:312-333), which is non-empty and therefore truthy, so the then-branch is taken unconditionally. Any typo or evaluator error inside an iif condition thus silently pins the result to the true-value on every host, every run.",
+  "recommendation": "Narrow the fallback in MathFunctions.Iif: only fall back to truthiness when the condition contains no comparison/logical operators (the legitimate 'simple value' case the comment describes); let FormatException from the evaluator propagate so the step fails with 'Unknown function: lenght'. This also becomes moot for the typo case if the unknown-function fall-through (BUG-010) is fixed.",
+  "user_benefit": "iif is the branching primitive people embed in set:/send: lines; today a typo flips it into a constant. Propagating the parse error makes the failure visible at the exact step instead of producing confidently wrong branch decisions fleet-wide.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\MathFunctions.cs", "lines": "176-197", "note": "bare catch at 188-193 re-resolves the condition as a value; literal string is truthy"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionParser.cs", "lines": "436", "note": "the FormatException that gets swallowed"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\JsonUtilities.cs", "lines": "312-333", "note": "fallback path resolves the condition text to itself as a string"}
+  ]
+ },
+ {
+  "id": "BUG-046",
+  "title": "Division and modulo by zero silently return 0, propagating bad numbers into downstream decisions",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-core",
+  "lens": "correctness",
+  "existing_state": "In ExpressionParser, `/` and `%` with a zero right-hand side emit a Warning line and substitute `0.0` rather than failing: `if (rhs == 0) { _context.EmitOutput(\"Warning: Division by zero, returning 0\"...); left = 0.0; }` (ExpressionParser.cs:234-243 for `/`, 249-257 for `%`). Since denominators in this tool are frequently derived from command output (e.g. `set: pct = ${used} / ${total} * 100` where a host returns total=0), the expression yields 0 instead of erroring, and that 0 then commonly drives an `if`/threshold (`if pct > 90`) — so a host with no data is silently classified as 0% healthy and the wrong action is taken. The warning is buried in normal output and the step still reports success.",
+  "recommendation": "Make divide/modulo-by-zero fail the enclosing step (throw a FormatException from ExpressionParser, which ExecuteStepCoreAsync already funnels into CommandResult.ApplyOnError), or at minimum return a sentinel that conditions treat as undefined rather than the false-but-valid value 0. If a silent default is kept for back-compat, gate it behind an explicit script option.",
+  "user_benefit": "Arithmetic on missing/zero host data fails visibly instead of quietly producing 0 and steering threshold logic into the wrong branch.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionParser.cs", "lines": "230-258", "note": "div and mod by zero both return 0.0 with only a warning"}
+  ]
+ },
+ {
+  "id": "BUG-047",
+  "title": "Encoding functions return wrong data instead of failing: hash() silently computes SHA256 for any unknown algorithm; hex_decode() drops the last nibble of odd-length input",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-functions",
+  "lens": "correctness",
+  "existing_state": "CreateHashAlgorithm's switch ends with `_ => SHA256.Create()` (Services/Scripting/Functions/EncodingFunctions.cs:104-115), so `hash(data, \"crc32\")` or `hash(data, \"sha3-256\")` returns a SHA256 digest with no error — and the intended guard `if (hasher == null) return null;` at EncodingFunctions.cs:67 is dead code because the factory can never return null. Separately, HexDecode sizes its buffer with integer division `value.Length / 2` (EncodingFunctions.cs:86-88), so an odd-length hex string like \"abc\" decodes only \"ab\" and silently discards the trailing character instead of rejecting clearly-corrupt input (the existing catch at :91-94 would have returned null had the loop been allowed to hit the bad slice).",
+  "recommendation": "Change the switch default to return null so the existing null-check at line 67 does its job (hash() then returns null for unknown algorithms, consistent with base64_decode's failure behavior). In HexDecode, return null when value.Length is odd before allocating the buffer. Both are one-line fixes in EncodingFunctions.cs.",
+  "user_benefit": "Scripts that verify file checksums or decode device-emitted hex get definitively wrong answers today instead of a detectable failure; a checksum comparison against the wrong algorithm fails confusingly, and truncated hex decodes pass through as plausible-looking data.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\EncodingFunctions.cs", "lines": "104-115", "note": "`_ => SHA256.Create()` — unknown algorithm silently becomes SHA256"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\EncodingFunctions.cs", "lines": "67", "note": "dead null-check that the fix would reactivate"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\EncodingFunctions.cs", "lines": "86-88", "note": "value.Length / 2 truncates the final nibble of odd-length input"}
+  ]
+ },
+ {
+  "id": "BUG-048",
+  "title": "extract silently exports every named regex group as a script variable, clobbering existing variables of the same name",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-commands-a",
+  "lens": "correctness",
+  "existing_state": "On every successful single-match extraction, ExposeNamedGroups (Services/Scripting/Commands/ExtractCommand.cs:195-208, called from ExtractSingleMatch at 124) iterates all named groups in the pattern and calls context.SetVariable(group.Name, value) for each — unconditionally overwriting any existing variable with that name. The only trace is a Debug-level line (206) that is invisible unless debug mode is on. A pattern like `(?<host>\\S+)\\s+(?<status>\\w+)` silently replaces the `host` / `status` variables (including CSV-column-derived variables like a `status` column) for all subsequent steps of the run, with no opt-in and no warning. Note the named group also wins even when the group didn't participate in the match (empty string overwrites the old value).",
+  "recommendation": "Make named-group export opt-in (e.g. `export_groups: true` on extract, or only export groups not already present), or at minimum emit a Warning-level (not Debug) message when an existing variable is overwritten by a named group. Also skip groups that did not participate in the match (Group.Success == false) so an optional group can't blank an existing variable.",
+  "user_benefit": "Stops a regex author's incidental group names from silently corrupting unrelated script state (host/credential/loop variables) mid-run — a class of failure that today is nearly undebuggable because the overwrite leaves no visible trace.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExtractCommand.cs", "lines": "195-208", "note": "every non-numeric group name SetVariable'd unconditionally; only Debug-level output"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExtractCommand.cs", "lines": "122-124", "note": "ExposeNamedGroups invoked on every single-match extract before into-assignment"}
+  ]
+ },
+ {
+  "id": "BUG-049",
+  "title": "assert substitutes variable text into the condition before parsing — quotes/operators in data break or alter the expression (diverges from if)",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scripting-commands-a",
+  "lens": "correctness",
+  "existing_state": "AssertCommand textually substitutes variables into the condition string and then parses the result as an expression (`context.SubstituteVariables(step.Assert.Condition)` then `evaluator.Evaluate(condition)`, Services/Scripting/Commands/AssertCommand.cs:18-24), whereas IfCommand passes the raw condition to the same ExpressionEvaluator, which resolves variable references internally (IfCommand.cs:24-28). Consequence: for `assert: '\"{{output}}\" contains \"up\"'`, any double quote, backslash, or operator-looking text in the device output is spliced into the expression source — typically producing 'Assert condition evaluation failed' (caught at 26-31, fails the step) on data that the logically identical `if:` handles fine; in unlucky cases the spliced text parses as a different expression and the assertion evaluates the wrong thing. Real device output (banners, JSON, quoted strings) hits this routinely, and the same condition string behaves differently between if and assert.",
+  "recommendation": "Have AssertCommand pass step.Assert.Condition raw to ExpressionEvaluator exactly like IfCommand (delete the SubstituteVariables call at line 18; keep substitution for the `message` only). If some existing scripts rely on {{var}} splicing inside assert conditions, support both: try raw evaluation first and only fall back to substituted text when the raw parse references no resolvable form — but converging on the if semantics is the clean fix.",
+  "user_benefit": "Assertions stop failing spuriously (or evaluating the wrong predicate) whenever device output contains quotes or operator characters, and if/assert finally agree on what the same condition string means.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\AssertCommand.cs", "lines": "18-31", "note": "substitute-then-parse; parse exception fails the step"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\IfCommand.cs", "lines": "24-28", "note": "if passes the raw condition; evaluator resolves variables itself"}
+  ]
+ },
+ {
+  "id": "BUG-050",
+  "title": "input validate regex runs with no timeout on the UI thread — a pathological pattern freezes the whole app",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-commands-a",
+  "lens": "reliability",
+  "existing_state": "InputCommand compiles the user-supplied `validate:` pattern with `new Regex(step.Input.Validate, RegexOptions.Compiled)` and no match timeout (Services/Scripting/Commands/InputCommand.cs:41). The match executes in the dialog's OK handler on the UI thread (`_validationRegex.IsMatch(_txtInput.Text)` in BtnOk_Click, InputCommand.cs:209). A backtracking-prone pattern (e.g. `^(\\w+\\s?)*$`) combined with a longish non-matching input hangs the entire WinForms message pump indefinitely — no Stop button, no recovery except killing the process. The codebase already has the fix pattern: ScriptRegexDefaults.UserPatternTimeout (5s, Services/Scripting/ScriptRegexDefaults.cs:10) is used for the same class of user-authored patterns in ExtractCommand.cs:60 and ExpressionEvaluator.cs:98 — input validation is the one place it was missed.",
+  "recommendation": "Pass ScriptRegexDefaults.UserPatternTimeout as the third Regex constructor argument at InputCommand.cs:41, and catch RegexMatchTimeoutException in BtnOk_Click (treat as validation failure with a 'pattern timed out' message). Optionally drop RegexOptions.Compiled, which buys nothing for a few interactive matches.",
+  "user_benefit": "A typo'd validation regex in a script can no longer hard-freeze the app mid-fleet-run at an interactive prompt, taking the unsent work of the whole run with it.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\InputCommand.cs", "lines": "36-47", "note": "Regex compiled without timeout"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\InputCommand.cs", "lines": "204-217", "note": "IsMatch on the UI thread in BtnOk_Click"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptRegexDefaults.cs", "lines": "8-10", "note": "5s UserPatternTimeout exists and is used by extract and the expression evaluator"}
+  ]
+ },
+ {
+  "id": "BUG-051",
+  "title": "Retry loop mutates the shared step.OnError field; concurrent parallel/subroutine reuse of a step races",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scripting-core",
+  "lens": "reliability",
+  "existing_state": "The retry path temporarily rewrites the step object's OnError and restores it in a finally: `var originalOnError = step.OnError; ... step.OnError = onErrorForAttempt; try { ... } finally { step.OnError = originalOnError; }` (ScriptExecutor.cs:456-471). ScriptStep instances are not per-execution copies — subroutine bodies are parsed once and the same `ScriptSubroutineDefinition.Subroutine.Steps` instances are executed every call. ParallelCommand runs each branch on the shared context concurrently via Task.Run (ParallelCommand.cs:40-61) with the comment 'Steps share one context'. So if two parallel branches both `call:` the same subroutine (or a parallel branch and the main flow re-enter the same shared step) and that step has `retry:`, the two executions write/restore the same `step.OnError` without synchronization — one branch can permanently observe the other's forced 'stop', or have its original on_error wiped to the interleaved value, changing whether failures are suppressed. The same shared-instance hazard touches `step.StepPath ??=` (ScriptExecutor.cs:318), though that one is idempotent.",
+  "recommendation": "Stop mutating shared step state for retry: thread the per-attempt on_error override as a parameter into ExecuteStepCoreAsync / the command result evaluation instead of writing step.OnError, so retry attempts never touch the shared ScriptStep. This also makes retries safe under Parallel and concurrent subroutine calls.",
+  "user_benefit": "Retries inside parallel blocks or shared subroutines behave deterministically instead of intermittently flipping error-handling behavior under concurrency.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs", "lines": "456-471", "note": "retry mutates and restores shared step.OnError"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ParallelCommand.cs", "lines": "40-61", "note": "branches run concurrently on the shared context/steps"}
+  ]
+ },
+ {
+  "id": "BUG-052",
+  "title": "Capture-mode 'natural completion' can fire early on prompt-like output, killing the still-running remote command",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "M",
+  "area": "terminal",
+  "lens": "correctness",
+  "existing_state": "Capture mode (interactive with `command:`) decides the command is finished per received chunk: after dispatch, `ShouldArmCaptureNaturalCompletion` arms on the first chunk that contains the command text as a case-insensitive substring of any line (Services/Terminal/InteractiveTerminalService.cs:2690-2712) OR simply isn't prompt-terminated (2674-2683) — i.e., effectively any output arms it. Completion then triggers when the last non-empty line of a chunk matches the detected prompt regex, falling back to `PromptDetector.IsLikelyPrompt` heuristics when startup prompt detection failed (2714-2734; call sites 800-814 windowed, 1390-1404 headless). Chunk boundaries are arbitrary network reads, so a mid-output chunk ending on a prompt-looking line (device status dumps echoing `hostname #`, log lines ending in `$`/`>`, cat of a session log) completes the capture early. On `natural_complete` the step returns Ok with the truncated transcript (563) and the `finally` block disconnects the separate SSH session (573-575) — terminating the still-running remote command (the canonical use case is long-running operations like upgrades), while the step and any `capture:` variable report success.",
+  "recommendation": "Make completion stricter: require the prompt match to be anchored at the true end of accumulated output (carry an incomplete-final-line buffer like the transcript path already does, rather than testing each raw chunk), require the detected prompt regex when available instead of `IsLikelyPrompt`, and debounce — confirm the prompt persists across a short quiet window (e.g. 300-500 ms with no further output) before declaring `natural_complete`. Keep `max_seconds`/`max_lines` as the hard caps.",
+  "user_benefit": "Prevents the worst capture failure mode: a long-running command (firmware upgrade, migration) being SIGHUP-killed mid-flight because its own output happened to look like a prompt, while the script reports the step as successfully completed with a truncated transcript.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "2674-2683", "note": "arming returns true for any non-prompt chunk or any line containing the command substring"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "2690-2734", "note": "case-insensitive substring echo match; completion tests only the last line of the current chunk; IsLikelyPrompt fallback"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "800-814, 1390-1404", "note": "per-chunk arm/complete in both windowed and headless capture loops"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "563, 573-575", "note": "natural_complete returns Ok; finally disconnects the session, killing the remote command"}
+  ]
+ }
+]

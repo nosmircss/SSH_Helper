@@ -1,0 +1,265 @@
+[
+ {
+  "id": "BUG-053",
+  "title": "Opening or resizing a shared-session terminal window permanently rewrites the pooled shell's geometry",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "terminal",
+  "lens": "reliability",
+  "existing_state": "In `session: shared` mode the window is bound to the pooled script session's live terminal (`sharedSession.SharedTerminal`, Services/Terminal/InteractiveTerminalService.cs:285 and 294-295; SshShellSession.cs:115 exposes `_scripting.Terminal`). `InteractiveTerminalForm.OnShown` immediately fires `EmitTerminalSizeChanged` (Forms/InteractiveTerminalForm.cs:216-221), which computes columns/rows from the window's pixel client size (339-364), and the handler calls `terminal.SetScreenSize(...)` on that pooled terminal (InteractiveTerminalService.cs:1843-1859). The pooled session was created at 120x36 (Services/SshTerminalOptionsFactory.cs:13-14), so merely opening the window — and certainly any user resize — changes the remote PTY geometry, and nothing restores it after the window closes: `SyncAfterInteractive` only sends \\r and re-reads to the prompt (Services/SshShellSession.cs:344-365). Every subsequent `send`/`expect` step in the same script then runs against the altered width, changing line wrapping and pager trigger points — which is exactly what the prompt/pager regexes and `TerminalOutputProcessor` line handling key off.",
+  "recommendation": "Capture the pooled terminal's columns/rows before handing it to `RunWindowLoopAsync` in `RunSharedAsync`, and restore them (inside the same `ioLock`) right before `SyncAfterInteractive()` in the close path. Alternatively, in shared mode render at the session's existing geometry and ignore window-driven `TerminalSizeChanged` (letterbox the viewport) so the script session is never perturbed.",
+  "user_benefit": "Stops a class of 'script worked until I peeked at it' failures: today a quick shared-mode look at a session can change output wrapping for the rest of the run, breaking expect patterns and pager handling in ways that look like random flakiness.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "285, 294-295", "note": "shared mode binds the window to the pooled session's SharedTerminal"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs", "lines": "216-221, 339-364", "note": "OnShown emits TerminalSizeChanged computed from window pixels"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "1843-1859", "note": "handler calls SetScreenSize on the pooled terminal; nothing saves/restores"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs", "lines": "344-365", "note": "SyncAfterInteractive realigns the prompt only — no geometry restore"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshTerminalOptionsFactory.cs", "lines": "13-14", "note": "pooled session default geometry 120x36"}
+  ]
+ },
+ {
+  "id": "BUG-054",
+  "title": "Shared-session exit/logout guard is trivially bypassed, killing the pooled shell mid-script while the step reports success",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "terminal",
+  "lens": "reliability",
+  "existing_state": "In shared mode, typing `exit`/`logout` is supposed to detach the window instead of terminating the pooled shell the rest of the script depends on. But `ShouldBlockSharedShellCommand` matches only the exact trimmed strings \"exit\" and \"logout\" (Services/Terminal/InteractiveTerminalService.cs:2952-2960), and the guard's local line buffer resets to empty on any navigation/control key (3160-3165, with a comment acknowledging it). So `exit 0`, `exit;`, `;exit`, or pressing an arrow key before typing `exit` all reach the host and terminate the shared shell. The disconnect then closes the window with reason `disconnected`, which `RunSharedAsync` still returns as success (line 310, see BUG-030), and every subsequent SSH step in the script fails against the dead pooled session with unrelated-looking connection errors. `SyncAfterInteractive` no-ops because the client is no longer connected (SshShellSession.cs:346-347).",
+  "recommendation": "Stop trying to reconstruct the command line client-side. Either (a) extend the match to a regex like ^\\s*(exit|logout)\\b on the buffer and additionally treat shared-mode shell termination as a step failure with a clear message ('shared session terminated from interactive window'), or (b) accept the bypass but detect the shared session's death on window close (sharedSession.IsConnected) and fail/flag the step there so the run stops with an accurate error instead of cascading confusing failures.",
+  "user_benefit": "A user habitually typing `exit 0` in the shared window currently nukes the script's SSH session and gets a wall of misleading errors from later steps; this makes the failure immediate, accurate, and attributable.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "2952-2960", "note": "exact-match exit/logout only"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "3160-3165", "note": "guard buffer resets on any nav/control key — acknowledged in comment"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "310", "note": "shared window closing as 'disconnected' still returns Ok to the script step"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs", "lines": "346-347", "note": "SyncAfterInteractive silently no-ops once the shared client is dead"}
+  ]
+ },
+ {
+  "id": "BUG-055",
+  "title": "FlushBuffer / DrainResidualBuffer loop forever on a continuously-streaming device (no iteration cap, no cancellation)",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "ssh-execution",
+  "lens": "reliability",
+  "existing_state": "`FlushBuffer` (`SshShellSession.cs:317-339`) and `DrainResidualBuffer` (`:1393-1415`) both loop `while (true) { _stream.ReadData(); }` and rely *solely* on a read-timeout exception to terminate — FlushBuffer with a 200ms window, DrainResidualBuffer with a 25ms window — with no maximum iteration count and no `CancellationToken` check inside the loop. If the remote device emits output continuously faster than that window (e.g. a session where `top`/`tail -f`/a chatty MOTD or background logging keeps writing to the TTY), `ReadData()` keeps returning data and never throws a timeout, so the loop never exits. Both are on common paths: `FlushBuffer` runs after init on the non-pooled simple-command path (`SshExecutionService.cs:2270`), and `DrainResidualBuffer` runs before *every* command send. Because the loop ignores the cancellation token, the user's Stop button cannot break it, and the whole run hangs.",
+  "recommendation": "Bound both loops: add a max-iterations / max-wall-clock cap (e.g. drain for at most a few hundred ms total or N reads) and check `cancellationToken`/the session's CT inside the loop, breaking out when exceeded. Thread the execution CancellationToken into `DrainResidualBuffer` and `FlushBuffer` so Stop can interrupt them.",
+  "user_benefit": "Prevents the app from hanging indefinitely (un-cancellable) when a host streams output, instead of silently locking up the run.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs", "lines": "323-334", "note": "FlushBuffer while(true) ReadData with only a timeout exit, no cap/CT"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs", "lines": "1399-1410", "note": "DrainResidualBuffer same unbounded pattern, runs before every send"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "2270", "note": "FlushBuffer called on the common non-pooled command path"}
+  ]
+ },
+ {
+  "id": "BUG-056",
+  "title": "Vault KV-version auto-detect defaults to V2 on a double-404, breaking restricted KV v1 mounts",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "integrations",
+  "lens": "correctness",
+  "existing_state": "When KvVersion is AutoDetect and the sys/mounts/{mount}/tune probe is forbidden or inconclusive, DetectKvVersionByHeuristicAsync probes `v1/{mount}/data/detect-kv-version-probe` then `v1/{mount}/detect-kv-version-probe`; if BOTH return 404 it unconditionally sets DetectedKvVersion = V2 (Services/Vault/VaultService.cs:664-665). For a genuine KV v1 mount whose policy does not grant the probe path (or simply has no such secret), both probes legitimately return 404, so the mount is then driven with V2 `data/`-prefixed read/write/list URLs (e.g. WriteSecretAsync VaultService.cs:160-168, ListSecretsAsync :204-207). Every subsequent operation fails or returns a misleading 'No secret found', and the user has no obvious way to know the version was guessed wrong.",
+  "recommendation": "On a double-404, do not silently assume V2. Prefer surfacing an explicit, actionable VaultException ('could not auto-detect KV version for mount X — set KV version explicitly in the profile') so the operator pins V1/V2 in Settings, or weight the heuristic by the mount's behavior (e.g. a 404 with a Vault-style errors body vs a routing 404). At minimum, document that AutoDetect is unreliable for locked-down v1 mounts and make the Settings KV-version dropdown default to an explicit choice.",
+  "user_benefit": "KV v1 users with least-privilege policies stop getting silent, misleading 'No secret found' failures and instead get a clear instruction to pin the KV version.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs", "lines": "645-666", "note": "both-404 path defaults to V2"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs", "lines": "160-168", "note": "V2 assumption injects data/ prefix into write URL"}
+  ]
+ },
+ {
+  "id": "BUG-057",
+  "title": "Running a folder silently excludes presets inside its subfolders",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "M",
+  "area": "form1-b",
+  "lens": "correctness",
+  "existing_state": "ExecuteFolderPresetsAsync builds the run list via GetSortedPresetsInFolder (Form1.cs:12836-12837), which calls PresetManager.GetPresetsInFolder — an exact ordinal match on the folder path (Services/PresetManager.cs:762-769). Presets in nested subfolders are never included; the FolderExecutionDialog (Form1.cs:12850) simply lists the direct children, so nothing tells the user that 'Datacenter/Switches' presets were left out of a 'Datacenter' run. The app is inconsistent about folder semantics: deleting the same folder counts and operates on all descendants (CountPresetsInFolderAndDescendants, Form1.cs:8124-8126).",
+  "recommendation": "Include descendant presets in the folder-run preset list (grouped/prefixed by subfolder path in FolderExecutionDialog so users can uncheck whole subfolders), or at minimum show an explicit note in the dialog when N presets in subfolders were excluded. Whichever semantic is chosen, align it with the delete-folder behavior.",
+  "user_benefit": "Operators who organize presets hierarchically and run a parent folder currently get a partial run that reports success — the missing subfolder presets are easy to overlook in the dialog and there is no warning anywhere.",
+  "mockup_idea": "Before/after of FolderExecutionDialog: before shows a flat list of 3 direct-child presets for 'Datacenter'; after shows the same plus a 'Switches/' group with its 4 presets indented and checkable, with a count line 'Includes 4 presets from 1 subfolder'.",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "12836-12857", "note": "Run list = GetSortedPresetsInFolder, dialog shows only that list"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\PresetManager.cs", "lines": "762-769", "note": "Exact-folder ordinal match; no descendants"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "8124-8126", "note": "Folder delete counts descendants — inconsistent semantics"}
+  ]
+ },
+ {
+  "id": "BUG-058",
+  "title": "Connection tests cannot be cancelled once started",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "form1-b",
+  "lens": "ux",
+  "existing_state": "TestSelectedConnections creates `_connectionTestCts` and handles OperationCanceledException (Form1.cs:8899-8900, 8949-8953), but a repo-wide search shows no code path ever calls `.Cancel()` — the CTS is only created (8899) and disposed (8958-8959). With all checked rows tested at `config.ConnectionTimeout` seconds each, capped to 5 concurrent (SemaphoreSlim(5), 8910), a fleet of unreachable hosts means e.g. 200 hosts x 10s / 5 = ~7 minutes of unstoppable 'Testing...' overlays, during which `_isTestingConnections` (8877) blocks starting another test, and the main Stop button only stops `_sshService` (StopExecution, Form1.cs:13282-13299), not this run.",
+  "recommendation": "Wire a cancel affordance: morph the status-bar progress area (or grid context menu) into 'Cancel test' while `_isTestingConnections` is true and have it call `_connectionTestCts.Cancel()`; pass the token's cancellation into the per-row visual cleanup so stuck 'Testing...' overlays are cleared. Also guard the result paint at 8935 with the same `hostIpColIndex >= 0` check used at 8922.",
+  "user_benefit": "Accidentally testing a large checked set against a dead network segment currently locks the feature for minutes with no way out except waiting or killing the app.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "8875-8961", "note": "CTS created/disposed, OCE handled, but no Cancel() call exists anywhere (verified by repo-wide grep of _connectionTestCts)"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "13282-13299", "note": "StopExecution only stops _sshService, not connection tests"}
+  ]
+ },
+ {
+  "id": "BUG-059",
+  "title": "Cancelling the import-destination prompt imports all presets to root level anyway",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "form1-b",
+  "lens": "ux",
+  "existing_state": "ImportAllPresets asks for a destination via PromptForImportDestination (Form1.cs:10804). If the user answers Yes ('choose a folder') and then presses Cancel on the VB InputBox, the empty return is indistinguishable from 'leave empty for root' — the code comment admits this (Form1.cs:10880-10885) and returns the empty string, so the import proceeds dumping every preset at root level (10810) with '_imported' suffixes on collisions. The bulk import then clears the preset-delete undo history (10824), and there is no import-undo, so cleanup of a bad import is fully manual. A proper wrapper already exists (`ShowInputBox`, Form1.cs:11304 area, with test seam) but this call site uses `Microsoft.VisualBasic.Interaction.InputBox` directly (10875).",
+  "recommendation": "Replace the VB InputBox with a small themed dialog (or extend ShowInputBox) that returns a real cancelled/ok result plus the text — e.g. a folder picker combo seeded from _presetManager.GetFolders() with OK/Cancel — and abort the import on cancel. Same fix applies to the other three direct InputBox call sites (8093, 9391, 9419).",
+  "user_benefit": "Pressing Cancel should never mutate the preset library; today it can flood the root level with dozens of imported presets that must be cleaned up one by one (and it wipes the delete-undo stack in the process).",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "10846-10886", "note": "Cancel/empty ambiguity acknowledged in comment; empty returned as 'import to root'"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "10804-10825", "note": "Only the first dialog's ESC sentinel aborts; import proceeds and clears undo history"}
+  ]
+ },
+ {
+  "id": "BUG-060",
+  "title": "EnvironmentDialog Save swallows all persistence failures and closes as if it succeeded",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "dialogs-general",
+  "lens": "ux",
+  "existing_state": "PersistCurrentEnvironmentDetails wraps the only write of description/color/variables/vault-binding in a bare `catch { }` (EnvironmentDialog.cs:807-823) — the comment claims \"actionable errors are shown on explicit operations,\" but the explicit Save button routes through this exact method (BtnSave_Click, 639-643) and the button carries DialogResult.OK (249), so the form closes successfully even when ConfigurationService.SaveEnvironmentState threw (config.json locked by AV/backup tooling, disk full, KeyNotFoundException from UpdateEnvironmentDetails at Services/EnvironmentService.cs:311-312). Every variable the user just entered is silently discarded while the UI reports success and Form1 proceeds to switch environments.",
+  "recommendation": "Split the behavior: keep the silent catch for the high-frequency selection-change autosave, but have BtnSave_Click call a throwing variant — on exception, show a DialogTheme.Show error and set `DialogResult = DialogResult.None` so the dialog stays open and the user's grid contents are not lost.",
+  "user_benefit": "A failed disk write no longer eats an entire environment-variable editing session without a word — the user gets a chance to retry or copy their data out.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\EnvironmentDialog.cs", "lines": "802-823", "note": "catch-all with no logging or surfacing"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\EnvironmentDialog.cs", "lines": "639-643, 249", "note": "Save routes through the swallowing method; button's DialogResult.OK closes the form regardless"}
+  ]
+ },
+ {
+  "id": "BUG-061",
+  "title": "Notifications tab: clicking Add silently discards all unsaved edits (including a just-typed password) on the currently selected profile",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "dialogs-general",
+  "lens": "ux",
+  "existing_state": "BtnNotificationAdd_Click (SettingsDialog.cs:1424-1440) creates the new profile, suppresses selection events (_suppressNotificationProfileSelection = true at 1429), selects the new row, and overwrites _activeNotificationProfileIndex (1433) — without ever calling PersistCurrentNotificationProfile. Because the selection-change handler that normally flushes edits (1396-1401) is suppressed, everything the user typed into the previously selected profile (SMTP host/port/recipients, webhook URL, SMTP password, rename) is lost the moment they click Add. The vault tab's Add does this correctly — BtnVaultAdd_Click flushes first via PersistCurrentVaultProfile() (820).",
+  "recommendation": "Add `PersistCurrentNotificationProfile();` as the first line of BtnNotificationAdd_Click, mirroring BtnVaultAdd_Click at line 820. (Once the credential-staging fix in BUG-020 is implemented, this flush goes to the staged model instead of Credential Manager.)",
+  "user_benefit": "Users no longer lose a fully-configured SMTP/webhook profile by clicking Add before clicking away — a one-line fix for a silent input-loss path.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "1424-1440", "note": "No persist call; selection events suppressed; active index overwritten"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "818-835", "note": "Vault Add shows the correct pattern: PersistCurrentVaultProfile() first"}
+  ]
+ },
+ {
+  "id": "BUG-062",
+  "title": "Duplicate profile names are trivially created (profile-N collision) and duplicated profiles silently share one credential-store slot",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "dialogs-general",
+  "lens": "correctness",
+  "existing_state": "Both Add buttons generate names as `profile-{Count + 1}` (SettingsDialog.cs:821 vault, 1426 notifications). Sequence: Add, Add (profile-1, profile-2), remove profile-1, Add -> Count is 1 so the new profile is also named \"profile-2\". Nothing prevents typing a duplicate name either: ValidateVaultProfiles only checks for empty names (2762-2768) and notifications have no name validation at all. Two same-named profiles read and write the identical CredentialTargets target — selecting one and letting persist fire (1011-1017 / 1577-1581) overwrites the other profile's token/webhook/password with no warning, and default-profile resolution picks whichever matches first (1169-1171, 1685-1687). The user ends up with two visually distinct profiles whose secrets clobber each other.",
+  "recommendation": "Generate unique names by scanning existing names (e.g. increment until `profile-N` is free), and add a duplicate-name check (OrdinalIgnoreCase, matching the lookup semantics used everywhere) to ValidateVaultProfiles plus an equivalent notification validation before SaveNotificationSettings — block Save with a themed prompt naming the collision.",
+  "user_benefit": "Prevents two profiles from invisibly sharing and corrupting each other's stored secrets, and removes an ambiguity that also confuses default-profile resolution.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "821, 1426", "note": "Name = profile-{Count+1}; collides after any deletion"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "2762-2768", "note": "Validation checks only IsNullOrWhiteSpace(Name); no duplicate guard; notifications validate nothing"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "1011-1017, 1169-1174", "note": "Same-named profiles write the same VaultAuthTarget; default resolution takes first name match"}
+  ]
+ },
+ {
+  "id": "BUG-063",
+  "title": "Run Now is an async-void handler with no try/catch over code paths that perform throwing disk writes",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "dialogs-jobs-history",
+  "lens": "reliability",
+  "existing_state": "OnRunNowClick (JobListDialog.cs:1061-1076) is async void with no try/catch; it awaits RunNowJobAsync (JobListDialog.cs:1515-1523), which in production routes to Form1.RunTrackedJobNowAsync (Form1.cs:15311-15326, also no try/catch) and then JobExecutionService.RunNowAsync. RunNowAsync's own catch blocks only cover ExecuteTrackedJobAsync — but its start path TryStartJob persists RunningState via _jobStorage.Save (Services/JobExecutionService.cs:768-774), its finally path CompleteJob also calls _jobStorage.Save (827-832), and the exception handlers themselves call HandlePostExecution which can call Save (251, 258 -> 877-888). JobStorageService.PersistToDisk does real file I/O on jobs.json, so a locked file, disk-full, or AV interference throws straight through the awaited chain into the async-void continuation on the UI thread. The repo registers no Application.ThreadException / AppDomain.UnhandledException handler anywhere (see BUG-037), so the user gets the raw WinForms unhandled-exception dialog — or process termination — instead of an error message, while the job may actually be mid-run.",
+  "recommendation": "Wrap the body of OnRunNowClick in try/catch and surface failures via the existing DialogTheme.Show error pattern used by every sibling handler (e.g. OnNewClick at JobListDialog.cs:1043-1052). Defense in depth: have RunNowAsync catch persistence failures from TryStartJob/CompleteJob (RunningState persistence is best-effort crash-recovery metadata — a failed write should log and continue, not abort/crash the run).",
+  "user_benefit": "A transient jobs.json write failure during Run Now degrades to a readable error message instead of crashing the whole application mid-fleet-run.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs", "lines": "1061-1076, 1515-1523", "note": "async void handler with no try/catch, unlike every neighboring handler"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "222-268, 768-774, 820-833", "note": "TryStartJob and CompleteJob (finally) perform _jobStorage.Save outside the catch coverage; HandlePostExecution Saves inside the catch blocks"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "15311-15326", "note": "RunTrackedJobNowAsync passes exceptions through; no global ThreadException/UnhandledException handler exists in the repo"}
+  ]
+ },
+ {
+  "id": "BUG-064",
+  "title": "UpdateDialog: retrying a failed download detaches the progress handler, showing a frozen bar that invites the user to kill a healthy download",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "dialogs-general",
+  "lens": "ux",
+  "existing_state": "On a retryable download error, the catch block unsubscribes DownloadProgressChanged and re-invokes BtnYes_Click directly (UpdateDialog.cs:643-645). BtnYes_Click is `async void`, so the recursive call returns to the caller at its first await (the DownloadUpdateAsync await at 536) right after re-subscribing the handler at 525 — and then the OUTER invocation's `finally` runs (660-663) and unsubscribes the handler the retry just registered. The retried download proceeds with the bar stuck at 0% under \"Downloading update...\" with no byte counts. Because UpdateDialog_FormClosing cancels the download CTS (457-460), a user who concludes the update hung and closes the dialog aborts a download that was actually progressing fine.",
+  "recommendation": "Replace the recursive re-invocation with a loop: wrap the download/verify/install body in `while (true) { try { ... break; } catch (retryable) { if (user declines) break; } }` with subscribe/unsubscribe hoisted outside the loop — or simply move the subscribe into the try and skip the recursion by extracting the body into a private async Task method awaited in a loop.",
+  "user_benefit": "Retried update downloads show real progress instead of appearing hung, so users stop cancelling working updates.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UpdateDialog.cs", "lines": "640-663", "note": "Recursive async-void call at 644; outer finally at 662 unsubscribes the handler the inner call subscribed at 525"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UpdateDialog.cs", "lines": "457-460", "note": "Closing the seemingly-frozen dialog cancels the CTS and aborts the in-flight retry"}
+  ]
+ },
+ {
+  "id": "BUG-065",
+  "title": "Corrupt history index orphans every run payload and the next index write clobbers the good index backup",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "M",
+  "area": "persistence-config",
+  "lens": "data-integrity",
+  "existing_state": "history.index.json is written atomically WITH a .bak (Services/HistoryStorageService.cs:609-613 -> JsonFileWriter.WriteJsonAtomic createBackup:true), but ReadIndexDocument never uses that backup: on a parse failure it copies the corrupt file to a timestamped .corrupt (HistoryStorageService.cs:602-606, :736-737 — copy, not move, so the corrupt file stays at the index path) and returns a fresh empty index. Two consequences: (1) all history/{id}.json payloads remain on disk but become permanently invisible — nothing rescans the run folder (only DeleteAll sweeps it, :518-524); (2) the next index write — which happens on the very next run save or delete — calls File.Replace(temp, index, index.bak) (Utilities/JsonFileWriter.cs:40), moving the still-corrupt index over the last good .bak, destroying the only file that could have restored the list. Per-run load failures are also indistinguishable: TryLoadRunPayload swallows every exception into `return false` (:92-96), so locked vs corrupt vs missing all render as the same generic failure.",
+  "recommendation": "In ReadIndexDocument's catch: first try history.index.json.bak before resetting to empty, and back up the corrupt file with useMove:true so it can't be re-promoted into .bak. Add an orphan-reconciliation pass (on empty-index load, scan history/*.json and rebuild entries from payload Id + file mtime — ParseCreatedAtUtc already exists for label-derived timestamps). Optionally log the swallowed exception in TryLoadRunPayload so locked-file vs corrupt-file failures are diagnosable.",
+  "user_benefit": "One corrupted index file no longer silently erases the entire execution-history list while the data still sits on disk unrecoverable.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\HistoryStorageService.cs", "lines": "591-613", "note": "corrupt index -> .corrupt copy + empty index; .bak written but never read"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JsonFileWriter.cs", "lines": "34-41", "note": "File.Replace promotes the still-corrupt index into .bak on next write"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\HistoryStorageService.cs", "lines": "92-96, 510-528", "note": "exception-swallowing payload load; only DeleteAll ever sweeps orphans"}
+  ]
+ },
+ {
+  "id": "BUG-066",
+  "title": "CSV load rejects files with duplicate headers and silently drops cells from over-long rows (loss becomes permanent on save-back)",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "persistence-config",
+  "lens": "data-integrity",
+  "existing_state": "Two robustness gaps in CsvManager.LoadFromFile: (1) duplicate column names — common in spreadsheet exports, and including the case where any later column is literally named \"Host_IP\" (the first header is unconditionally discarded and replaced with Host_IP at Services/CsvManager.cs:32-35) — make `dt.Columns.Add(headerName)` (:46) throw DuplicateNameException, surfaced as a raw \"Failed to load CSV: A column named 'X' already belongs to this DataTable\" dialog (Form1.cs:9239-9242); the file cannot be opened at all. Note headers also collapse via the space->underscore rewrite (:45), so \"port 1\" and \"port_1\" collide. (2) Rows with more cells than the header are truncated without any warning (Array.Resize at :61-62); because saving writes the grid back over the same file (Form1.cs:9285-9325), one load-then-save round trip permanently deletes the extra columns' data from the user's file.",
+  "recommendation": "In LoadFromFile: deduplicate header names deterministically (append _2, _3...) instead of letting DataTable throw, treat a non-first \"Host_IP\" header the same way, and count truncated rows — return or expose a load summary so Form1 can show \"N rows had extra fields that were ignored\" before the user saves over the original.",
+  "user_benefit": "Real-world spreadsheet exports load instead of erroring, and a quiet open/save cycle can no longer permanently strip data out of the operator's hosts file.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\CsvManager.cs", "lines": "32-46", "note": "first header discarded -> Host_IP; dt.Columns.Add throws on duplicates"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\CsvManager.cs", "lines": "61-62", "note": "silent Array.Resize truncation of over-long rows"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "9239-9242", "note": "raw DuplicateNameException message shown; load aborted"}
+  ]
+ }
+]

@@ -1,0 +1,41 @@
+{
+ "id": "PERF-032",
+ "title": "Flow Canvas property edits commit O(graph) store updates per keystroke, and undo deep-clones the entire snippet-laden graph (100-deep) at every snapshot",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-ui",
+ "lens": "perf",
+ "existing_state": "Despite the name, useBufferedInput.onChange calls commitIfNeeded on every keystroke (FlowCanvas/src/panels/Properties.tsx:52-56) — the buffer only guards against external overwrites, not commit frequency. Each commit runs updateNodeProp, which builds a Map of ALL nodes, walks the _isChildOf ancestor chain, and produces a brand-new nodes array plus isDirty/export-status churn (stores/slices/graphSlice.ts:510-562); the new array identity re-renders React Flow and re-runs the full per-node/per-edge selector fan-out plus BranchBandsLayer — per keystroke. On top, undo snapshots JSON.parse(JSON.stringify()) ALL nodes and edges into a 100-deep stack (stores/slices/undoSlice.ts:5, 30-44; undo/redo double-clone again at 46-98), captured synchronously at pointer-down of every block drag (App.tsx:169-174), every connect/add/delete/branch-edit (graphSlice.ts:356, 423, 430, 461, 565), the first keystroke of each 500ms property-edit burst (Properties.tsx:1551-1566), paste, comment ops, auto-layout, and band moves. For imported presets each node's data.props._yamlSnippet holds its step's original YAML verbatim — a container's snippet contains its ENTIRE nested subtree text (Services/FlowCanvasBridge.cs:18-20, 419) — so a large script's text is duplicated once per nesting level per snapshot, accumulating up to 100 full graph copies (tens of MB) across a session, with a perceptible synchronous stringify/parse hitch at every drag start.",
+ "recommendation": "Commit on blur/Enter or debounce the commit ~250-300ms (the local buffer already gives instant visual feedback in the field) — the per-keystroke commitIfNeeded call in onChange is the one line to change. Make updateNodeProp touch only the edited node plus its ancestor containers instead of remapping every node (it already computes the exact id set). For undo, exploit the store's existing immutability: snapshot the array references (structural sharing — all mutation paths already produce new node/edge objects) instead of deep JSON clones, or strip _yamlSnippet from snapshots and reattach by id on restore; consider lowering MAX_HISTORY or capping by estimated bytes.",
+ "user_benefit": "Typing into a send block's commands field on a big preset stops doing O(graph) work plus multi-MB clones per keystroke burst — the most direct 'why does typing feel laggy' cause on the canvas — and the pointer-down hitch when dragging blocks on large imported scripts disappears.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/panels/Properties.tsx",
+   "lines": "52-56, 1551-1566",
+   "note": "onChange -> commitIfNeeded per keystroke; pushDebouncedSnapshot fires a full deep-clone snapshot once per 500ms burst"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/graphSlice.ts",
+   "lines": "510-562",
+   "note": "updateNodeProp builds a Map of all nodes + remaps the whole array + isDirty + export-status clear per call"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/undoSlice.ts",
+   "lines": "5, 30-44, 46-98",
+   "note": "JSON deep clone of all nodes+edges (incl. _yamlSnippet) per snapshot, 100-deep history; undo/redo clone again"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/App.tsx",
+   "lines": "169-174",
+   "note": "synchronous snapshot at every drag start"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/FlowCanvasBridge.cs",
+   "lines": "18-20, 419",
+   "note": "_yamlSnippet on every node; container snippets contain whole subtree text"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

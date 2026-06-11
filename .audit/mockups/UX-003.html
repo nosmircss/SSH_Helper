@@ -1,0 +1,76 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace;margin:12px}
+.row{display:flex;gap:14px;align-items:flex-start}
+.col{flex:1;min-width:0}
+.cap{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap b{color:#ff5c5c;font-weight:normal}.cap i{color:#2bd97c;font-style:normal}
+.panel{background:#11151d;border:1px solid #1c2330;border-radius:6px;padding:6px;position:relative}
+.grid{background:#0d1118;border:1px solid #1c2330;border-radius:3px;overflow:hidden;position:relative;font-size:10px}
+.ln{display:grid;grid-template-columns:16px 84px 1fr 48px 56px;gap:4px;padding:1px 5px;white-space:nowrap}
+.ln span{overflow:hidden}
+.hd{background:#161b25;border-bottom:1px solid #1c2330;color:#8294a8;padding:2px 5px}
+.ck{color:#2bd97c}.un{color:#3a4656}
+.dev{color:#8294a8}.site{color:#8294a8}.hit .site{color:#4cc9f0}
+.hide{color:#3a4656;text-align:center;padding:1px 0;font-size:9px;border-top:1px dashed #1c2330;border-bottom:1px dashed #1c2330}
+.sb{position:absolute;right:1px;top:18px;bottom:1px;width:5px;background:#161b25}
+.sb i{position:absolute;left:0;right:0;background:#2a3447;border-radius:2px}
+.fb{display:flex;gap:6px;align-items:center;margin-bottom:5px;font-size:10px}
+.inp{background:#0d1118;border:1px solid #2a3447;border-radius:3px;padding:1px 6px;color:#c9d4e3;flex:1}
+.inp.on{border-color:#4cc9f0}.inp .ph{color:#3a4656}.inp .q{color:#4cc9f0}
+.badge{border:1px solid #4cc9f0;color:#4cc9f0;border-radius:8px;padding:0 7px;font-size:9px;white-space:nowrap}
+.btn{background:#1b2230;border:1px solid #2a3447;border-radius:3px;padding:1px 8px;color:#c9d4e3;font-size:9px;white-space:nowrap}
+.btn.g{background:#10291c;border-color:#2bd97c;color:#2bd97c}
+.st{border-top:1px solid #1c2330;margin-top:5px;padding-top:4px;color:#8294a8;font-size:9px;display:flex;justify-content:space-between}
+.menu{position:absolute;right:14px;top:78px;background:#161b25;border:1px solid #2a3447;border-radius:3px;font-size:9px;box-shadow:0 4px 12px #0008;z-index:2}
+.menu div{padding:2px 12px}.menu div:hover{background:#1b2230}
+.note{font-size:10px;margin-top:4px}
+.r{color:#ff5c5c}.g{color:#2bd97c}.a{color:#ffb454}.c{color:#4cc9f0}.m{color:#8294a8}
+.foot{color:#8294a8;font-size:9px;margin-top:10px;border-top:1px solid #1c2330;padding-top:6px}
+</style></head><body>
+<div class="row">
+
+<div class="col">
+<p class="cap">Before — select-by-scrolling, 312 rows</p>
+<div class="panel">
+<div class="grid">
+<div class="ln hd"><span></span><span>Host_IP</span><span>name</span><span>site</span><span>role</span></div>
+<div class="ln"><span class="un">☐</span><span>10.20.10.11</span><span class="dev">edge-fw-dc1-01</span><span class="site">DC1</span><span>firewall</span></div>
+<div class="ln"><span class="un">☐</span><span>10.20.10.21</span><span class="dev">core-sw-dc1-01</span><span class="site">DC1</span><span>switch</span></div>
+<div class="ln"><span class="ck">☑</span><span>10.20.20.11</span><span class="dev">edge-fw-dc2-01</span><span class="site">DC2</span><span>firewall</span></div>
+<div class="ln"><span class="un">☐</span><span>10.30.5.11</span><span class="dev">br-rtr-aus-01</span><span class="site">BR-AUS</span><span>router</span></div>
+<div class="ln"><span class="ck">☑</span><span>10.20.20.21</span><span class="dev">core-sw-dc2-01</span><span class="site">DC2</span><span>switch</span></div>
+<div class="ln"><span class="un">☐</span><span>10.20.10.22</span><span class="dev">core-sw-dc1-02</span><span class="site">DC1</span><span>switch</span></div>
+<div class="ln"><span class="un">☐</span><span>10.30.5.12</span><span class="dev">br-rtr-aus-02</span><span class="site">BR-AUS</span><span>router</span></div>
+<div class="sb"><i style="top:3px;height:5px"></i></div>
+</div>
+<div class="menu"><div>Select All</div><div>Deselect All</div><div>Invert Selection</div></div>
+<div class="st"><span>312 hosts · 2 selected</span><span>row 8 of 312</span></div>
+</div>
+<div class="note a">↑ context menu = the only selection aids</div>
+<div class="note r">“run on all site=DC2 hosts” → scan 312 rows by eye, click 34 boxes one by one. Header click selects the column — never sorts (forced NotSortable).</div>
+</div>
+
+<div class="col">
+<p class="cap">After — filter row above the grid</p>
+<div class="panel">
+<div class="fb"><span class="inp on">⌕ <span class="q">site=DC2</span></span><span class="badge">34 of 312 shown</span></div>
+<div class="fb"><span class="btn g">☑ Check all visible</span><span class="btn">☐ Uncheck visible</span></div>
+<div class="grid">
+<div class="ln hd"><span></span><span>Host_IP</span><span>name</span><span>site</span><span>role</span></div>
+<div class="ln hit"><span class="ck">☑</span><span>10.20.20.11</span><span class="dev">edge-fw-dc2-01</span><span class="site">DC2</span><span>firewall</span></div>
+<div class="ln hit"><span class="ck">☑</span><span>10.20.20.12</span><span class="dev">edge-fw-dc2-02</span><span class="site">DC2</span><span>firewall</span></div>
+<div class="ln hit"><span class="ck">☑</span><span>10.20.20.21</span><span class="dev">core-sw-dc2-01</span><span class="site">DC2</span><span>switch</span></div>
+<div class="ln hit"><span class="ck">☑</span><span>10.20.20.22</span><span class="dev">core-sw-dc2-02</span><span class="site">DC2</span><span>switch</span></div>
+<div class="ln hit"><span class="ck">☑</span><span>10.20.20.31</span><span class="dev">acc-sw-dc2-01</span><span class="site">DC2</span><span>switch</span></div>
+<div class="hide">··· 278 non-matching rows hidden (Row.Visible=false) ···</div>
+</div>
+<div class="st"><span>312 hosts · <span class="g">34 selected</span></span><span>filtered</span></div>
+</div>
+<div class="note g">one line + one click, then Run — was minutes of scrolling</div>
+<div class="note m">matches any column (<span class="c">col=value</span> targets one); hiding rows sidesteps the checkbox-column reorder hazard real sorting would add</div>
+</div>
+
+</div>
+<div class="foot">Same filter box mirrored into the Run Folder dialog’s host list (today a flat unfiltered CheckedListBox).</div>
+</body></html>

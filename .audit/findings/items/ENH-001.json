@@ -1,0 +1,36 @@
+{
+ "id": "ENH-001",
+ "title": "Expressions are never validated before run — typo'd conditions silently evaluate always-true and unknown functions explode mid-run",
+ "category": "ENH",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "ux",
+ "existing_state": "Validate() checks only YAML structure: an `if` step is checked for having a `then` block (ScriptParser.cs:4419-4449) and `set` only for containing '=' (ScriptParser.cs:4539-4554) — the condition/RHS expression text is never parsed at validation time. At runtime the condition language is whitespace-sensitive string scanning: every operator must be written as \" op \" with spaces (ExpressionEvaluator.cs:151-203), so `if: x==1` (no spaces) finds no operator, falls through to a truthiness check of the literal string \"x==1\" (ExpressionEvaluator.cs:205-207), which is non-empty and not \"false\" so it is always TRUE (ValueResolver.cs:357-359) — the then-branch runs on every host regardless of x. Misspelled function names are equally invisible: ExpressionParser throws \"Unknown function\" only at runtime (ExpressionParser.cs:436); inside a condition that exception is swallowed and the unparsed string is returned (ExpressionEvaluator.cs:331-340), then coerced to 0 by ResolveNumeric (368-376), so `if: lenth(items) > 0` is silently always false. Regex errors in `matches` also silently return false (96-103). The live editor lint (Services/Editor) calls this same Parse+Validate, so it can't flag any of this either.",
+ "recommendation": "Add an expression syntax-check pass to Validate(): for every `if`/`elif`/`while`/`until`/`when`/`assert` condition and `set` RHS, run a context-free dry parse that (a) flags adjacent comparison operators lacking surrounding spaces (scan for ==/!=/>=/<= outside quotes when the spaced form was not found), (b) verifies every `name(` call site against FunctionRegistry.Instance plus the JsonUtilities legacy names (both catalogs are statically known), (c) checks balanced quotes/parens, and (d) compiles `matches` literal patterns. Skip checks for dynamic content the same way enum validation already does via IsDynamicValue (ScriptParser.cs:5202-5205). Surfacing these as validation errors automatically lights them up in the Scintilla editor lint and the pre-run validation dialog.",
+ "user_benefit": "A one-character typo today changes which branch runs on an entire fleet with zero diagnostics anywhere; this turns the most dangerous silent-wrong-answer class in the engine into red squiggles before anything is sent to a device.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionEvaluator.cs",
+   "lines": "151-207, 327-376, 96-103",
+   "note": "space-delimited operator scan, truthy fallback, swallowed parse/regex errors, numeric coercion to 0"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionParser.cs",
+   "lines": "422-437",
+   "note": "Unknown function is a runtime-only FormatException"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs",
+   "lines": "4419-4449, 4539-4554",
+   "note": "validation checks block structure only, never expression text"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ValueResolver.cs",
+   "lines": "347-368",
+   "note": "non-empty string truthiness makes unparsed conditions always-true"
+  }
+ ],
+ "mockup_idea": "Editor screenshot mockup: `if: x==1` with a red squiggle under `x==1` and hover tooltip \"Comparison operators need surrounding spaces: did you mean 'x == 1'? Without spaces this always evaluates true.\" plus a second line `set: n = lenth(items)` flagged \"Unknown function 'lenth' — did you mean 'length'?\"",
+ "merged_from": 1
+}

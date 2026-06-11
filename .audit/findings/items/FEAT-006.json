@@ -1,0 +1,41 @@
+{
+ "id": "FEAT-006",
+ "title": "No global exception handler, no application log file, no crash reporting — Release-build diagnostics evaporate",
+ "category": "FEAT",
+ "severity": "high",
+ "effort": "M",
+ "area": "error-diagnostics",
+ "lens": "cross",
+ "existing_state": "Program.cs:59 runs `Application.Run(new Form1())` with no try/catch, and a repo-wide search finds zero registrations of Application.ThreadException, AppDomain.CurrentDomain.UnhandledException, TaskScheduler.UnobservedTaskException, or SetUnhandledExceptionMode. There is no logging framework anywhere (no ILogger/Serilog/NLog/Trace/EventLog and no log file under %LocalAppData%\\SSH_Helper). The only diagnostic channel is Debug.WriteLine (35 occurrences across 9 files), which compiles to a no-op in Release. Concrete diagnostics that vanish for end users: the scheduler's entire evaluation loop failure is caught and Debug.WriteLine-only (Services/JobExecutionService.cs:325-327) — if it throws repeatedly, scheduled jobs silently stop firing with zero trace; losing the scheduler lock to another instance logs only Debug.WriteLine (Form1.cs:15103); an InheritFromApp job with a username but missing app-level password logs the real cause only to Debug.WriteLine (Services/JobExecutionService.cs:620) then passes the throw-guard at :388-393 (which requires BOTH username and password empty) and runs with an empty password, so job history records generic per-host auth failures instead of 'password missing'. User-facing error dialogs show only ex.Message with the stack discarded (e.g. Form1.cs:12442, 12501, 12969). An unhandled exception in the 15k-line Form1 produces the stock .NET crash dialog with no state flush and nothing the user can send the developer.",
+ "recommendation": "In Program.Main register Application.ThreadException + AppDomain.CurrentDomain.UnhandledException + TaskScheduler.UnobservedTaskException handlers that append exception, app version (Form1.ApplicationVersion), and timestamp to a rolling log under AppDataPaths.GetAppFolder()/logs/, then show a themed crash dialog with 'Copy details' and 'Open log folder' actions. Add a tiny static FileLog helper (one class in Utilities/) and route the existing Debug.WriteLine sites — at minimum JobExecutionService.cs:327/620/1019 and Form1.cs:15103 — through it so scheduler failures are diagnosable in Release. Error dialogs can then append 'Details were written to the log.'",
+ "user_benefit": "Today a crash or a silently-dead scheduler is undebuggable — there is literally nothing on disk to look at. A log file plus a crash handler turns 'it just stopped working' support cases into one-file diagnoses.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Program.cs",
+   "lines": "13-60",
+   "note": "Main has no exception handling; Application.Run unguarded at :59"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "325-327",
+   "note": "scheduler evaluation failure swallowed into Debug.WriteLine"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "388-393, 605-621",
+   "note": "throw-guard requires both username AND password empty; missing-password cause logged Debug-only, job runs with empty password"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "15103",
+   "note": "scheduler-lock loss (second instance) is Debug.WriteLine only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12439-12443",
+   "note": "execution failure dialog shows ex.Message only; no stack, no log"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

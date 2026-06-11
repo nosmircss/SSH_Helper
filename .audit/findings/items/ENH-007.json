@@ -1,0 +1,26 @@
+{
+ "id": "ENH-007",
+ "title": "No CI on push/PR — the .NET test suite and FlowCanvas vitest suite never run anywhere",
+ "category": "ENH",
+ "severity": "high",
+ "effort": "S",
+ "area": "models-samples-build",
+ "lens": "ux",
+ "existing_state": "The only workflow, .github/workflows/build-release.yml, triggers solely on v* tags and manual dispatch — the push-to-master and pull_request triggers are commented out (lines 4-10). No job anywhere runs `dotnet test` (SSH_Helper.Tests with its sample-validation, bridge round-trip/parity, scheduler and config-corruption suites is invisible to CI), and no job runs FlowCanvas `npm test` (vitest). The only automated gate before a release binary is cut is the Playwright e2e suite (line 43), which the build job `needs` (line 56). Regressions land on master completely unverified, and a tag build can ship binaries whose unit suites are red.",
+ "recommendation": "Add a lightweight ci.yml triggered on push + pull_request: job 1 (windows-latest) runs `dotnet build -p:SkipFlowCanvasBuild=true` + `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj`; job 2 (ubuntu) runs `npm ci && npm test` in FlowCanvas/ plus optionally the fast `test:e2e:parity` subset. Keep the heavyweight full-e2e + dual-publish pipeline tag-only as today. Also add the same `dotnet test` step to build-release.yml so a tag can never ship over a red suite.",
+ "user_benefit": "Every commit gets the safety net the project already paid for (a large xUnit + vitest investment that currently runs only on developer machines); release tags stop being the first time anyone discovers a broken build.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml",
+   "lines": "3-10",
+   "note": "tags + workflow_dispatch only; branches/pull_request triggers commented out"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml",
+   "lines": "41-43, 55-87",
+   "note": "Playwright e2e is the only test gate; build job publishes without ever running dotnet test or vitest"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

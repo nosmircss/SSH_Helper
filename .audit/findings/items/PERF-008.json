@@ -1,0 +1,31 @@
+{
+ "id": "PERF-008",
+ "title": "Host grid populated row-by-row, cell-by-cell — startup and every environment switch stall on large fleets",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "cross-startup",
+ "lens": "perf",
+ "existing_state": "Both grid loaders insert hosts one at a time: RestoreApplicationState does dgv_variables.Rows.Add() per row, then sets Rows[rowIndex].Height = 28 per row (redundant — RowTemplate.Height is already 28 at Form1.cs:14817), then assigns each cell via name indexer guarded by dgv_variables.Columns.Contains(kvp.Key) per cell (Form1.cs:14836-14844). LoadEnvironmentIntoGrid repeats the identical pattern and additionally allocates a full Dictionary copy per row (Form1.cs:2286-2316). Columns.Contains + Cells[name] are linear name lookups, so populating is O(rows x cols x cols). BeginHostGridRestoreScope only defers the scrollbar/host-count/dirty callbacks (UI/HostGridRestoreBatcher.cs:36-67); nothing suspends grid layout or batches row insertion, so each Rows.Add triggers DataGridView bookkeeping individually. This runs in the startup Load handler (RestoreWindowState -> RestoreInitialEnvironmentState, Form1.cs:1678-1702) and again on every environment switch — for the multi-thousand-host fleets this app targets, that is the classic multi-second DataGridView freeze.",
+ "recommendation": "In both loaders: precompute a Dictionary<string,int> of column name -> index once; build DataGridViewRow instances offline (row.CreateCells(dgv) + SetValues) and insert with a single dgv_variables.Rows.AddRange(rowArray); drop the per-row Height assignment (RowTemplate covers it); wrap population in SuspendLayout/ResumeLayout. This naturally falls out of extracting a shared PopulateHostGrid helper for the two duplicate loaders.",
+ "user_benefit": "Startup restore and environment switching go from a visible multi-second freeze to near-instant on large fleets — the core workflow of a multi-host tool.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "14801-14858",
+   "note": "RestoreApplicationState: per-row Rows.Add + per-row Height + per-cell Columns.Contains/name-indexed assignment"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "2269-2331",
+   "note": "LoadEnvironmentIntoGrid: identical per-row/per-cell pattern plus a dictionary copy per row; runs on every environment switch"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/HostGridRestoreBatcher.cs",
+   "lines": "24-67",
+   "note": "restore scope only batches refresh callbacks — no layout suspension, no row batching"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

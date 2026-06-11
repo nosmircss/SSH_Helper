@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-020",
+ "title": "Three near-identical script execution backends inside SshExecutionService with visible behavioral drift",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "ssh-execution",
+ "lens": "perf",
+ "existing_state": "ExecuteScriptWithPool (Services/SshExecutionService.cs:1501-1572), ExecuteScriptWithoutPool (:1578-1703), and ExecuteScriptLocal (:1705-1759) each independently re-implement the same sequence: header banner build, ScriptContext creation, ConfigureScriptExecutionContext, AttachScriptExecutionEventHandlers, ScriptExecutor construction + the three debug-event re-subscriptions, EnsureScriptSucceeded. The duplication has already produced divergence: (1) header format differs for the same feature — pooled emits \"# {host} {prompt} SCRIPT: {name} #\" (:1531) while non-pooled emits \"# SCRIPT: {host} {prompt}{name} #\" (:1665), so transcripts/history for identical runs differ by pooling setting; (2) session.DebugOutput is subscribed only in the non-pooled path (:1637-1643) — pooled script runs silently drop all session-level debug output (prompt detection, banner handling), even though the simple-command pooled path does subscribe it (:2115-2119); (3) post-init FlushBuffer is called only in the non-pooled simple path (:2270) — both script paths and the pooled simple path skip it, so residual login-banner data can bleed into the first command's output on those paths only. These are inside a 2,897-line service, so each new script feature (relay state, preconnect, Flow Canvas debug bootstrap) had to be threaded through all three copies.",
+ "recommendation": "Collapse the trio into one RunScriptCore(host, script, sessionProvider, ...) where the only varying piece is a small session acquisition strategy (pooled lease / direct connect / null for local) and the header prefix string. The shared body owns header emission, context configuration, event wiring (including session.DebugOutput uniformly), executor execution, and cleanup. Fix the header format and DebugOutput drift in the process — one format, one subscription policy.",
+ "user_benefit": "Identical script runs produce identical transcripts and identical debug diagnostics regardless of the pooling toggle, and future script-engine features get wired once instead of three times (the class's history shows each copy is a place to forget).",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "1501-1759",
+   "note": "Three parallel backends repeating header/context/executor wiring"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "1531 vs 1665",
+   "note": "Drifted header formats for the same banner"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "1637-1643 vs 1520-1565, 2115-2119",
+   "note": "session.DebugOutput hooked non-pooled (and in pooled simple-command path) but absent from the pooled script backend"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

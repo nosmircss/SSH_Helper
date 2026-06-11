@@ -1,0 +1,26 @@
+{
+ "id": "BUG-015",
+ "title": "Folder runs apply the first preset's timeout to every preset in the folder",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "form1-b",
+ "lens": "correctness",
+ "existing_state": "ExecuteFolderWithOptionsAsync computes one timeout for the whole folder: `int commandTimeout = presets.Values.FirstOrDefault()?.Timeout ?? config.Timeout;` (Form1.cs:12916) and passes a single SshTimeoutOptions into `_sshService.ExecuteFolderAsync` (12917-12929). SshExecutionService never re-resolves per-preset timeouts — the only timeout reads in the service are `timeouts.CommandTimeout` (SshExecutionService.cs:1628, 2226) and `timeouts.ConnectionTimeout` (2375). Per CLAUDE.md, `int? Timeout` is the one per-preset override that exists, and it is honored for single-preset runs (Form1.cs:12307-12309) — but in a folder run, every preset after the first runs under the first preset's (or default) timeout.",
+ "recommendation": "Thread per-preset timeouts into the folder pipeline: either pass `Dictionary<string, SshTimeoutOptions>` (or resolve `preset.Timeout ?? defaultTimeout` inside ExecuteFolderAsync's per-preset loop in SshExecutionService) so each preset executes with its own configured timeout. Keep ConnectionTimeout shared.",
+ "user_benefit": "A long-running preset (firmware upgrade, large transfer) placed after a quick preset in a folder is currently killed at the quick preset's timeout — runs fail with timeout errors that look like host problems, and the per-preset Timeout setting the user configured is silently ignored.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12915-12929",
+   "note": "Single timeout from first preset for entire folder run"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "618-660",
+   "note": "ExecuteFolderAsync takes one SshTimeoutOptions; no per-preset timeout resolution anywhere in the service (only timeouts.CommandTimeout at 1628/2226)"
+  }
+ ]
+}

@@ -1,0 +1,31 @@
+{
+ "id": "UX-026",
+ "title": "No Ctrl+/ comment toggle — commenting is two buried context-menu items, and the job editor's script box has neither",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "editor",
+ "lens": "ux",
+ "existing_state": "ScintillaScriptEditorControl already exposes solid CommentSelectedLines/UncommentSelectedLines methods (indent-aware, single undo action — UI/ScintillaScriptEditorControl.cs:406-443), but the only way to reach them is two separate right-click items on Form1's editor context menu with no keyboard shortcut assigned (ctxCommentSelectedLines/ctxUncommentSelectedLines, Form1.Designer.cs:885-897 — note ctxSelectAll right above them displays Ctrl+A, these display nothing). A repo-wide search confirms no Keys.Oem2/Ctrl+/ handler exists anywhere. Worse, the second editor host — JobEditorDialog's custom-preset script box — has no editor context menu at all (its only ContextMenuStrip is the hosts grid menu, JobEditorDialog.cs:68, 178, 780), so commenting there means typing '#' line by line. Toggling blocks of steps on/off while debugging a device run is one of the most frequent edits in this kind of tool.",
+ "recommendation": "Handle Ctrl+/ (Keys.Oem2 with Control) inside ScintillaScriptEditorControl.Editor_KeyDown as a single smart toggle (if any selected non-blank line is uncommented, comment all; else uncomment all) — implementing it in the control gives Form1 and JobEditorDialog the shortcut simultaneously with zero per-host wiring. Merge the two menu items into one 'Toggle Comment  Ctrl+/' entry, and give JobEditorDialog the same editor context menu (or at least the toggle).",
+ "user_benefit": "Comment-toggling a block of steps becomes a one-chord muscle-memory action identical to VS Code, instead of right-click + choosing the correct of two menu items — and it finally works at all in the job editor.",
+ "evidence": [
+  {
+   "file": "UI/ScintillaScriptEditorControl.cs",
+   "lines": "406-443",
+   "note": "Comment/uncomment logic already exists on the control"
+  },
+  {
+   "file": "Form1.Designer.cs",
+   "lines": "885-897",
+   "note": "Two context-menu items, no ShortcutKeys set"
+  },
+  {
+   "file": "JobEditorDialog.cs",
+   "lines": "68, 178, 780",
+   "note": "Only ContextMenuStrip in the dialog is the hosts grid menu — script editor has none"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

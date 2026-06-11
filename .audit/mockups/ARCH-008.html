@@ -1,0 +1,86 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+.cols{display:flex;gap:14px}
+.col{flex:1;min-width:0}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px 2px}
+.cap b{font-weight:700}
+.cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+.win{border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden}
+.tb{background:#11161f;border-bottom:1px solid #1c2330;padding:5px 8px;color:#8294a8;font-size:11px}
+.tabs{display:flex;gap:2px;padding:6px 8px 0;border-bottom:1px solid #1c2330;font-size:10px;color:#8294a8}
+.tabs span{padding:3px 8px;border:1px solid transparent;border-bottom:none;border-radius:4px 4px 0 0}
+.tabs .on{color:#4cc9f0;border-color:#1c2330;background:#0b0e13}
+.body{display:flex;gap:8px;padding:8px}
+.list{width:118px;border:1px solid #1c2330;border-radius:4px;background:#0b0e13;padding:3px;flex-shrink:0}
+.it{padding:3px 6px;border-radius:3px;white-space:nowrap;overflow:hidden}
+.it.sel{background:#14202e;color:#4cc9f0}
+.it small{color:#8294a8;font-size:9px}
+.gone{color:#3a4656;text-decoration:line-through}
+.badge{display:inline-block;font-size:8px;background:#2b2113;color:#ffb454;border:1px solid #5c4a22;border-radius:3px;padding:0 4px;text-decoration:none}
+.flds{flex:1;min-width:0}
+.f{margin-bottom:5px}
+.f label{display:block;font-size:9px;color:#8294a8;margin-bottom:1px}
+.f .v{border:1px solid #1c2330;border-radius:3px;background:#0b0e13;padding:3px 6px;font-size:10px;overflow:hidden;white-space:nowrap}
+.btns{display:flex;gap:6px;padding:0 8px 8px}
+.btn{border:1px solid #1c2330;border-radius:4px;background:#11161f;padding:3px 10px;font-size:10px;color:#c9d4e3}
+.btn.rm{border-color:#7a2e2e;color:#ff5c5c}
+.btn.cx{margin-left:auto}
+.note{margin-top:8px;border-left:2px solid;padding:5px 8px;font-size:10.5px;line-height:1.5;border-radius:0 4px 4px 0}
+.note.bad{border-color:#ff5c5c;background:#1a1014;color:#e8b4b4}
+.note.good{border-color:#2bd97c;background:#0e1a14;color:#a8d9bd}
+.note code{color:#c9d4e3}
+.k{color:#4cc9f0}
+.foot{margin-top:10px;font-size:10px;color:#8294a8;line-height:1.5}
+.foot b{color:#c9d4e3}
+</style></head><body>
+
+<div class="cols">
+ <div class="col">
+  <p class="cap"><b class="bad">Before</b> — Remove writes Credential Manager immediately</p>
+  <div class="win">
+   <div class="tb">Settings</div>
+   <div class="tabs"><span>General</span><span>Editor</span><span class="on">Vault</span><span>Notifications</span></div>
+   <div class="body">
+    <div class="list">
+     <div class="it">prod-vault <small>★</small></div>
+     <div class="it sel">lab-fortigate</div>
+     <div class="it">dev-sandbox</div>
+    </div>
+    <div class="flds">
+     <div class="f"><label>Address</label><div class="v">https://vault.nwcd.net:8200</div></div>
+     <div class="f"><label>Auth method</label><div class="v">Token</div></div>
+     <div class="f"><label>Token</label><div class="v" style="color:#3a4656">(empty — deleted)</div></div>
+    </div>
+   </div>
+   <div class="btns"><span class="btn">Add</span><span class="btn rm">Remove ⟵ clicked</span><span class="btn cx">Save</span><span class="btn">Cancel</span></div>
+  </div>
+  <div class="note bad">Remove ⟶ <code>SaveVaultCredential</code> <b>deletes the stored token right now</b> (SettingsDialog.cs:851–858). Click <b>Cancel</b> next: profile reappears in <code>config.json</code> — but its token is <b>already gone</b>. Next run against 10.40.2.11 fails: “no credential for lab-fortigate”.</div>
+ </div>
+
+ <div class="col">
+  <p class="cap"><b class="good">After</b> — purge staged, flushed only on Save</p>
+  <div class="win">
+   <div class="tb">Settings</div>
+   <div class="tabs"><span>General</span><span>Editor</span><span class="on">Vault</span><span>Notifications</span></div>
+   <div class="body">
+    <div class="list">
+     <div class="it">prod-vault <small>★</small></div>
+     <div class="it" style="white-space:normal"><span class="gone">lab-fortigate</span><br><span class="badge">pending until Save</span></div>
+     <div class="it">dev-sandbox</div>
+    </div>
+    <div class="flds">
+     <div class="f"><label>Address</label><div class="v">https://vault.nwcd.net:8200</div></div>
+     <div class="f"><label>Auth method</label><div class="v">Token</div></div>
+     <div class="f"><label>Token</label><div class="v">••••••••••••  <span style="color:#8294a8;font-size:9px">held in memory</span></div></div>
+    </div>
+   </div>
+   <div class="btns"><span class="btn">Add</span><span class="btn rm">Remove</span><span class="btn cx" style="border-color:#1f5c3a;color:#2bd97c">Save ⟶ flush</span><span class="btn">Cancel ⟶ restore</span></div>
+  </div>
+  <div class="note good">Remove writes a <b>tombstone</b> in an in-memory map (profile ⟶ slot ⟶ value). <b>Cancel</b> discards it — token untouched. <b>Save</b> validates, then flushes all queued writes/purges to Credential Manager in one pass with <code>_configService.Update</code>.</div>
+ </div>
+</div>
+
+<div class="foot"><b>Why it matters:</b> everything else in Settings already stages until <code>BtnSave_Click</code> — secrets are the one exception, and <span class="k">EnvironmentDialog</span> persists every action (New / Rename / Delete / selection change) straight to disk, so its Cancel is cosmetic. Same staged-commit fix applies to both.</div>
+
+</body></html>

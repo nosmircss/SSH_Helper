@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>UX-008 mockup</title>
+<style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+h1{font-size:11px;font-weight:600;margin:0 0 8px;color:#c9d4e3}
+h1 span{color:#8294a8;font-weight:400}
+.row{display:flex;gap:10px;align-items:stretch}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.cap{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+.cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+.term{background:#06080c;border:1px solid #1c2330;border-radius:6px;overflow:hidden;position:relative;flex:1}
+.tbar{display:flex;align-items:center;gap:6px;background:#10141c;border-bottom:1px solid #1c2330;padding:4px 8px;font-size:9.5px;color:#8294a8}
+.dot{width:7px;height:7px;border-radius:50%;background:#2bd97c}
+.tb{padding:7px 9px;font-size:10px;line-height:1.55;white-space:pre-wrap}
+.p{color:#2bd97c}.c{color:#c9d4e3}.o{color:#8294a8}.sig{color:#ff5c5c;font-weight:600}
+.ev{color:#ffb454;font-style:italic}
+.note{color:#ff5c5c}
+.sel{background:rgba(76,201,240,.18);outline:1px solid rgba(76,201,240,.4);border-radius:2px}
+.chips{margin-top:6px;font-size:9.5px;line-height:1.7}
+.chips div{color:#8294a8}
+.x{color:#ff5c5c;margin-right:4px}.v{color:#2bd97c;margin-right:4px}
+kbd{border:1px solid #2a3650;border-bottom-width:2px;border-radius:3px;background:#131926;color:#c9d4e3;padding:0 3px;font:inherit;font-size:9px}
+.dim{position:absolute;inset:25px 0 0 0;background:rgba(11,14,19,.62)}
+.modal{position:absolute;left:50%;top:54%;transform:translate(-50%,-50%);width:84%;background:#131926;border:1px solid #2a3650;border-radius:7px;box-shadow:0 10px 30px rgba(0,0,0,.6);padding:10px 11px}
+.mt{font-size:10.5px;color:#c9d4e3;margin-bottom:7px}
+.mt b{color:#4cc9f0;font-weight:600}
+.prev{background:#06080c;border:1px solid #1c2330;border-radius:4px;padding:5px 7px;font-size:10px;margin-bottom:7px}
+.prev .more{color:#8294a8;font-size:9px}
+.chk{font-size:9px;color:#8294a8;margin-bottom:8px}
+.box{display:inline-block;width:8px;height:8px;border:1px solid #2a3650;border-radius:2px;background:#0b0e13;vertical-align:-1px;margin-right:4px}
+.btns{display:flex;gap:6px;justify-content:flex-end}
+.btn{font:inherit;font-size:9.5px;padding:3px 9px;border-radius:4px;border:1px solid #2a3650;background:#0f1420;color:#c9d4e3}
+.btn.pri{border-color:#4cc9f0;color:#0b0e13;background:#4cc9f0;font-weight:600}
+.btn.ghost{color:#8294a8}
+</style></head><body>
+<h1>UX-008 <span>· Interactive terminal — F-keys, Ctrl+Shift+C/V, and multi-line paste safety</span></h1>
+<div class="row">
+ <div class="col">
+  <div class="cap"><span class="bad">Before</span> — shortcuts leak, paste fires blind</div>
+  <div class="term">
+   <div class="tbar"><span class="dot" style="background:#ff5c5c"></span>192.168.1.20 — FGT-60F (edge-fw-01)</div>
+   <div class="tb"><span class="p">FGT-60F #</span> <span class="c">diagnose sniffer packet any 'host 10.0.8.4' 4</span>
+<span class="o">2.3847 wan1 in 10.0.8.4 -&gt; 172.16.0.1: icmp: echo req</span>
+<span class="o">3.3851 wan1 in 10.0.8.4 -&gt; 172.16.0.1: icmp: echo req</span>
+<span class="ev">  — user hits Ctrl+Shift+C to copy the output —</span>
+<span class="sig">^C</span>  <span class="note">◀ raw SIGINT: capture killed</span>
+<span class="p">FGT-60F #</span> <span class="ev">— right-click ▸ Paste (14-line config) —</span>
+<span class="p">FGT-60F #</span> <span class="c">conf t</span>
+<span class="p">(global) #</span> <span class="c">config system interface</span>
+<span class="p">(interface) #</span> <span class="c">edit "wan2"</span>
+<span class="note">  …11 more lines execute instantly, no confirmation</span></div>
+  </div>
+  <div class="chips">
+   <div><span class="x">✗</span><kbd>Ctrl+Shift+C</kbd> sent to host as <span class="sig">^C</span> (SIGINT)</div>
+   <div><span class="x">✗</span><kbd>F1</kbd>–<kbd>F12</kbd> dropped — htop / mc / FortiGate menus dead</div>
+   <div><span class="x">✗</span>Paste is right-click only; every line runs on arrival</div>
+  </div>
+ </div>
+ <div class="col">
+  <div class="cap"><span class="good">After</span> — confirm modal + real keyboard copy/paste</div>
+  <div class="term">
+   <div class="tbar"><span class="dot"></span>192.168.1.20 — FGT-60F (edge-fw-01)</div>
+   <div class="tb"><span class="p">FGT-60F #</span> <span class="c">diagnose sniffer packet any 'host 10.0.8.4' 4</span>
+<span class="sel"><span class="o">2.3847 wan1 in 10.0.8.4 -&gt; 172.16.0.1: icmp: echo req</span></span>
+<span class="o">3.3851 wan1 in 10.0.8.4 -&gt; 172.16.0.1: icmp: echo req</span>
+<span class="p">FGT-60F #</span> <span class="o">▮</span>
+&#8203;
+&#8203;
+&#8203;
+&#8203;
+&#8203;</div>
+   <div class="dim"></div>
+   <div class="modal">
+    <div class="mt">Paste <b>14 lines</b> to 192.168.1.20?</div>
+    <div class="prev"><span class="c">conf t</span><br><span class="more">+ 13 more lines</span></div>
+    <div class="chk"><span class="box"></span>Don't warn again</div>
+    <div class="btns"><button class="btn ghost">Cancel</button><button class="btn">Paste as one line</button><button class="btn pri">Paste</button></div>
+   </div>
+  </div>
+  <div class="chips">
+   <div><span class="v">✓</span><kbd>Ctrl+Shift+C</kbd> / <kbd>Ctrl+Ins</kbd> copy selection — never reach host</div>
+   <div><span class="v">✓</span><kbd>Ctrl+Shift+V</kbd> / <kbd>Shift+Ins</kbd> paste; multi-line asks first</div>
+   <div><span class="v">✓</span><kbd>F1</kbd>–<kbd>F12</kbd> forwarded as terminal function keys</div>
+  </div>
+ </div>
+</div>
+</body></html>

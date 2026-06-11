@@ -1,0 +1,31 @@
+{
+ "id": "BUG-066",
+ "title": "CSV load rejects files with duplicate headers and silently drops cells from over-long rows (loss becomes permanent on save-back)",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "persistence-config",
+ "lens": "data-integrity",
+ "existing_state": "Two robustness gaps in CsvManager.LoadFromFile: (1) duplicate column names — common in spreadsheet exports, and including the case where any later column is literally named \"Host_IP\" (the first header is unconditionally discarded and replaced with Host_IP at Services/CsvManager.cs:32-35) — make `dt.Columns.Add(headerName)` (:46) throw DuplicateNameException, surfaced as a raw \"Failed to load CSV: A column named 'X' already belongs to this DataTable\" dialog (Form1.cs:9239-9242); the file cannot be opened at all. Note headers also collapse via the space->underscore rewrite (:45), so \"port 1\" and \"port_1\" collide. (2) Rows with more cells than the header are truncated without any warning (Array.Resize at :61-62); because saving writes the grid back over the same file (Form1.cs:9285-9325), one load-then-save round trip permanently deletes the extra columns' data from the user's file.",
+ "recommendation": "In LoadFromFile: deduplicate header names deterministically (append _2, _3...) instead of letting DataTable throw, treat a non-first \"Host_IP\" header the same way, and count truncated rows — return or expose a load summary so Form1 can show \"N rows had extra fields that were ignored\" before the user saves over the original.",
+ "user_benefit": "Real-world spreadsheet exports load instead of erroring, and a quiet open/save cycle can no longer permanently strip data out of the operator's hosts file.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\CsvManager.cs",
+   "lines": "32-46",
+   "note": "first header discarded -> Host_IP; dt.Columns.Add throws on duplicates"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\CsvManager.cs",
+   "lines": "61-62",
+   "note": "silent Array.Resize truncation of over-long rows"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "9239-9242",
+   "note": "raw DuplicateNameException message shown; load aborted"
+  }
+ ]
+}

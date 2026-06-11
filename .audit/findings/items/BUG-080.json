@@ -1,0 +1,31 @@
+{
+ "id": "BUG-080",
+ "title": "Missing REBEX_LICENSE_KEY secret produces a successful release whose SSH features are broken at runtime",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "models-samples-build",
+ "lens": "build-ci",
+ "existing_state": "The Rebex license is injected at build time only if the env var is non-empty: SSH_Helper.csproj:13 (`<RebexLicenseKey Condition=\"'$(REBEX_LICENSE_KEY)' != ''\">`) gates the AssemblyMetadata attribute at csproj:45-50. The workflow maps the secret at build-release.yml:60 with no validation that it is actually set — GitHub silently supplies an empty string for a missing/renamed secret, and unconfigured-secret states are easy to hit (fork, repo migration, secret rotation). At runtime, Program.cs:17-40 tries assembly metadata, then a rebex.key file beside the exe (absent in single-file releases), then the user's REBEX_LICENSE_KEY env var (absent on end-user machines), and if all miss it simply proceeds without setting Rebex.Licensing.Key (the `if` at Program.cs:37-40 has no else). The result is a green build, a green release, and an exe where connection pooling and the interactive terminal (everything Rebex-backed, per CLAUDE.md) throws a licensing exception on first use.",
+ "recommendation": "Fail fast at build time: add a step in the `build` job that exits non-zero when `$env:REBEX_LICENSE_KEY` is empty, or better, an MSBuild <Error> in SSH_Helper.csproj gated on `'$(Configuration)'=='Release' and '$(RebexLicenseKey)'==''` (with an opt-out property for unlicensed local Release builds). Optionally log a one-time startup warning in Program.cs when no key was resolved so dev builds surface the state immediately instead of at first SSH use.",
+ "user_benefit": "Turns a silent supply-chain failure mode — shipping a release where the app's core SSH features are dead on arrival — into an immediate, obvious CI failure.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.csproj",
+   "lines": "13, 45-50",
+   "note": "License attribute emitted only when env var non-empty; no error otherwise"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Program.cs",
+   "lines": "17-40",
+   "note": "Three-step fallback chain ends in silently proceeding unlicensed"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml",
+   "lines": "59-60",
+   "note": "Secret mapped to env with no presence check before publish"
+  }
+ ]
+}

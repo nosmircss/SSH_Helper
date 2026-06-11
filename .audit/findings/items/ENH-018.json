@@ -1,0 +1,26 @@
+{
+ "id": "ENH-018",
+ "title": "Host grid columns cannot be sorted — header click selects the column instead",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "form1-a",
+ "lens": "ux",
+ "existing_state": "Every column added to the host grid is forced to DataGridViewColumnSortMode.NotSortable in Dgv_Variables_ColumnAdded (Form1.cs:4306). Clicking a column header instead selects all cells in that column (Form1.cs:4264-4271). So a 200-row fleet cannot be ordered by hostname, site, port, or any custom variable column — rows live in raw CSV order forever. Professional grid tools (mRemoteNG, Excel, even basic DataGridView defaults) all sort on header click; here the gesture is repurposed with no replacement affordance anywhere.",
+ "recommendation": "Add sorting via a modifier or context menu rather than breaking the existing header-click-selects-column gesture: e.g. header right-click menu gains 'Sort ascending / descending / Restore CSV order', or double-click on header toggles sort. Implement with DataGridView.Sort(column, direction) (grid is unbound — rows are added directly, Form1.cs:2306). Track original CSV order in a hidden index so 'Restore CSV order' is possible and Save CSV writes the original order (or explicitly the sorted order, user's choice). Connection-test visuals already survive row moves because state is keyed on row objects in a ConditionalWeakTable (Form1.cs:215). Verify the checkbox Select column and custom row-number painting (Form1.cs:4061-4085) behave after sort.",
+ "user_benefit": "Sorting by hostname or by a site/role column is how operators audit a fleet ('are all DC1 switches checked?') and spot duplicates. Right now the data is frozen in whatever order the CSV was authored.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "4304-4308",
+   "note": "Dgv_Variables_ColumnAdded forces SortMode = NotSortable on every column"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "4261-4272",
+   "note": "Header click is repurposed to select the whole column — no sort gesture remains"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

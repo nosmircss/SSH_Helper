@@ -1,0 +1,106 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap b{color:#ff5c5c;font-weight:600}.cap.g b{color:#2bd97c}
+.row{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px}
+.win{background:#10141c;border:1px solid #1c2330;border-radius:6px;overflow:hidden}
+.tbar{background:#151a24;border-bottom:1px solid #1c2330;padding:4px 8px;font-size:11px;color:#8294a8;display:flex;gap:6px;align-items:center}
+.dots i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#2a3344;margin-left:4px}
+.menu{padding:3px 0;width:190px}
+.mi{padding:4px 12px;font-size:11px}
+.mi.hov{background:#1a2230;color:#fff}
+.mi .ext{color:#8294a8;float:right}
+.sep{border-top:1px solid #1c2330;margin:3px 0}
+.arrow{align-self:center;color:#8294a8;font-size:16px;padding-top:24px}
+.browser{flex:1}
+.url{background:#0b0e13;border:1px solid #1c2330;border-radius:10px;padding:3px 8px;font-size:10px;color:#8294a8;white-space:nowrap;overflow:hidden}
+.url b{color:#ffb454;font-weight:600}
+.berr{padding:14px 12px;text-align:center}
+.berr .x{color:#ff5c5c;font-size:14px}
+.note{font-size:10px;line-height:1.5;margin-top:6px}
+.bad{color:#ff5c5c}.good{color:#2bd97c}.amber{color:#ffb454}.mut{color:#8294a8}
+.app{display:flex;height:268px}
+.side{width:168px;border-right:1px solid #1c2330;display:flex;flex-direction:column}
+.filter{margin:6px;background:#0b0e13;border:1px solid #1c2330;border-radius:4px;padding:3px 6px;font-size:10px;color:#8294a8}
+.filter b{color:#c9d4e3;font-weight:400}.cur{color:#4cc9f0}
+.grp{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#8294a8;padding:5px 8px 2px}
+.cmd{font-size:10px;padding:2px 8px 2px 16px;color:#c9d4e3}
+.cmd.sel{background:rgba(76,201,240,.12);color:#4cc9f0;border-left:2px solid #4cc9f0;padding-left:14px}
+.main{flex:1;padding:8px 12px;overflow:hidden}
+h3{margin:0 0 4px;font-size:13px;color:#fff;font-weight:600}
+h3 span{color:#8294a8;font-weight:400;font-size:11px}
+.desc{font-size:10px;color:#8294a8;margin:0 0 8px}
+pre{background:#0b0e13;border:1px solid #1c2330;border-radius:4px;padding:7px 9px;font-size:10px;line-height:1.5;margin:0 0 8px}
+.k{color:#4cc9f0}.s{color:#2bd97c}.c{color:#8294a8}.d{color:#ffb454}
+table{border-collapse:collapse;font-size:9px;width:100%}
+td,th{border:1px solid #1c2330;padding:2px 6px;text-align:left}
+th{color:#8294a8;font-weight:400}td:first-child{color:#4cc9f0}
+.foot{font-size:9px;color:#8294a8;margin-top:7px}
+.foot a{color:#4cc9f0;text-decoration:none}
+</style></head><body>
+
+<p class="cap">Before — <b>Help menu just launches a browser at master</b></p>
+<div class="row">
+ <div class="win">
+  <div class="tbar">Help</div>
+  <div class="menu">
+   <div class="mi">Documentation <span class="ext">&#8599;</span></div>
+   <div class="mi hov">Scripting Documentation <span class="ext">&#8599;</span></div>
+   <div class="sep"></div>
+   <div class="mi">Check for Updates&#8230;</div>
+   <div class="mi">About</div>
+  </div>
+ </div>
+ <div class="arrow">&#10142;</div>
+ <div class="win browser">
+  <div class="tbar"><span class="dots"><i></i><i></i><i></i></span>
+   <div class="url" style="flex:1">github.com/nosmircss/SSH_Helper/blob/<b>master</b>/SCRIPTING.md</div></div>
+  <div class="berr">
+   <div class="x">&#9888; This site can&#8217;t be reached</div>
+   <div class="note mut">github.com &#8212; ERR_NAME_NOT_RESOLVED <span class="bad">(jump box, air-gapped mgmt network)</span></div>
+   <div class="note"><span class="amber">master</span> docs &#8800; installed <span class="amber">v0.51.23</span> &#8212; even online, users read features they don&#8217;t have</div>
+  </div>
+ </div>
+</div>
+
+<p class="cap g">After — <b>Help &gt; Command Reference: embedded docs, offline, version-exact</b></p>
+<div class="win">
+ <div class="tbar">Command Reference &#8212; SSH_Helper v0.51.23 <span style="color:#2bd97c;margin-left:auto">&#9679; embedded SCRIPTING.md</span></div>
+ <div class="app">
+  <div class="side">
+   <div class="filter">&#128269; <b>se</b><span class="cur">|</span></div>
+   <div class="grp">Core</div>
+   <div class="cmd sel">send</div>
+   <div class="cmd">set</div>
+   <div class="grp">Flow control</div>
+   <div class="cmd">if &nbsp;&#183;&nbsp; foreach &#183; while</div>
+   <div class="cmd">repeat &#183; try &#183; parallel</div>
+   <div class="grp">Files &amp; transfer</div>
+   <div class="cmd">sftp &#183; readfile &#8230;</div>
+   <div class="grp">Prompts</div>
+   <div class="cmd">choose &#183; multiselect</div>
+   <div class="grp" style="margin-top:auto;padding-bottom:6px">43 commands &#183; 8 families</div>
+  </div>
+  <div class="main">
+   <h3>send <span>&#8212; Execute SSH Commands</span></h3>
+   <p class="desc">Executes a command on the SSH session. Use the map form when you need options.</p>
+<pre><span class="c"># FortiGate health check across the fleet</span>
+- <span class="k">send</span>:
+    <span class="k">command</span>: <span class="s">get system performance status</span>
+    <span class="k">capture</span>: <span class="s">perf_out</span>
+    <span class="k">expect</span>: <span class="s">'/# $/'</span>
+    <span class="k">timeout</span>: <span class="d">30</span>
+    <span class="k">retry</span>: <span class="d">3</span></pre>
+   <table>
+    <tr><th>Option</th><th>Type</th><th>Description</th></tr>
+    <tr><td>capture</td><td>string</td><td>Variable name to store command output</td></tr>
+    <tr><td>expect</td><td>string</td><td>Regex to wait for; completes on match</td></tr>
+    <tr><td>retry</td><td>integer</td><td>Retries on failure (default: 0)</td></tr>
+   </table>
+   <div class="foot">Docs match this binary by construction &#183; <a>View on GitHub (tag v0.51.23) &#8599;</a> <span class="mut">&#8212; master only as fallback</span></div>
+  </div>
+ </div>
+</div>
+
+</body></html>

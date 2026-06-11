@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-026",
+ "title": "Two near-identical 90-line host-grid loaders and a 4x-duplicated password-migration block that must stay in lockstep",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "cross-startup",
+ "lens": "perf",
+ "existing_state": "RestoreApplicationState (Form1.cs:14782-14889) and LoadEnvironmentIntoGrid (Form1.cs:2242-2337) are parallel implementations of the same operation — clear grid, rebuild columns, EnsureSelectColumn, per-row plaintext-password → Credential Manager migration, populate cells, restore checked indices, request refreshes — differing only in input shape (ApplicationState vs EnvironmentConfig) and small drift (the environment loader dedupes/filters columns at :2264-2273; the state loader doesn't). The credential-migration kernel (TryGetValue Host_IP/username/password → resolvedUsername falls back to tsbUsername.Text → StoreHostPassword → blank the cell) is additionally copy-pasted in MigratePasswordsToCredentialManager (Form1.cs:1506-1522) and BuildApplicationState (Form1.cs:14718-14752). The credential key (CredentialTargets.HostPasswordTarget(host, username), Form1.cs:1497) depends on that exact resolution logic — if one copy changes (e.g. trimming, case rules, a new vault_path bypass) and the others don't, stored passwords silently stop resolving for hosts loaded through the other path. Any new convention column or grid semantic must be hand-applied in 2-4 places.",
+ "recommendation": "Extract two helpers: PopulateHostGrid(IReadOnlyList<string> columns, IEnumerable<IDictionary<string,string>> rows, IReadOnlyList<int> selectedIndices) carrying all the grid mechanics, and MigrateRowPasswordToCredentialManager(IDictionary<string,string> row) carrying the single canonical host+username keying. Have RestoreApplicationState, LoadEnvironmentIntoGrid, BuildApplicationState, and MigratePasswordsToCredentialManager call them. This is also where any bulk-row AddRange/column-index-map performance fix lands once instead of twice.",
+ "user_benefit": "One place to change grid/credential semantics instead of four — removes the class of bug where an environment-loaded fleet and a state-restored fleet behave differently (including stored passwords silently not resolving).",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "14782-14889",
+   "note": "state-restore grid loader with inline credential migration at 14818-14834"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "2242-2337",
+   "note": "environment grid loader — near-identical, with inline credential migration at 2292-2304"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "1492-1523, 14718-14752",
+   "note": "third and fourth copies of the resolvedUsername/StoreHostPassword kernel"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,26 @@
+{
+ "id": "UX-021",
+ "title": "while/repeat hitting max_iterations reports success — runaway loops truncate work silently",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-b",
+ "lens": "ux",
+ "existing_state": "Both loop commands hardcode DefaultMaxIterations = 10000 (Services/Scripting/Commands/WhileCommand.cs:14, RepeatCommand.cs:15). When the cap is reached they emit a single Warning-type output line and return Success (WhileCommand.cs:105-110 returns {Success = true}; RepeatCommand.cs:85-90 likewise). A while whose condition never flips — e.g. polling a device that never comes back, or a typo'd variable that makes the condition perpetually true — therefore stops mid-work and the run, job history, and any notify-on-failure logic all see a green result. The per-step max_iterations override exists (WhileCommand.cs:30-32, RepeatCommand.cs:31-33) but there is no way to make cap-exhaustion fail the step.",
+ "recommendation": "Add an on_max_iterations: fail | warn option on while/repeat (and foreach if it shares the pattern). Defaulting to fail is the honest behavior; if back-compat matters, keep warn as default but emit it as Error-type output and set a _loop_truncated context variable plus a flag on CommandResult so the Flow Canvas run summary and job history can show 'loop hit cap' instead of a clean pass. The change is localized to the two cap checks.",
+ "user_benefit": "A stuck polling loop in an overnight scheduled job becomes a red failed run with a clear reason, instead of a green run that quietly did 10,000 useless iterations and skipped everything after the real work was supposed to happen.",
+ "evidence": [
+  {
+   "file": "Services/Scripting/Commands/WhileCommand.cs",
+   "lines": "14, 30-32, 105-110",
+   "note": "hardcoded 10000 default; cap reached = Warning + Success=true"
+  },
+  {
+   "file": "Services/Scripting/Commands/RepeatCommand.cs",
+   "lines": "15, 31-33, 85-90",
+   "note": "same pattern in the do-while variant"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

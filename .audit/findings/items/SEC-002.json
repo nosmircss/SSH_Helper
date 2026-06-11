@@ -1,0 +1,46 @@
+{
+ "id": "SEC-002",
+ "title": "Resolved secrets (host/Vault passwords, inline vault values) flow unredacted into the live output pane and plaintext on-disk run history",
+ "category": "SEC",
+ "severity": "critical",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "bugs",
+ "existing_state": "The output/history pipeline has no value-based secret redaction, and secrets enter it from several directions. (1) The fully resolved connection password — typed in the grid, recalled from Windows Credential Manager, or fetched from HashiCorp Vault via vault_path (Form1.cs:13332-13343) — is seeded as an ordinary readable script variable: host.Variables[\"password\"] = host.Password (Form1.cs:13368-13371) and SeedConnectionVariables' context.SetVariable(\"password\", password) (Services/SshExecutionService.cs:2027-2028); that dictionary seeds every ScriptContext (SshExecutionService.cs:1542/1676/1736/1880). Any print/log/send/set_column referencing {{password}} emits the cleartext secret (set_column also writes it into the CSV grid), and when a remote device echoes an interpolated command (typical for network gear and enable/login flows) the secret enters the output buffer that way too. (2) Inline vault refs resolve during ordinary substitution and are echoed verbatim: SendCommand substitutes then emits the full command line unless suppress: is set (Services/Scripting/Commands/SendCommand.cs:57-65), PrintCommand likewise (PrintCommand.cs:18-20); ResolveVaultExpression returns the raw secret untagged (Services/Scripting/ScriptContext.cs:748-749) and EmitOutput/RecordCommandOutput append everything to the shared FullOutput with zero masking (ScriptContext.cs:855-893). (3) The only redaction that exists is name-anchored: SensitiveSetOutputRegex rewrites literal 'Set _ssh_password = ...' / '_ssh_identity_passphrase' lines only (SshExecutionService.cs:87-89, RedactSensitiveScriptOutput :2731-2737) — echoed secret VALUES pass through untouched. StoreExecutionHistory then persists the raw buffer to disk (Form1.cs:14217-14248) as unencrypted JSON under %LocalAppData%\\SSH_Helper\\history (Services/HistoryStorageService.cs:468/569). The codebase clearly intends to keep secrets out of persisted artifacts — BuildHostExecutionContexts skips the password variable (Form1.cs:13126-13130) and the canvas Variable Inspector masks it (FlowCanvas/src/panels/VariableInspector.tsx:165-168) — but the output stream defeats both protections. Vault-sourced credentials are the worst case: centrally managed, rotated secrets end up cached in local plaintext history files that survive indefinitely.",
+ "recommendation": "Add a per-run secret registry and a value-based masking pass: register the resolved connection password, identity passphrase, and every value returned by ResolveVaultExpression/vault() in a per-context redaction set, and have EmitOutput/RecordCommandOutput plus RedactSensitiveScriptOutput replace registered substrings with **** before output reaches _sharedState.Output, OutputReceived subscribers, the live pane, and the persisted history payload. Additionally, stop seeding the raw password as an ordinary readable variable — keep it only in the redaction-aware _ssh_password channel (or make {{password}} an explicit per-preset opt-in) — and exclude registered secret values from set_column grid write-back.",
+ "user_benefit": "Prevents SSH, Vault, and other credentials from accumulating in plaintext on disk in history payloads and .txt exports, and from appearing in the visible run log during screen shares — which currently undermines the entire Credential Manager / Vault integration story.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13332-13371",
+   "note": "Vault/CredMan/grid password resolved then injected into host.Variables[\"password\"] as a readable script variable"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "87-89, 2027-2028, 2731-2737",
+   "note": "SeedConnectionVariables sets a readable 'password' var; the only redaction is the name-anchored 'Set _ssh_password=' regex — no value scrubbing"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SendCommand.cs",
+   "lines": "57-65",
+   "note": "Vault-resolved command line echoed via EmitOutput unless suppress: is set"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+   "lines": "748-749, 855-893",
+   "note": "ResolveVaultExpression returns the raw secret untagged; EmitOutput/RecordCommandOutput append to FullOutput with no redaction"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "14217-14248",
+   "note": "Raw output buffer persisted to the history payload"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\HistoryStorageService.cs",
+   "lines": "468, 569",
+   "note": "Payload written as plain JSON under %LocalAppData%\\SSH_Helper\\history"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 4
+}

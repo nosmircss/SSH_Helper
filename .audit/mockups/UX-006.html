@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX-006 — Vault failure visibility</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px/1.5 "Cascadia Code",Consolas,monospace}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{color:#ff5c5c;font-weight:600}.cap b.g{color:#2bd97c}
+  .panel{border:1px solid #1c2330;border-radius:6px;background:#0d1118;overflow:hidden;margin-bottom:14px}
+  .tbar{display:flex;gap:8px;align-items:center;padding:4px 10px;background:#10151e;border-bottom:1px solid #1c2330;color:#8294a8;font-size:10px}
+  .dot{width:7px;height:7px;border-radius:50%;background:#4cc9f0;opacity:.8}
+  .out{padding:8px 10px;white-space:pre-wrap;word-break:break-all;font-size:11px}
+  .err{color:#ff5c5c}.warn{color:#ffb454}.ok{color:#2bd97c}.mut{color:#8294a8}.cy{color:#4cc9f0}
+  .note{font-size:10.5px;color:#8294a8;margin:-8px 0 14px;padding-left:2px}
+  .banner{margin:8px 10px;border:1px solid #ffb45455;border-left:3px solid #ffb454;background:#ffb4540f;border-radius:4px;padding:8px 10px}
+  .banner h4{margin:0 0 5px;font-size:11px;color:#ffb454;font-weight:600}
+  .banner ul{margin:0 0 8px;padding-left:16px;font-size:10.5px;color:#c9d4e3}
+  .banner li{margin:1px 0}.banner li span{color:#8294a8}
+  .btns{display:flex;gap:8px}
+  .btn{font:10.5px "Cascadia Code",Consolas,monospace;padding:3px 10px;border-radius:4px;border:1px solid #1c2330;background:#10151e;color:#c9d4e3}
+  .btn.danger{border-color:#ff5c5c66;color:#ff5c5c}
+  .btn.go{border-color:#ffb45466;color:#ffb454}
+</style>
+</head>
+<body>
+
+<p class="cap">Before — <b>vault failure is silent</b> · output panel after a 200-host run</p>
+<div class="panel">
+  <div class="tbar"><span class="dot"></span>Output — preset: backup-running-config (200 hosts)</div>
+  <div class="out"><span class="mut">Connecting to 10.20.4.11 (sw-neta-11)... </span><span class="ok">OK</span>
+<span class="mut">Connecting to 10.20.4.12 (sw-neta-12)...</span>
+<span class="err">##################################
+##### AUTHENTICATION ERROR: 10.20.4.12 #####
+##################################
+SshException: Authentication failed</span>
+<span class="mut">Connecting to 10.20.4.13 (sw-neta-13)...</span>
+<span class="err">##### AUTHENTICATION ERROR: 10.20.4.13 #####
+SshException: Authentication failed</span>
+<span class="mut">... 197 more hosts: 196 OK, 1 failed</span></div>
+</div>
+<p class="note">A one-character typo in a <span class="cy">vault_path</span> cell (secret/neta/sw-12). VaultCredentialProvider swallowed the 403 into Debug.WriteLine and the run silently fell back to a stale toolbar password — sprayed at the device until TACACS locked the account. Nothing here says Vault was ever consulted.</p>
+
+<p class="cap">After — <b class="g">pre-run check + per-host warnings</b></p>
+<div class="panel">
+  <div class="tbar"><span class="dot"></span>Output — preset: backup-running-config (200 hosts)</div>
+  <div class="banner">
+    <h4>&#9888; Vault pre-run check — 3 of 200 vault_path lookups failed</h4>
+    <ul>
+      <li>secret/neta/sw-12 <span>— permission denied (403) · 10.20.4.12</span></li>
+      <li>secret/neta/sw-13 <span>— secret not found · 10.20.4.13</span></li>
+      <li>secret/netb/core-01 <span>— Vault is sealed · 10.30.0.1</span></li>
+    </ul>
+    <div class="btns"><button class="btn danger">Abort run</button><button class="btn go">Continue with fallback credentials</button></div>
+  </div>
+  <div class="out"><span class="mut">Connecting to 10.20.4.11 (sw-neta-11)... </span><span class="ok">OK  (vault: secret/neta/sw-11)</span>
+<span class="warn">[WARNING] 10.20.4.12: vault_path "secret/neta/sw-12" failed: permission denied — falling back to grid credentials</span>
+<span class="mut">Connecting to 10.20.4.12 (sw-neta-12)...</span>
+<span class="err">##### AUTHENTICATION ERROR: 10.20.4.12 #####
+SshException: Authentication failed  <span class="warn">(vault fallback was in effect)</span></span>
+<span class="mut">... warning also recorded in job history / JobRunResult per host</span></div>
+</div>
+<p class="note">Same failure, but now: an amber summary before any SSH connection is opened (abortable), a per-host warning line naming the exact path and reason, and the fallback noted on the eventual auth error. Optional setting: treat vault_path failure as host failure (skip instead of fall back).</p>
+
+</body>
+</html>

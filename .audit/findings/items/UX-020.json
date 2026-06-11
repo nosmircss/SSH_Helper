@@ -1,0 +1,31 @@
+{
+ "id": "UX-020",
+ "title": "Failed shell-prompt detection is silent; runs degrade into a per-command 60-second timeout slog",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "error-diagnostics",
+ "lens": "cross",
+ "existing_state": "SshShellSession.InitializeAsync (Services/SshShellSession.cs:279-310) retries prompt detection up to 3 times, but when no prompt is ever detected it only emits a debug-mode-only warning ('WARNING: Could not detect a valid shell prompt after all attempts', :303-307) and returns normally. Execution then proceeds: each subsequent command waits on generic prompt patterns and typically dies by the per-command CommandTimeout (default 60s, Services/SshTimeoutOptions.cs). On a device with an unusual prompt (long prompts >80 chars and quote-heavy prompts are rejected by PromptDetector heuristics, Utilities/PromptDetector.cs:174, 190), a 10-command preset means ~10 minutes of consecutive timeout errors, and nothing in the output tells the user the root cause is prompt detection rather than the commands or the network. The excellent diagnostics that do exist (line-by-line prompt-match autopsy, SshShellSession.cs:893-921) are gated behind Debug mode, which the user has no reason to enable because nothing pointed them there.",
+ "recommendation": "When InitializeAsync ends with _currentPrompt empty, emit a visible warning line through the normal OutputReceived stream (e.g. '[WARNING] Could not detect a shell prompt on <host> — commands may time out. Enable Debug Mode (menu) for prompt diagnostics.') and set a flag on the session; when a subsequent command then times out, prefix the timeout error with 'no shell prompt was detected during connection' so the failure is attributed correctly. Optionally add a config toggle to fail fast instead of attempting commands.",
+ "user_benefit": "Turns the single most confusing failure mode on nonstandard devices (every command times out, no explanation) into a one-line diagnosis that also points the user at the existing Debug Mode tooling.",
+ "evidence": [
+  {
+   "file": "Services/SshShellSession.cs",
+   "lines": "303-307",
+   "note": "no-prompt outcome is EmitDebug-only; method returns normally"
+  },
+  {
+   "file": "Services/SshShellSession.cs",
+   "lines": "893-921",
+   "note": "rich prompt-mismatch autopsy exists but only in Debug mode"
+  },
+  {
+   "file": "Utilities/PromptDetector.cs",
+   "lines": "160-194",
+   "note": "heuristics that legitimately fail on long/quoted prompts make this path reachable"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

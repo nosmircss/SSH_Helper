@@ -1,0 +1,36 @@
+{
+ "id": "BUG-072",
+ "title": "Editor diagnostics delivery from the validation thread lacks handle/disposal guards (latent cross-thread control access and post-dispose crash)",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "editor",
+ "lens": "reliability",
+ "existing_state": "ScriptEditorValidationService raises DiagnosticsUpdated on a threadpool continuation (`ConfigureAwait(false)` + invoke, ScriptEditorValidationService.cs:82-87). The control's handler (UI/ScintillaScriptEditorControl.cs:2291-2305) checks only `IsDisposed` and `InvokeRequired`. Two gaps: (1) Pre-handle delivery — `QueueRefreshAndValidation` explicitly requests validation when the handle is NOT yet created (lines 620-625), and JobEditorDialog assigns editor text in its constructor before ShowDialog (JobEditorDialog.cs:222 `PrepopulateFromJob()` -> line 1581). If the debounced result (min 150ms) arrives before handle creation, `InvokeRequired` returns false (documented WinForms behavior when no handle exists) and `SetDiagnostics` -> `ApplyDiagnosticsVisuals` runs on the threadpool thread, where touching `_editor.TextLength`/indicators (lines 2192-2200) forces the Scintilla handle to be created on a non-UI thread — the control is then permanently broken for the real UI thread. (2) Disposal race — the marshaled lambda `BeginInvoke(() => SetDiagnostics(diagnostics))` (line 2300) has no disposal guard inside it, so a callback that lands after the dialog is closed mid-debounce hits disposed Scintilla and throws ObjectDisposedException. The author guarded the exact same pattern in the sibling path (`IsDisposed || _editor.IsDisposed` inside the lambda, lines 628-634) but not here.",
+ "recommendation": "In ValidationService_DiagnosticsUpdated: bail (or stash the diagnostics for OnHandleCreated) when `!IsHandleCreated`; add the same `IsDisposed || _editor.IsDisposed` check inside the BeginInvoke lambda as QueueRefreshAndValidation already has; optionally wrap the BeginInvoke call in try/catch (ObjectDisposedException, InvalidOperationException). Alternatively suppress the pre-handle RequestValidationOrClear at line 620-625 and re-request on OnHandleCreated.",
+ "user_benefit": "Eliminates a rare but real crash/corruption window when opening or closing the Job Editor (or main form) while validation of a YAML preset is in flight.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs",
+   "lines": "2291-2305",
+   "note": "handler: IsDisposed check then InvokeRequired-gated BeginInvoke; no IsHandleCreated guard, no guard inside the lambda"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs",
+   "lines": "613-639",
+   "note": "sibling QueueRefreshAndValidation requests validation pre-handle (620-625) yet guards its own lambda (631-634) — asymmetry"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptEditorValidationService.cs",
+   "lines": "82-87",
+   "note": "DiagnosticsUpdated invoked on threadpool after ConfigureAwait(false)"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs",
+   "lines": "222, 1581",
+   "note": "editor text assigned during constructor (PrepopulateFromJob), before any handle exists"
+  }
+ ]
+}

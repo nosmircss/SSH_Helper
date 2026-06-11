@@ -1,0 +1,36 @@
+{
+ "id": "PERF-007",
+ "title": "Building the run's host list deep-clones every environment's entire host table once per selected host",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "persistence-config",
+ "lens": "perf",
+ "existing_state": "GetHostConnections (Form1.cs:13301-13392) calls _environmentService.GetActiveEnvironmentVariables() at Form1.cs:13373 INSIDE the per-row loop — once for every selected host. Each call runs ConfigurationService.LoadEnvironmentState (Services/ConfigurationService.cs:174-179), which (a) runs NormalizeEnvironmentData on the cached config (360-403), where EnvironmentConfig.Normalize re-allocates a new Dictionary for every host row of every environment (Models/EnvironmentConfig.cs:83-88); then (b) CloneEnvironmentMap (411-425) deep-clones every environment — every host-row dictionary again (EnvironmentConfig.Clone, 48-69) plus another Normalize pass. Net: ~3 full copies of every host row in every environment, per selected host, just to read the active environment's variables (which cannot change mid-loop). The iterator is materialized with .ToList() on the UI thread at run start (Form1.cs:12277 and 12900) — the SshDebugLog timing instrumentation around it (12276-12278, 'Building host connections') shows this stage was already a latency suspect. For a 500-host run with 3 environments of 500 rows each that is ~1.5 million dictionary copies before the first connection opens. The same clone-everything call also runs on every editor tooltip hover (Form1.cs:709).",
+ "recommendation": "Hoist the GetActiveEnvironmentVariables() call out of the loop in GetHostConnections — fetch once before the foreach and reuse the dictionary (a one-line move that eliminates the O(selected hosts x environments x env rows) clone storm). Additionally give ConfigurationService a read-only environment accessor that does not clone (or caches the last clone until the next Save invalidates it) so dialog/tooltip read paths stop paying O(all environments x all hosts) allocations per query; LoadEnvironmentState's normalize-on-read mutation of the cached config can move to load/save time where it belongs.",
+ "user_benefit": "Eliminates a hidden allocation storm at the start of every run — on a 1000-host fleet with a few environments this is millions of dictionary allocations and a multi-second UI freeze before the first connection even opens.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "13301-13392",
+   "note": "GetHostConnections loop; line 13373 fetches env variables per row"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+   "lines": "174-179, 360-403, 411-425",
+   "note": "LoadEnvironmentState = normalize-mutate cached config + full deep clone of all environments, on every read"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/EnvironmentConfig.cs",
+   "lines": "48-89",
+   "note": "Clone() and Normalize() each re-allocate a dictionary per host row"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "709, 12276-12278, 12900",
+   "note": "tooltip-hover call site; UI-thread .ToList() materialization with existing latency instrumentation"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

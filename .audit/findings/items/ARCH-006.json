@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-006",
+ "title": "Host credential resolution is forked between Form1 and JobExecutionService and has already diverged",
+ "category": "ARCH",
+ "severity": "high",
+ "effort": "M",
+ "area": "integrations",
+ "lens": "perf",
+ "existing_state": "The contract 'turn host rows into HostConnections with credentials' is implemented twice in full: Form1.GetHostConnections (Form1.cs:13301-13389) for interactive runs and JobExecutionService.BuildHostConnections (Services/JobExecutionService.cs:487-544) for scheduled jobs. Both re-implement host parsing, explicit-port-beats-port-column precedence (the TryGetExplicitPortFromHostValue helper is copy-pasted as a private static at JobExecutionService.cs:564-587), vault_path-first resolution, and the username/password column fallback. They have already drifted in a way that produces wrong results: the grid path silently auto-saves any typed password to Windows Credential Manager and auto-loads the stored per-host password when the cell is empty (Form1.cs:13345-13357), while the job path has no Credential Manager per-host lookup at all — a job in PerHostColumn mode (ResolveCredentials returns (\"\",\"\") for that mode, JobExecutionService.cs:624-626) whose rows have empty password cells connects with an empty password and fails at schedule time, even though the identical rows work in the grid. Every job-side failure path is a Debug.WriteLine plus empty strings (JobExecutionService.cs:605, 620, 639), so the divergence surfaces only as 2am authentication failures.",
+ "recommendation": "Extract a single HostCredentialResolver service (rows -> List<HostConnection>) consumed by both Form1 and JobExecutionService, with the Credential Manager per-host fallback policy made explicit and shared (or explicitly opted out for jobs, in one documented place). Move the duplicated port/host parsing helpers into it. This is also the natural seam for making resolution awaitable, parallel, and properly error-surfaced instead of two.",
+ "user_benefit": "Hosts that authenticate fine in the grid stop mysteriously failing when the same rows run as a scheduled job, and future changes to credential precedence only need to be made (and tested) once instead of being silently missed on one of the two paths.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "13301-13389",
+   "note": "grid-side implementation incl. Credential Manager auto-save/auto-load at 13345-13357"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobExecutionService.cs",
+   "lines": "487-544",
+   "note": "job-side reimplementation with no per-host Credential Manager lookup"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobExecutionService.cs",
+   "lines": "564-587, 605-639",
+   "note": "copy-pasted TryGetExplicitPortFromHostValue; all failures degrade to Debug.WriteLine + empty credentials"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

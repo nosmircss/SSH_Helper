@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-015",
+ "title": "set's expression dispatch is a five-layer heuristic gate whose patch-guards are fossils of past misparse bugs — and it still silently turns literals like 2024-1 into arithmetic",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-b",
+ "lens": "perf",
+ "existing_state": "SetCommand.EvaluateExpression (Services/Scripting/Commands/SetCommand.cs:97-198) routes each assignment through an ordered chain: string-prefix-matched push/unshift/pop/shift (101-176), built-in function expressions, JSON expressions, then ExpressionParser — but only when HasExpressionOperator fires (184-195). That gate is pure heuristics: '+'/'-' count as operators only when preceded by whitespace, a guard added so hyphenated hostnames like db-master.local are not subtracted (245-248); a separate IsSimpleCompactNumericBinaryExpression special case re-admits compact numerics (266-306) with its own HasAmbiguousLeadingZero guard so 2024-01 stays a string (300-302, 308-318). Each guard is a patch over an earlier silent misparse, and holes remain: `set: v = 2024-1` passes the compact check (no leading zero on either operand) and evaluates to 2023; `set: v = 1.2-3` becomes -1.8 — both silently, with only a Debug-level echo (39). Meanwhile if/while conditions always evaluate through ExpressionEvaluator (which delegates to the same ExpressionParser, ExpressionEvaluator.cs:333), so the identical text is an expression in `if:` but maybe-a-string in `set:` depending on spacing — behavior nobody can predict without reading this method. The dead ResolveValue pass-through wrapper (320-323) and a comment referencing the already-deleted ArithmeticParser (391) show the layer has been reworked repeatedly.",
+ "recommendation": "Replace the guess-the-intent gate with an explicit rule and one downgrade path: treat the right-hand side as an expression whenever ExpressionParser can fully consume it AND it contains an unambiguous operator token (operator with surrounding whitespace, or parentheses); otherwise treat it as a literal/substitution — deleting IsSimpleCompactNumericBinaryExpression and its leading-zero guard outright (compact `1+2` users can write `1 + 2`). Document the rule in the script reference, and emit an Info-level (not Debug) line whenever an assignment was evaluated as arithmetic so misparses are visible in normal output. Add regression tests for the fossil cases: hyphenated hostnames, 2024-01, 2024-1, 1.2-3.",
+ "user_benefit": "Assignments stop silently changing meaning based on invisible spacing rules, and the next hostname-like or version-like literal will not require yet another guard patch shipped after a user hits data corruption in their variables.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/SetCommand.cs",
+   "lines": "97-198",
+   "note": "five-layer dispatch chain ending in the heuristic-gated ExpressionParser"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/SetCommand.cs",
+   "lines": "245-248",
+   "note": "whitespace guard patching the hyphenated-hostname misparse"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/SetCommand.cs",
+   "lines": "266-318",
+   "note": "compact-numeric special case + leading-zero guard; 2024-1 and 1.2-3 still evaluate as arithmetic"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ExpressionEvaluator.cs",
+   "lines": "333",
+   "note": "if/while conditions always reach the same ExpressionParser — no heuristic gate there"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/SetCommand.cs",
+   "lines": "320-323, 391",
+   "note": "dead pass-through wrapper and stale ArithmeticParser comment — evidence of repeated rework"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

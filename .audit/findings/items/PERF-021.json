@@ -1,0 +1,36 @@
+{
+ "id": "PERF-021",
+ "title": "input validate regex compiled without the standard timeout — catastrophic backtracking freezes the whole app on the UI thread",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-a",
+ "lens": "perf",
+ "existing_state": "The engine has a single source of truth for user-pattern safety — ScriptRegexDefaults.UserPatternTimeout (5s, Services/Scripting/ScriptRegexDefaults.cs:10) — and it is applied in ExtractCommand.cs:60 and ExpressionEvaluator.cs:98. InputCommand is the outlier: the user-supplied validate: pattern is compiled with new Regex(step.Input.Validate, RegexOptions.Compiled) and no timeout (Services/Scripting/Commands/InputCommand.cs:41), and IsMatch runs synchronously on the UI thread inside the dialog's OK handler (204-217, IsMatch at 209). A backtracking-prone pattern against a long pasted value hangs the UI thread indefinitely — and because ScriptPromptDialogRunner has already disabled the main form except the Stop button (which also lives on the now-frozen UI thread), there is no recovery short of killing the process.",
+ "recommendation": "Add a factory on ScriptRegexDefaults (e.g. CreateUserRegex(pattern, options) that always passes UserPatternTimeout) and route InputCommand.cs:41 — and any future user-pattern compilation — through it; catch RegexMatchTimeoutException in BtnOk_Click and surface it as the validation error. Dropping RegexOptions.Compiled for a once-per-prompt match is a free bonus.",
+ "user_benefit": "An innocent-looking validation regex can no longer hard-freeze the entire application mid-script with the main form locked; worst case the user sees a validation error after 5 seconds instead of reaching for Task Manager.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/InputCommand.cs",
+   "lines": "41",
+   "note": "new Regex(step.Input.Validate, RegexOptions.Compiled) — no timeout"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/InputCommand.cs",
+   "lines": "204-217",
+   "note": "IsMatch executes in BtnOk_Click on the UI thread"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptRegexDefaults.cs",
+   "lines": "10",
+   "note": "UserPatternTimeout = 5s exists as the intended standard"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ExtractCommand.cs",
+   "lines": "60",
+   "note": "extract applies the timeout — input is the inconsistent outlier"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

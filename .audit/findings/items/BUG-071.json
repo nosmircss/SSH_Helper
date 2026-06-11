@@ -1,0 +1,31 @@
+{
+ "id": "BUG-071",
+ "title": "Manual 'Validate Script' silently does nothing for plain presets/folders and contradicts inline validation on library scripts",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "editor",
+ "lens": "ux",
+ "existing_state": "Two defects in the right-click Validate Script menu. (1) Silent no-op: with a folder selected (Form1.cs:5777-5778) or a non-YAML plain-command preset (Form1.cs:5782-5783) the handler just returns — no message box, no output line. The user clicks Validate and gets zero feedback, which reads as 'validated OK'. (2) Flag divergence: the menu calls `parser.Validate(script, scriptText, enforceCanonicalSyntax: true)` (Form1.cs:5790) without `allowLibraryDefinitions`, whose default is false (ScriptParser.cs:4185), so a `library: true` preset fails with \"Library scripts cannot be executed directly\" (ScriptParser.cs:4206-4209) — while the inline validator passes `allowLibraryDefinitions: true` (ScriptEditorValidationService.cs:124-128) and shows the same script squiggle-free. The same editor gives two contradictory verdicts on the same content, and the well-tested `ValidateNowAsync` service entry point exists but is used only by tests (ScriptEditorValidationService.cs:60-63).",
+ "recommendation": "Route the menu handler through the existing ScriptEditorValidationService (or at minimum pass `allowLibraryDefinitions: true` to match inline behavior, with a separate informational note that library scripts aren't directly executable). Replace the silent returns with explicit feedback: \"This is a plain command list — YAML validation does not apply\" / \"Select a preset to validate\".",
+ "user_benefit": "Validate Script always answers, and the answer matches the squiggles — library authors stop getting a false failure from the menu on scripts the editor says are clean.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "5775-5790",
+   "note": "silent returns at 5777-5778 and 5782-5783; Validate call at 5790 omits allowLibraryDefinitions"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs",
+   "lines": "4181-4209",
+   "note": "allowLibraryDefinitions defaults to false; false adds 'Library scripts cannot be executed directly' error"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptEditorValidationService.cs",
+   "lines": "124-128",
+   "note": "inline validation passes allowLibraryDefinitions: true — divergent flags"
+  }
+ ]
+}

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:11px/1.5 "Cascadia Code",Consolas,monospace}
+h1{font-size:12px;margin:0 0 8px;color:#c9d4e3;font-weight:600}
+.cols{display:flex;gap:10px}
+.col{flex:1;min-width:0}
+.cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 4px}
+.cap b{font-weight:600}
+.cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+.ed{background:#10141c;border:1px solid #1c2330;border-radius:6px;overflow:hidden}
+.bar{background:#141a24;border-bottom:1px solid #1c2330;padding:3px 8px;font-size:9px;color:#8294a8}
+pre{margin:0;padding:6px 0;font:10.5px/1.55 "Cascadia Code",Consolas,monospace;overflow-x:auto}
+.ln{display:block;white-space:pre;padding:0 8px 0 0}
+.ln i{display:inline-block;width:22px;color:#3a4656;text-align:right;margin-right:8px;font-style:normal;user-select:none}
+.sel{background:#1a2433}
+.k{color:#569cd6}.s{color:#c586c0}.o{color:#4ec9b0}.c{color:#6a9955}.t{color:#c9d4e3}
+.pay{color:#ce9178}
+.warnline{color:#ce9178;text-decoration:underline dotted #ffb454;text-underline-offset:3px}
+.note{margin-top:5px;border-radius:6px;padding:5px 8px;font-size:9.5px}
+.note.red{border:1px solid #3a1c1c;background:#160e10;color:#ff5c5c}
+.note.red .h{color:#8294a8}
+.note.amber{border:1px solid #4a3417;background:#161208;color:#ffb454}
+.btns{margin-top:5px}
+.btn{display:inline-block;border:1px solid #1c2330;border-radius:4px;padding:2px 8px;font-size:9px;color:#c9d4e3;background:#141a24;margin-right:5px}
+.btn.pri{border-color:#4cc9f0;color:#4cc9f0}
+.tag{display:inline-block;font-size:8.5px;border-radius:3px;padding:0 5px;margin-left:6px;vertical-align:1px}
+.tag.bad{background:#2a1313;color:#ff5c5c;border:1px solid #3a1c1c}
+.tag.good{background:#0e2117;color:#2bd97c;border:1px solid #1d3a2a}
+.foot{margin-top:8px;font-size:9.5px;color:#8294a8}
+</style></head><body>
+<h1>BUG-069 &mdash; &ldquo;Comment Selected Lines&rdquo; inside a <span class="o">command: |</span> payload doesn&rsquo;t disable anything</h1>
+<div class="cols">
+
+<div class="col">
+<p class="cap"><b class="bad">Before</b> &mdash; current behavior: # lines render green, look disabled</p>
+<div class="ed">
+<div class="bar">edge-fw-audit.yaml &middot; right-click &rsaquo; Comment Selected Lines</div>
+<pre><span class="ln"><i>3</i>  <span class="t">- </span><span class="s">send</span><span class="t">:</span></span><span class="ln"><i>4</i>      <span class="o">command</span><span class="t">: |</span></span><span class="ln"><i>5</i>        <span class="pay">get system status</span></span><span class="ln sel"><i>6</i>        <span class="c">#diagnose sys top 5</span></span><span class="ln sel"><i>7</i>        <span class="c">#execute backup config flash bk1</span></span><span class="ln"><i>8</i>        <span class="pay">get router info routing-table all</span></span><span class="ln"><i>9</i>      <span class="o">timeout</span><span class="t">: </span><span class="pay">30</span></span></pre>
+</div>
+<div class="note red"><span class="h">FGT-EDGE-01 (10.20.4.11) #</span> #diagnose sys top 5<br>Unknown action 0<br><span class="h">FGT-EDGE-01 (10.20.4.11) #</span> #execute backup config flash bk1<br>Unknown action 0</div>
+<p class="cap" style="margin-top:4px">Step still runs &mdash; the # lines are sent verbatim to all 14 hosts<span class="tag bad">device reacts to junk</span></p>
+</div>
+
+<div class="col">
+<p class="cap"><b class="good">After</b> &mdash; payload stays payload-colored, editor warns</p>
+<div class="ed">
+<div class="bar">edge-fw-audit.yaml &middot; right-click &rsaquo; Comment Selected Lines</div>
+<pre><span class="ln"><i>3</i>  <span class="t">- </span><span class="s">send</span><span class="t">:</span></span><span class="ln"><i>4</i>      <span class="o">command</span><span class="t">: |</span></span><span class="ln"><i>5</i>        <span class="pay">get system status</span></span><span class="ln sel"><i>6</i>        <span class="warnline">diagnose sys top 5</span></span><span class="ln sel"><i>7</i>        <span class="warnline">execute backup config flash bk1</span></span><span class="ln"><i>8</i>        <span class="pay">get router info routing-table all</span></span><span class="ln"><i>9</i>      <span class="o">timeout</span><span class="t">: </span><span class="pay">30</span></span></pre>
+</div>
+<div class="note amber">&#9888; Lines 6&ndash;7 are command payload &mdash; <b>#</b> is not a comment here; it would be sent to the host as-is. Nothing was changed.</div>
+<div class="btns"><span class="btn pri">Comment out enclosing step</span><span class="btn">Insert # anyway</span><span class="btn">Cancel</span></div>
+<p class="cap" style="margin-top:5px">Highlighter no longer greens # inside block scalars<span class="tag good">no false &ldquo;disabled&rdquo; cue</span></p>
+</div>
+
+</div>
+<p class="foot">Fix detects block-scalar regions in Comment/Uncomment (shared with BUG-070 lints) and stops the highlighter from styling payload <b>#</b> as comments.</p>
+</body></html>

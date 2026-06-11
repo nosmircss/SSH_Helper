@@ -1,0 +1,26 @@
+{
+ "id": "BUG-041",
+ "title": "while/repeat loops that hit max_iterations report success, silently truncating the run",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-b",
+ "lens": "correctness",
+ "existing_state": "Both loop containers stop at max_iterations (default 10000: Services/Scripting/Commands/WhileCommand.cs:14, RepeatCommand.cs:15) and then return `new CommandResult { Success = true, ... }` after emitting only a Warning-level line (WhileCommand.cs:105-110, RepeatCommand.cs:85-90). The triggering condition is exactly the dangerous one: the `while`/`until` expression is stuck (typo'd variable name evaluating to a constant, a `send`-captured value that never changes, etc.). The script burns up to 10000 iterations of real SSH commands against the host, abandons the loop mid-work, and then continues to the following steps — and the overall run is recorded as successful in history and job results. Nothing sets _last_error, the result is not marked SuppressedError, and `on_error` has no effect since nothing failed.",
+ "recommendation": "Make hitting the cap a failure by default (CommandResult.ApplyOnError with a clear message, so `on_error: continue` still allows opting out), or add an explicit `on_max_iterations: fail|continue` option on while/repeat with fail as default. At minimum set _last_error and mark the result SuppressedError so post-run checks and notifications can see the truncation.",
+ "user_benefit": "A stuck loop condition surfaces as a failed step instead of a quietly truncated run that history marks green — critical when the loop is doing real work against production hosts.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WhileCommand.cs",
+   "lines": "105-110",
+   "note": "cap reached -> Warning emit only, then Success=true returned"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\RepeatCommand.cs",
+   "lines": "85-90",
+   "note": "identical silent-success pattern in repeat"
+  }
+ ]
+}

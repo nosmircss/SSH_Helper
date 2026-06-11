@@ -1,0 +1,76 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>UX-040 mockup</title><style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+h1{font-size:11px;font-weight:600;margin:0 0 8px;color:#c9d4e3}
+.cap{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+.row{display:flex;gap:14px}.col{flex:1;min-width:0}
+.canvas{position:relative;height:212px;border:1px solid #1c2330;border-radius:8px;overflow:hidden;
+background:radial-gradient(circle,#151c28 1px,transparent 1px) 0 0/16px 16px,#0d1117}
+svg{position:absolute;inset:0}
+.blk{position:absolute;border:1px solid #2bd97c55;border-radius:6px;background:#10161f;padding:4px 7px;font-size:9px;line-height:1.45;color:#c9d4e3}
+.blk small{color:#8294a8;display:block;font-size:8px}
+.if{border-color:#4cc9f0;box-shadow:0 0 10px rgba(76,201,240,.18)}
+.badge{display:inline-block;font-size:8px;padding:0 5px;border-radius:7px;background:rgba(76,201,240,.16);color:#4cc9f0;margin-right:4px}
+.pill{position:absolute;font-size:8px;padding:1px 6px;border-radius:8px;border:1px solid;background:#0d1117;white-space:nowrap}
+.pg{border-color:#2bd97c66;color:#2bd97c}
+.pa{border-color:#ffb454;color:#ffb454}
+.note{font-size:9px;line-height:1.6;color:#8294a8;margin-top:8px}
+.note b{color:#ff5c5c;font-weight:600}.note i{color:#ffb454;font-style:normal}
+.pop{position:absolute;left:128px;top:62px;width:188px;background:#10161f;border:1px solid #4cc9f0aa;border-radius:7px;box-shadow:0 6px 22px rgba(0,0,0,.55),0 0 12px rgba(76,201,240,.12);font-size:9px;z-index:2}
+.pop h2{margin:0;padding:5px 9px;font-size:9px;font-weight:600;color:#4cc9f0;border-bottom:1px solid #1c2330}
+.opt{display:flex;align-items:center;gap:6px;padding:4px 9px;color:#c9d4e3}
+.r{width:9px;height:9px;border-radius:50%;border:1px solid #8294a8;flex:none}
+.r.on{border-color:#4cc9f0;box-shadow:inset 0 0 0 2.5px #0b0e13;background:#4cc9f0}
+.inp{flex:1;border:1px solid #4cc9f0;border-radius:4px;background:#0b0e13;color:#c9d4e3;padding:1px 5px;font-size:8px;box-shadow:0 0 6px rgba(76,201,240,.3)}
+.dim{color:#8294a8;font-size:8px}
+.btns{display:flex;justify-content:flex-end;gap:6px;padding:5px 9px 7px}
+.btn{border:1px solid #1c2330;border-radius:4px;padding:2px 9px;font-size:8px;color:#8294a8}
+.btn.ok{border-color:#4cc9f0;color:#0b0e13;background:#4cc9f0;font-weight:600}
+.chip{border:1px solid #1c2330;border-radius:7px;background:#10161f;padding:6px 9px;font-size:9px;margin-top:8px}
+.chip .t{color:#4cc9f0;font-weight:600;margin-right:6px}
+.chip .mini{border:1px solid #4cc9f0;border-radius:3px;background:#0b0e13;padding:0 4px;color:#c9d4e3;font-size:8px}
+.tst{border:1px solid #ff5c5c88;border-radius:7px;background:rgba(255,92,92,.07);padding:6px 9px;font-size:9px;color:#ff5c5c;margin-top:8px}
+.x{color:#ff5c5c;font-weight:700;margin-right:5px}
+.guess{position:absolute;left:212px;top:120px;font-size:8px;color:#ff5c5c}
+</style></head><body>
+<h1>UX-040 &mdash; Wiring a container output silently guesses the branch; choose it at wire time instead</h1>
+<div class="row">
+<div class="col"><p class="cap">Before &mdash; silent inference</p>
+<div class="canvas">
+<svg width="330" height="212">
+<path d="M160 56 C160 96,84 100,84 138" fill="none" stroke="#2bd97c" stroke-width="1.5" opacity=".8"/>
+<path d="M170 56 C170 96,242 100,242 138" fill="none" stroke="#ffb454" stroke-width="1.5" stroke-dasharray="5 3"/>
+</svg>
+<div class="blk if" style="left:96px;top:12px;width:148px"><span class="badge">if</span>{{exit_code}} != 0<small>fw-edge-01 &middot; 10.20.4.17</small></div>
+<div class="blk" style="left:22px;top:140px;width:128px"><span class="badge" style="background:rgba(43,217,124,.14);color:#2bd97c">send</span>get system status</div>
+<div class="blk" style="left:188px;top:140px;width:118px"><span class="badge" style="background:rgba(43,217,124,.14);color:#2bd97c">send</span>diagnose sys top</div>
+<span class="pill pg" style="left:88px;top:88px">then</span>
+<span class="pill pa" style="left:196px;top:88px">elif &middot; condition: ""</span>
+<span class="guess">&#8593; guessed, never asked</span>
+</div>
+<div class="note">2nd wire from <i>If</i> &rarr; <b>elif with an empty condition</b> &mdash; looks valid until Apply fails.<br>
+4th wire from <i>Try</i> &rarr; silent <b>duplicate catch</b>. <i>Switch</i> wire &rarr; always case&nbsp;N; <b>default is unreachable</b>.<br>
+Only fix: right-click the wire &rarr; Edit branch. Nothing on canvas advertises it.</div>
+</div>
+<div class="col"><p class="cap">After &mdash; branch chooser on connect</p>
+<div class="canvas">
+<svg width="330" height="212">
+<path d="M160 56 C160 110,52 116,52 160" fill="none" stroke="#2bd97c" stroke-width="1.5" opacity=".8"/>
+<path d="M170 56 C170 70,200 52,222 62" fill="none" stroke="#4cc9f0" stroke-width="1.5" stroke-dasharray="5 3"/>
+</svg>
+<div class="blk if" style="left:96px;top:12px;width:148px"><span class="badge">if</span>{{exit_code}} != 0<small>fw-edge-01 &middot; 10.20.4.17</small></div>
+<div class="blk" style="left:14px;top:162px;width:108px"><span class="badge" style="background:rgba(43,217,124,.14);color:#2bd97c">send</span>get system status</div>
+<span class="pill pg" style="left:78px;top:100px">then</span>
+<div class="pop">
+<h2>New branch from If</h2>
+<div class="opt"><span class="r"></span>then <span class="dim">(in use)</span></div>
+<div class="opt"><span class="r on"></span>elif <input class="inp" value='{{status}} == "down"' readonly></div>
+<div class="opt"><span class="r"></span>else</div>
+<div class="btns"><span class="btn">Use default</span><span class="btn ok">OK</span></div>
+</div>
+</div>
+<div class="chip"><span class="t">New branch from Switch</span> <span class="r on" style="display:inline-block;vertical-align:-1px"></span> case <span class="mini">fortigate</span> &nbsp;<span class="r" style="display:inline-block;vertical-align:-1px"></span> default</div>
+<div class="tst"><span class="x">&#10005;</span>Try already has do / catch / finally &mdash; connection rejected</div>
+</div>
+</div>
+</body></html>

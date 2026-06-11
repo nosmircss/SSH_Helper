@@ -1,0 +1,31 @@
+{
+ "id": "UX-053",
+ "title": "Custom-painted controls drop keyboard affordances: Stop All has no focus indicator, Presets/Favorites tabs are mouse-only",
+ "category": "UX",
+ "severity": "low",
+ "effort": "S",
+ "area": "ui-utilities",
+ "lens": "ux",
+ "existing_state": "FlatVisualButton's OnPaint draws background, border, and text only (UI/FlatVisualButton.cs:86-118) — no focus rectangle, and TextFormatFlags.NoPrefix (:117) strips mnemonic underlines; its single production use is btnStopAll (Form1.Designer.cs:132), the emergency Stop All button, so a keyboard user tabbing toward it gets no visual cue it is focused before pressing Space/Enter mid-run. PresetTabHeaderStrip (the main window's Presets/Favorites switcher) sets TabStop = false (UI/PresetTabHeaderStrip.cs:26) and handles only mouse events (:72-108) — there is no keyboard path to switch between Presets and Favorites at all.",
+ "recommendation": "In FlatVisualButton.OnPaint, when Focused && ShowFocusCues draw ControlPaint.DrawFocusRectangle (or a 1px accent inner border to match the flat style) and drop NoPrefix so &-mnemonics render. For PresetTabHeaderStrip, set TabStop = true, override IsInputKey/OnKeyDown for Left/Right arrows to change SelectedIndex, and draw a focus underline; both are small additions to existing OnPaint code.",
+ "user_benefit": "Keyboard-driven operators (common among terminal-heavy network engineers) can reliably hit Stop All under pressure and switch preset tabs without reaching for the mouse.",
+ "evidence": [
+  {
+   "file": "UI/FlatVisualButton.cs",
+   "lines": "86-118",
+   "note": "OnPaint: no focus cue; :117 NoPrefix strips mnemonics"
+  },
+  {
+   "file": "Form1.Designer.cs",
+   "lines": "132",
+   "note": "btnStopAll is the sole FlatVisualButton"
+  },
+  {
+   "file": "UI/PresetTabHeaderStrip.cs",
+   "lines": "26, 72-108",
+   "note": "TabStop=false; mouse handlers only, no key handling"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

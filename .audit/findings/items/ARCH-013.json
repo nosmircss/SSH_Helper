@@ -1,0 +1,26 @@
+{
+ "id": "ARCH-013",
+ "title": "Two divergent CSV parsers: job host import silently corrupts CSVs the app itself wrote",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "persistence-config",
+ "lens": "perf",
+ "existing_state": "CsvManager contains two independent CSV parsers. The grid load path uses ReadCsvRecord (CsvManager.cs:118-189), a full record reader that supports quoted fields with embedded newlines — and the app's own save path deliberately produces such fields: EscapeCsvValue quotes any value containing \\n or \\r (CsvManager.cs:254-256). The second parser, public static ParseCsvLine (CsvManager.cs:194-243), is line-based and cannot handle embedded newlines. JobStorageService.ImportHostsFromCsv uses the second one: it does File.ReadAllLines and parses each physical line independently (JobStorageService.cs:263-285, delegating at 311-312). Result: a hosts CSV exported by the app's own Save (or any RFC-compliant CSV) containing a multi-line cell loads perfectly into the main grid but, when imported into a scheduled job, splits the quoted record across lines — the first fragment becomes a short row and the continuation line becomes a bogus extra 'host' — with no error. The job then targets a corrupted host list.",
+ "recommendation": "Delete the duplication: expose the record-based reader (ReadCsvRecord, or a LoadFromFile overload returning rows) as the single parsing entry point and rewrite JobStorageService.ImportHostsFromCsv to stream records through it instead of File.ReadAllLines + ParseCsvLine. Keep ParseCsvLine only if a genuinely single-line use case remains, and document it as such.",
+ "user_benefit": "Job host imports stop silently diverging from grid imports for the same file — no phantom hosts or truncated rows in scheduled jobs, and one parser to fix when the next CSV edge case shows up.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/CsvManager.cs",
+   "lines": "118-189, 194-243, 248-260",
+   "note": "Record reader handles embedded newlines; ParseCsvLine does not; EscapeCsvValue emits quoted newlines on save"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobStorageService.cs",
+   "lines": "258-290, 311-312",
+   "note": "ImportHostsFromCsv: File.ReadAllLines + per-line ParseCsvLine — breaks on quoted multi-line fields"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-012",
+ "title": "Execution history has no search, filter, or useful metadata — finding last week's failed run means scrolling labels",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "M",
+ "area": "persistence-config",
+ "lens": "ux",
+ "existing_state": "The history surface is a plain ListBox of labels (lstOutput, Form1.cs:1006 sets DisplayMember to Label) whose context menu offers only Save As / Save All / Delete / Delete All / View Details (contextHistoryLst_Opening, Form1.cs:8358-8374). The on-disk index entry stores only Id, Label, CreatedAtUtc, two booleans, and a filename (Models/HistoryIndex.cs:15-23) — no preset name, no environment, no host count, no success/failure status — even though all of that exists in the ExecutionDetails payload being written at the same moment (Form1.cs:13009, 14240). There is no text search across run outputs, no date or status filter, and no way to answer \"which run touched host 10.1.2.3\" without opening entries one by one.",
+ "recommendation": "Enrich HistoryIndexEntry with PresetName, EnvironmentName, HostCount, FailedHostCount (populate in the two SaveRun call sites; old entries just render without badges — SchemaVersion already exists for migration). Add a filter textbox above lstOutput that narrows by label/preset/environment, plus a status filter (all / had failures). For content search, add a \"Search outputs...\" action that streams run files with the existing selective deserializer (HistoryStorageService already has lightweight readers) and lists matching runs.",
+ "user_benefit": "For someone running daily jobs against 200 devices, history is the audit trail. Ansible/SecureCRT users expect to query past runs; today the only navigation is scrolling a label list capped at MaxHistoryEntries.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8358-8374",
+   "note": "context menu = save/delete/details only; no search or filter affordance"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HistoryIndex.cs",
+   "lines": "15-23",
+   "note": "index entry carries no queryable metadata beyond label and timestamp"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13009",
+   "note": "SaveRun call site where ExecutionDetails (preset, environment, host results) is in hand"
+  }
+ ],
+ "mockup_idea": "History panel before/after: before = flat label list; after = search box on top, each row showing label + preset/environment chips + a red '3 failed' badge, with a status filter dropdown.",
+ "merged_from": 1
+}

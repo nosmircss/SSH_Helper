@@ -1,0 +1,26 @@
+{
+ "id": "UX-046",
+ "title": "Released exes are unsigned — every fresh download fights SmartScreen for a credential-handling SSH tool",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "models-samples-build",
+ "lens": "ux",
+ "existing_state": "The release job stages SSH_Helper.exe and SSH_Helper_Portable.exe and publishes them with SHA256 checksum sidecar files only (.github/workflows/build-release.yml:110-135); no Authenticode signing step exists anywhere in the pipeline, and the build job has no signing inputs. Self-contained single-file exes (SSH_Helper.csproj:24-29) are precisely the shape SmartScreen and corporate AV flag hardest: every new release resets reputation, so each download greets users (often network admins on locked-down workstations) with 'Windows protected your PC' and requires the More info → Run anyway bypass — or is outright blocked by AppLocker/AV policy. For a tool that handles SSH credentials and Vault tokens, training users to click through trust warnings is its own cost.",
+ "recommendation": "Add a signing step between publish and artifact upload in the build job (Windows runner, where signtool is available): Azure Trusted Signing (azure/trusted-signing-action, low-cost subscription) or SignPath's free OSS tier are the practical paths without buying an EV cert. Sign both flavors, keep the SHA256 sidecars. Document the signing identity in the release notes so org policies can allowlist the publisher once instead of per-version.",
+ "user_benefit": "Downloads run without scary bypass dialogs, releases stop being blocked by corporate AV/AppLocker policies, and per-release SmartScreen reputation resets disappear — meaningfully lowering the barrier for the exact audience (admins on managed machines) the tool targets.",
+ "evidence": [
+  {
+   "file": ".github/workflows/build-release.yml",
+   "lines": "83-93, 110-135",
+   "note": "publish → upload → release with checksums only; no signtool/signing action anywhere"
+  },
+  {
+   "file": "SSH_Helper.csproj",
+   "lines": "24-30",
+   "note": "self-contained single-file publish — the highest-friction shape for SmartScreen reputation"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

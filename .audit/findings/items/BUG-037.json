@@ -1,0 +1,36 @@
+{
+ "id": "BUG-037",
+ "title": "No global exception handler: any unhandled error is a stock crash with no save, no log — and two startup paths throw unhandled",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "cross-startup",
+ "lens": "reliability",
+ "existing_state": "There are zero registrations of Application.ThreadException, AppDomain.CurrentDomain.UnhandledException, or Application.SetUnhandledExceptionMode anywhere in the codebase (grep across all .cs files returns no hits). Program.Main runs Application.Run(new Form1()) bare (Program.cs:59). Concrete unhandled startup throws exist today: (a) ScintillaNativeBootstrap.ExtractEmbeddedNativeLibraries throws InvalidOperationException when both extraction roots are unwritable (Utilities/ScintillaNativeBootstrap.cs:84-86, called from Program.cs:58) — hard crash before any window; (b) AppDataPaths.ValidateStartupStorageWritable returns true without probing in standard builds (Utilities/AppDataPaths.cs:99-100), so a locked-down or full %LocalAppData% surfaces as a raw exception inside the Form1 constructor (GetAppFolder/Directory.CreateDirectory via ConfigurationService at Form1.cs:344, or the first-run default-config Save at ConfigurationService.cs:48-53). At runtime, any stray exception on the UI thread kills a process that may hold an unsaved host grid, running SSH sessions, and the scheduler — with no log, no state flush, and (because LastAppShutdownUtc is only written in FormClosing, Form1.cs:3946) corrupted missed-run bookkeeping on the next start.",
+ "recommendation": "In Program.Main: wrap the bootstrap (ConfigureSatelliteDirectory onward) in try/catch that shows an actionable error dialog; register Application.ThreadException and AppDomain.CurrentDomain.UnhandledException handlers that write the exception to a crash log under AppDataPaths.GetAppFolder() and attempt a best-effort SaveConfiguration before exiting; extend ValidateStartupStorageWritable to probe %LocalAppData%\\SSH_Helper in standard builds too (TryEnsureFolderWritable already exists and is only wired for portable mode).",
+ "user_benefit": "Crashes stop silently destroying in-session work and become diagnosable; the two real startup-crash paths (unwritable AppData, failed native extraction) get a clear message instead of a stack-trace dialog or instant process death.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Program.cs",
+   "lines": "13-60",
+   "note": "Main has no try/catch and registers no global exception handlers"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\ScintillaNativeBootstrap.cs",
+   "lines": "84-86",
+   "note": "throws InvalidOperationException pre-UI when extraction roots are unwritable; unhandled in Main"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\AppDataPaths.cs",
+   "lines": "95-108",
+   "note": "ValidateStartupStorageWritable early-returns true for non-portable builds, never probing LocalAppData"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "344-349",
+   "note": "ConfigurationService/Load in the constructor — storage failures here are unhandled"
+  }
+ ]
+}

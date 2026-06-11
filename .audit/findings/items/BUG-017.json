@@ -1,0 +1,36 @@
+{
+ "id": "BUG-017",
+ "title": "Multi-host runs hide failures and silently drop invalid hosts from the run entirely",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "ssh-execution",
+ "lens": "correctness",
+ "existing_state": "Two compounding gaps. (1) Silent skips: every per-host loop skips hosts failing IsValid() with a bare `continue` and no ExecutionResult — simple commands at Services/SshExecutionService.cs:394-395 and 439-443, scripts at :589-591, and ExecuteFolderAsync pre-filters with `hosts.Where(h => h.IsValid())` (:634). IsValid() (Models/HostConnection.cs:59-65) rejects not just blank rows but any malformed host/IP via InputValidator.IsValidHostOrIp, so a typo'd address in the grid simply vanishes from the run; the only trace is a debug-mode-only SshDebugLog (:441). The returned List<ExecutionResult> has fewer entries than the user selected with no per-host explanation. (2) No failure roll-up: the plain Execute path's completion status is built as `resultCount => $\"Completed execution on {resultCount} hosts\"` (Form1.cs:12676, 12774) — it says 'Completed execution on 8 hosts' even when all 8 failed, and when 10 were selected but 2 were skipped as invalid. The folder-run path already does this right: 'Completed folder X: N succeeded, M failed' (Form1.cs:12958-12964). To find which hosts failed, the user must scroll the full transcript for error banners; history stores per-host success (Form1.cs:8568-8571) but the live run gives no roll-up and skipped hosts never appear anywhere, including history.",
+ "recommendation": "In SshExecutionService, replace the silent `continue` at :394, :439, and :589 (and the :634 pre-filter) with a failed ExecutionResult (Success=false, ErrorMessage=\"Skipped: invalid host address '<value>'\") so skipped hosts appear in output, summary counts, and history. In Form1, give the plain-preset path parity with the folder path: compute successCount/failCount from results (as at 12958-12959) and use a 'N succeeded, M failed' status plus an appended summary block listing failed hosts at the end of the output transcript.",
+ "user_benefit": "On a fleet tool, a host that silently never received the change is the worst failure mode — the run reports completion and nothing flags the omission. Failed/skipped hosts become visible at a glance instead of requiring a transcript scroll-and-search after every run.",
+ "mockup_idea": "Before/after of the post-run state: current status bar 'Completed execution on 8 hosts' vs 'Completed: 6 succeeded, 2 failed, 1 skipped (invalid)' plus an end-of-output summary listing the failed/skipped host addresses.",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "394-395,439-443,589-591,634",
+   "note": "invalid hosts skipped with no result entry in all per-host loops; folder path filters them out entirely"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HostConnection.cs",
+   "lines": "59-65",
+   "note": "IsValid rejects malformed (not just empty) addresses via InputValidator.IsValidHostOrIp"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12673-12677,12771-12775",
+   "note": "completion status reports raw result count with no success/fail breakdown"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12958-12964",
+   "note": "folder path already shows 'N succeeded, M failed' — parity model exists"
+  }
+ ]
+}

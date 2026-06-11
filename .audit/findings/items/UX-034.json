@@ -1,0 +1,31 @@
+{
+ "id": "UX-034",
+ "title": "Run start blocks the UI thread on sequential per-host Vault reads; an expired OIDC token pops a surprise synchronous browser login",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "integrations",
+ "lens": "ux",
+ "existing_state": "ExecutePresetOnRowsAsync builds host connections synchronously on the UI thread (Form1.cs:12277 — it shows owned dialogs immediately after at :12286-12288, confirming UI-thread context). For each row with a vault_path, GetHostConnections calls VaultCredentialProvider.TryGetPassword, which is sync-over-async (.GetAwaiter().GetResult(), Services/Vault/VaultCredentialProvider.cs:48-49) — one blocking Vault HTTP round-trip per distinct secret path (the 300s cache only helps repeated paths). With 200 devices holding per-device secrets, the app freezes for the full sequential resolution before the run even begins, with no progress indication. Worse: if the profile uses OIDC and the cached token has expired, the first lookup launches a full interactive browser login (VaultService.GetAuthenticatedProfileAsync → AuthenticateWithOidcAsync → VaultOidcLoginFlow opens the system browser and blocks on an HttpListener, Services/Vault/VaultOidcLoginFlow.cs:42-69) — the user gets an unexplained browser window while the main window is frozen for up to OidcTimeoutSeconds (default 180s). The same sync-over-async pattern exists in inline {{vault:}} (ScriptContext.cs:748) and vault() functions (VaultFunctions.cs:36).",
+ "recommendation": "Make credential resolution an async pre-run phase: extract the vault portion of GetHostConnections into an awaited 'resolve credentials' step that (1) runs off the UI thread with bounded parallelism across distinct paths, (2) shows progress in the status bar ('Resolving Vault credentials 38/142...'), and (3) pre-flights authentication once — if the OIDC token is expired, show an explicit 'Vault login required' prompt before opening the browser instead of letting it appear mid-freeze. The interactive-terminal path already resolves per-row inside an async lambda (Form1.cs:8916), so the per-row resolution is already separable.",
+ "user_benefit": "No more multi-second (or 3-minute) frozen main window at the exact moment the operator clicks Run, and no more mystery browser windows — the app explains what it needs (a Vault login) before taking over the screen.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "12277, 12286-12288",
+   "note": "GetHostConnections enumerated synchronously on the UI thread at run start"
+  },
+  {
+   "file": "Services/Vault/VaultCredentialProvider.cs",
+   "lines": "48-49",
+   "note": "sync-over-async Vault read per row"
+  },
+  {
+   "file": "Services/Vault/VaultOidcLoginFlow.cs",
+   "lines": "42-69",
+   "note": "expired OIDC token triggers a blocking interactive browser flow, timeout default 180s"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

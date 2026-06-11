@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-011",
+ "title": "Graph structure has two competing sources of truth (edges vs _isChildOf/_stepPath metadata) with no central normalization seam",
+ "category": "ARCH",
+ "severity": "high",
+ "effort": "L",
+ "area": "flowcanvas-state",
+ "lens": "perf",
+ "existing_state": "Container membership is decided by node metadata (_isChildOf + _stepPath), NOT edges, for imported graphs -- but canvas-built graphs have no metadata, so every structural consumer carries a dual-origin code path: treeBuilder tries buildBranchesMeta then falls back to buildBranchesEdges (FlowCanvas/src/utils/layout/treeBuilder.ts:63-67); edgePath classifies branch edges via data.branchPath OR target _isChildOf and correlates taken-branches two different ways (edgePath.ts:58-63, 177-192); branchBands groups purely by _isChildOf (branchBands.ts:156-169); export regeneration rebuilds nesting from metadata. childMembership.ts:1-12 documents the seam and exists precisely because wiring a fresh block used to orphan it. This duplication has a documented defect history (issue #45 sibling drop/promote, the rewire-into-band bug, the _stepPath-contiguity dead-neon bug), and a live hole remains today: pasteNodes deep-copies node data verbatim (utils/clipboard.ts:44-57) and the paste site strips nothing (hooks/useKeyboardShortcuts.ts:63-74), so a pasted child still carries _isChildOf/_stepPath pointing at the ORIGINAL container -- branchBands draws it inside the original band, treeBuilder nests it under the original container, renumberStepPaths renumbers it as a sibling of the original branch, and metadata-driven export can double-place it. Every new structural entry point (paste today; future duplicate/drag-into-band/group ops) must independently remember all metadata invariants or it ships another bug of this class.",
+ "recommendation": "Introduce a single normalization seam: a normalizeStructure(nodes, edges) pass owning the invariants (membership matches wiring, _stepPath contiguous per branch, cosmetics/_forceGraphExport consistent) that every structural entry point routes through -- import (load-graph), onConnect, paste, delete paths, undo/redo restore. Short-term, fix paste inside it (strip or remap _isChildOf/_stepPath/_membershipFromConnect via the paste idMap). Longer-term, collapse the dual origin: derive and write membership metadata for canvas-authored nodes at connect time for ALL gestures (childMembership already covers three), so treeBuilder/edgePath/branchBands can drop their edge-walking fallbacks and metadata becomes the only structural source of truth.",
+ "user_benefit": "Stops the recurring class of wrong-band / wrong-export / dead-highlight bugs that has already produced several shipped defects, and makes new graph operations (duplicate, group, drag-into-container) safe to build.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/utils/childMembership.ts",
+   "lines": "1-12",
+   "note": "membership decided by metadata, not edges; module exists to patch one entry point (connect)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/utils/layout/treeBuilder.ts",
+   "lines": "63-67, 72-124",
+   "note": "dual builders: metadata first, edge-walk fallback"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/selectors/edgePath.ts",
+   "lines": "58-63, 177-192",
+   "note": "dual-origin branch identity and taken-branch correlation"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/utils/branchBands.ts",
+   "lines": "156-169",
+   "note": "bands group by _isChildOf only"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/utils/clipboard.ts",
+   "lines": "44-57",
+   "note": "paste copies stale _isChildOf/_stepPath/_membershipFromConnect verbatim; no entry point normalizes it"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

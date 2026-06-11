@@ -1,0 +1,31 @@
+{
+ "id": "ENH-008",
+ "title": "Undefined variables silently resolve to empty strings at runtime — no warning, no strict mode",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "ux",
+ "existing_state": "Any `${typo_var}` reference resolves to empty string with zero diagnostics: plain lookup ends in GetVariableString which returns \"\" for missing names (ScriptContext.cs:559-565, reached from ResolveVariableExpression at 704), and out-of-range `arr[i]` also returns \"\" silently (ScriptContext.cs:682-684). The only safety net is a pre-run dialog that frames every statically-unresolved reference as a missing *grid column* (Form1.cs:12542-12611, fed by ScriptDependencyAnalyzer whose own doc says its purpose is grid-column dependencies, ScriptDependencyAnalyzer.cs:40-44). Nothing exists at runtime: a `send: delete flash:${backup_file}` where the variable went empty mid-loop sends `delete flash:` to the device. Ansible fails on undefined variables by default; here it's invisible. Per-script the user can't opt into stricter behavior at all.",
+ "recommendation": "Two layers: (1) runtime warning — when SubstituteVariableTokens resolves a token to empty because the variable doesn't exist (HasVariable false, distinguishable from legitimately-empty), emit a once-per-name Warning via context.EmitOutput identifying the step line and token; (2) a script-level `strict_vars: true` flag (parsed alongside `debug:`/`nobanner:` in the top-level keys) that escalates an undefined reference to a step failure instead. Also reword the pre-run dialog to separate \"not a grid column AND never set in the script (likely typo)\" from \"expected grid column\" — the analyzer already knows the set/capture-defined names so the split is cheap.",
+ "user_benefit": "Empty-substitution is how half-formed commands reach live network devices; a visible warning (or opt-in hard failure) catches the misspelled capture/var before it mangles 200 hosts.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+   "lines": "559-565, 682-684, 704",
+   "note": "missing variable and out-of-range index both yield empty string silently"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12542-12611",
+   "note": "only safety net is the pre-run missing-COLUMN dialog"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptDependencyAnalyzer.cs",
+   "lines": "40-44",
+   "note": "analyzer scoped to grid-column dependencies by design"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

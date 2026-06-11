@@ -1,0 +1,21 @@
+{
+ "id": "UX-022",
+ "title": "Invalid numeric step options (timeout: 30s, retry: two) are silently discarded by the parser",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-core",
+ "lens": "ux",
+ "existing_state": "The step-root option parser drops any value that fails int.TryParse without recording an error or warning: `timeout` (Services/Scripting/ScriptParser.cs:979-982), `retry` (988-991), `retry_delay` (992-996), and `max_iterations` (1000-1004) all use `if (int.TryParse(...)) step.X = ...;` with no else branch. A user who writes `timeout: 30s` or `retry_delay: 1.5` gets a script that validates green and runs with the option simply absent — the global default timeout applies and they never learn why their per-step timeout 'didn't work'. This contrasts sharply with the rest of the parser, which produces line-accurate did-you-mean errors for unknown keys.",
+ "recommendation": "In each of the four cases, on TryParse failure add a ParseError with the line number and offending value (matching the existing error style), e.g. 'Line 14: timeout must be an integer number of seconds (got 30s)'. While there, accept the obvious duration suffixes users keep reaching for — parse 30s/2m/1h into seconds for timeout/retry_delay — which both fixes the trap and adds the ergonomics everyone expects from modern tools.",
+ "user_benefit": "A timeout or retry the user believes is configured but silently isn't is exactly the kind of trap that surfaces as a 3 a.m. hung fleet run; this makes the mistake impossible to miss and the natural syntax just work.",
+ "evidence": [
+  {
+   "file": "Services/Scripting/ScriptParser.cs",
+   "lines": "979-1004",
+   "note": "timeout/retry/retry_delay/max_iterations silently dropped on TryParse failure"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

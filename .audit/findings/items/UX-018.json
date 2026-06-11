@@ -1,0 +1,36 @@
+{
+ "id": "UX-018",
+ "title": "Settings dialog mixes staged and instant actions — three buttons (and Vault profile Remove) take effect even if you press Cancel",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-general",
+ "lens": "ux",
+ "existing_state": "Everything in SettingsDialog is staged until Save commits one _configService.Update transaction (SettingsDialog.cs:2657-2663) — except: 'Reset All Preset Timeouts' calls _presetManager.ClearAllTimeouts() immediately (2440-2464; Form1.cs:5751-5757 even documents the resulting sync hazard), 'Clear Embedded Browser Data...' wipes WebView2 state immediately (2466-2502), and removing a Vault profile deletes its four Windows Credential Manager secrets on the spot (837-858) while the profile itself only disappears from config if you later press Save — Cancel leaves config still referencing a profile whose token/passwords are gone. Notifications Remove behaves the same way. Nothing in the UI distinguishes these instant actions from the ~80 staged controls around them.",
+ "recommendation": "Make the semantics visible and consistent: (1) defer credential deletion to Save by queuing pending deletions (a List<string> of credential targets processed inside BtnSave_Click after ValidateVaultProfiles) so cancelling the dialog genuinely cancels a profile removal; (2) for the two genuinely-immediate maintenance buttons, add an 'applies immediately' caption next to them (matching the note-label style already used throughout the tabs) or move them to a dedicated 'Maintenance' group so users stop assuming Save/Cancel governs them.",
+ "user_benefit": "Cancel becomes trustworthy across the whole dialog: no more losing a Vault token or AppRole secret because you removed a profile, changed your mind, and cancelled — today that secret is unrecoverable and re-entry requires hunting it down again.",
+ "evidence": [
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "2440-2502",
+   "note": "Reset Preset Timeouts and Clear Embedded Browser Data execute immediately inside an otherwise staged dialog"
+  },
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "837-858",
+   "note": "Vault profile Remove deletes 4 Credential Manager secrets pre-Save; Cancel does not restore them"
+  },
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "2657-2663",
+   "note": "All other settings commit only in BtnSave_Click's single Update transaction"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "5751-5757",
+   "note": "Form1 comment acknowledging the timeout reset is 'persisted immediately' and needs post-dialog resync"
+  }
+ ],
+ "mockup_idea": "SettingsDialog General tab with the two instant buttons regrouped under a 'Maintenance (applies immediately)' header.",
+ "merged_from": 1
+}

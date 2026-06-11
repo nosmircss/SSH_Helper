@@ -1,0 +1,31 @@
+{
+ "id": "ENH-015",
+ "title": "Connection test cannot be cancelled and tests different rows than the one right-clicked",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "form1-b",
+ "lens": "ux",
+ "existing_state": "TestSelectedConnections (Form1.cs:8875-8961) creates _connectionTestCts (8899) and even handles OperationCanceledException with a \"Connection test cancelled\" status (8949-8953), but no code path ever calls Cancel() — the only references to _connectionTestCts in the entire file are the declaration (212), creation (8899-8900) and disposal (8958-8959). With the hardcoded SemaphoreSlim(5) concurrency (8910) and timeout of config.ConnectionTimeout seconds per host (8903), right-clicking \"Test Connection(s)\" with 200 checked rows of unreachable hosts locks the user into a multi-minute unstoppable run (re-entry is blocked by _isTestingConnections at 8877). Separately, the targeting is surprising: the menu item lives on the row context menu, but checked rows always win (8882-8887) and the right-clicked row is only used when nothing is checked (8889-8894) — right-clicking host X while others are checked tests the others, not X.",
+ "recommendation": "While a test is running, swap the \"Test Connection(s)\" menu item (or add a status-bar button next to statusProgress) to \"Cancel Test\" wired to _connectionTestCts.Cancel() — the downstream handling already exists. For targeting, split the menu into two explicit items whose visibility/captions are set in the context-menu Opening handler: \"Test This Host\" (right-clicked row) and \"Test Checked Hosts (N)\", mirroring the Run button's existing \"Run Checked (N)\" convention (UpdateRunButtonText).",
+ "user_benefit": "A mis-click no longer costs minutes of frozen progress against dead hosts, and the menu does what it says — testing the host you right-clicked instead of silently testing a different set.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8899-8959",
+   "note": "CTS created/disposed; grep confirms no .Cancel() caller anywhere"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8881-8894",
+   "note": "checked rows override the right-clicked row"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8949-8953",
+   "note": "cancellation handler already written, just unreachable"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

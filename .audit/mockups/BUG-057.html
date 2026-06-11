@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>BUG-057 — Folder run skips subfolder presets</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+  .row{display:flex;gap:14px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px 2px}
+  .cap b{font-weight:600}
+  .cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+  .dlg{background:#11151d;border:1px solid #1c2330;border-radius:6px;overflow:hidden}
+  .tbar{background:#161b25;border-bottom:1px solid #1c2330;padding:5px 9px;color:#c9d4e3;font-size:11px;display:flex;justify-content:space-between}
+  .tbar span{color:#8294a8}
+  .body{padding:9px 11px 11px}
+  .lbl{color:#8294a8;font-size:11px;margin:0 0 4px}
+  .list{background:#0d1118;border:1px solid #1c2330;border-radius:4px;padding:5px 0}
+  .it{display:flex;align-items:center;gap:7px;padding:2px 9px;white-space:nowrap}
+  .it.sub{padding-left:24px}
+  .cb{width:11px;height:11px;border:1px solid #3a4658;border-radius:2px;flex:none;position:relative}
+  .cb.on{border-color:#4cc9f0;background:rgba(76,201,240,.15)}
+  .cb.on::after{content:"";position:absolute;left:2px;top:0;width:4px;height:7px;border:solid #4cc9f0;border-width:0 2px 2px 0;transform:rotate(40deg)}
+  .note{font-size:11px;color:#8294a8;margin-top:6px}
+  .note .n{color:#2bd97c}
+  .hosts{margin-top:8px;color:#8294a8;font-size:11px}
+  .btns{display:flex;gap:8px;justify-content:flex-end;margin-top:9px}
+  .btn{border:1px solid #1c2330;border-radius:4px;padding:3px 12px;font-size:11px;color:#8294a8}
+  .btn.run{border-color:#2bd97c;color:#2bd97c}
+  .warn{margin-top:8px;background:rgba(255,92,92,.07);border:1px solid rgba(255,92,92,.35);border-radius:4px;padding:6px 9px;font-size:11px;color:#ff8f8f;line-height:1.45}
+  .warn b{color:#ff5c5c}
+  .tree{margin-top:8px;font-size:11px;color:#8294a8;line-height:1.5}
+  .tree .gone{color:#ff5c5c}
+  .foot{margin-top:10px;font-size:11px;color:#8294a8;line-height:1.5;border-top:1px solid #1c2330;padding-top:7px}
+  .foot b{color:#ffb454;font-weight:600}
+</style></head><body>
+
+<div class="row">
+  <div class="col">
+    <p class="cap"><b class="bad">Before</b> — only direct children listed</p>
+    <div class="dlg">
+      <div class="tbar">Run Folder: Datacenter <span>✕</span></div>
+      <div class="body">
+        <p class="lbl">Presets to run:</p>
+        <div class="list">
+          <div class="it"><span class="cb on"></span>Health Check</div>
+          <div class="it"><span class="cb on"></span>Backup Running Config</div>
+          <div class="it"><span class="cb on"></span>Interface Error Audit</div>
+        </div>
+        <div class="hosts">Target hosts (4): 10.20.4.11 · 10.20.4.12 · 10.20.4.21 · 10.20.4.22</div>
+        <div class="btns"><span class="btn run">Run</span><span class="btn">Cancel</span></div>
+        <div class="warn"><b>Silently missing:</b> 4 presets in Datacenter/<b>Switches</b> never run. Dialog gives no hint; the run still reports success.</div>
+      </div>
+    </div>
+    <div class="tree">Preset tree on disk:<br>
+      Datacenter/ — 3 presets shown<br>
+      &nbsp;&nbsp;└ Switches/ — <span class="gone">4 presets excluded</span><br>
+      (Deleting "Datacenter" <i>does</i> count all 7 — inconsistent)
+    </div>
+  </div>
+
+  <div class="col">
+    <p class="cap"><b class="good">After</b> — descendants grouped &amp; checkable</p>
+    <div class="dlg">
+      <div class="tbar">Run Folder: Datacenter <span>✕</span></div>
+      <div class="body">
+        <p class="lbl">Presets to run:</p>
+        <div class="list">
+          <div class="it"><span class="cb on"></span>Health Check</div>
+          <div class="it"><span class="cb on"></span>Backup Running Config</div>
+          <div class="it"><span class="cb on"></span>Interface Error Audit</div>
+          <div class="it" style="padding-top:5px"><span class="cb on"></span><span style="color:#4cc9f0">▾ Switches/</span><i style="font-style:normal;color:#8294a8">(4)</i></div>
+          <div class="it sub"><span class="cb on"></span>VLAN Audit</div>
+          <div class="it sub"><span class="cb on"></span>STP Root Check</div>
+          <div class="it sub"><span class="cb on"></span>Port Security Sweep</div>
+          <div class="it sub"><span class="cb"></span>MAC Table Export</div>
+        </div>
+        <div class="note"><span class="n">Includes 4 presets from 1 subfolder</span> — uncheck the group header to skip Switches/ entirely.</div>
+        <div class="hosts">Target hosts (4): 10.20.4.11 · 10.20.4.12 · 10.20.4.21 · 10.20.4.22</div>
+        <div class="btns"><span class="btn run">Run (6 selected)</span><span class="btn">Cancel</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  <b>Decision:</b> include descendant presets in folder runs (grouped by subfolder, default-checked), aligning run semantics with folder <i>delete</i>, which already operates on all descendants. Minimum fallback: an explicit "N presets in subfolders were excluded" notice in the dialog.
+</div>
+
+</body></html>

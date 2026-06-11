@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSH_Helper — Enhancement Audit v2</title>
+<style>
+  :root {
+    --bg0: #07090d;
+    --bg1: #0c1016;
+    --bg2: #11161f;
+    --bg3: #161d29;
+    --line: #1c2330;
+    --line2: #28324466;
+    --text: #c9d4e3;
+    --dim: #8294a8;
+    --faint: #55657a;
+    --green: #2bd97c;
+    --green-dim: #2bd97c33;
+    --red: #ff5c5c;
+    --red-dim: #ff5c5c2e;
+    --amber: #ffb454;
+    --amber-dim: #ffb45430;
+    --cyan: #4cc9f0;
+    --sev-critical: #ff3b5c;
+    --sev-high: #ff8a3d;
+    --sev-medium: #e3c462;
+    --sev-low: #5b7a99;
+    --cat-BUG: #ff8a3d;
+    --cat-SEC: #ff5c5c;
+    --cat-UX: #4cc9f0;
+    --cat-FEAT: #7ee787;
+    --cat-ENH: #3ddbd9;
+    --cat-PERF: #e3c462;
+    --cat-ARCH: #b794f6;
+    --mono: "Cascadia Code", "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
+    --body: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg0); color: var(--text);
+    font-family: var(--body); font-size: 14.5px; line-height: 1.55;
+  }
+  /* ── atmosphere: scanlines + vignette ── */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      repeating-linear-gradient(0deg, transparent 0 2px, #ffffff04 2px 4px),
+      radial-gradient(ellipse 120% 90% at 50% -10%, #14304908, transparent 60%);
+  }
+  ::selection { background: #2bd97c44; }
+  a { color: var(--cyan); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 0 28px 120px; position: relative; z-index: 1; }
+
+  /* ───────────────────── header ───────────────────── */
+  header { padding: 38px 0 0; }
+  .promptline {
+    font-family: var(--mono); font-size: 13px; color: var(--green);
+    letter-spacing: .02em;
+  }
+  .promptline .host { color: var(--cyan); }
+  .promptline .path { color: var(--dim); }
+  .cursor {
+    display: inline-block; width: 8px; height: 15px; margin-left: 4px;
+    background: var(--green); vertical-align: text-bottom;
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  h1 {
+    font-family: var(--mono); font-weight: 700; margin: 14px 0 4px;
+    font-size: clamp(26px, 3.6vw, 40px); letter-spacing: .12em; color: #e8eef7;
+    text-shadow: 0 0 26px #2bd97c2a;
+  }
+  h1 .thin { color: var(--faint); font-weight: 350; }
+  .subtitle { color: var(--dim); max-width: 860px; margin: 6px 0 0; }
+  .subtitle b { color: var(--text); font-weight: 600; }
+  .meta-row {
+    display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px;
+    font-family: var(--mono); font-size: 12px; color: var(--faint);
+  }
+  .meta-row span b { color: var(--dim); font-weight: 500; }
+
+  /* category LED counters */
+  .statgrid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+    gap: 10px; margin: 26px 0 0;
+  }
+  .stat {
+    background: var(--bg1); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px 10px; cursor: pointer; position: relative; overflow: hidden;
+    transition: border-color .15s, transform .15s;
+  }
+  .stat:hover { border-color: var(--c, var(--dim)); transform: translateY(-1px); }
+  .stat.active { border-color: var(--c); box-shadow: 0 0 0 1px var(--c), 0 0 22px color-mix(in srgb, var(--c) 18%, transparent); }
+  .stat::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c); opacity: .85; }
+  .stat .n { font-family: var(--mono); font-size: 26px; font-weight: 700; color: var(--c); line-height: 1; text-shadow: 0 0 14px color-mix(in srgb, var(--c) 40%, transparent); }
+  .stat .lbl { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; color: var(--dim); margin-top: 6px; }
+  .stat .desc { font-size: 10.5px; color: var(--faint); }
+
+  /* triage meter */
+  .meterbox { margin: 22px 0 0; }
+  .meter { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--bg2); border: 1px solid var(--line); }
+  .meter div { transition: width .35s ease; min-width: 0; }
+  .meter .m-app { background: linear-gradient(180deg, #34e88a, #1fae62); }
+  .meter .m-rej { background: linear-gradient(180deg, #ff6b6b, #c93b3b); }
+  .meter .m-def { background: linear-gradient(180deg, #ffc46b, #d68f33); }
+  .meter .m-und { background: repeating-linear-gradient(45deg, #1a2230 0 6px, #141b26 6px 12px); }
+  .meterlegend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+  .meterlegend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+
+  /* ───────────────────── toolbar ───────────────────── */
+  .toolbar {
+    position: sticky; top: 0; z-index: 50; margin: 30px -28px 18px; padding: 12px 28px;
+    background: color-mix(in srgb, var(--bg0) 86%, transparent);
+    backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
+  }
+  .tb-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .tb-row + .tb-row { margin-top: 9px; }
+  .search {
+    flex: 1 1 240px; min-width: 200px; background: var(--bg1); border: 1px solid var(--line);
+    border-radius: 7px; color: var(--text); padding: 8px 12px; font-family: var(--mono); font-size: 13px;
+    outline: none; transition: border-color .15s;
+  }
+  .search:focus { border-color: var(--green); box-shadow: 0 0 0 1px var(--green-dim); }
+  select {
+    background: var(--bg1); border: 1px solid var(--line); border-radius: 7px; color: var(--text);
+    padding: 8px 10px; font-family: var(--mono); font-size: 12.5px; outline: none; cursor: pointer;
+  }
+  .chip {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; cursor: pointer;
+    background: var(--bg1); border: 1px solid var(--line); color: var(--dim);
+    border-radius: 100px; padding: 5px 12px; transition: all .14s; user-select: none; white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--c, var(--dim)); color: var(--text); }
+  .chip.active { background: color-mix(in srgb, var(--c, var(--green)) 16%, var(--bg1)); border-color: var(--c, var(--green)); color: #eef4fb; }
+  .chip .cnt { opacity: .65; margin-left: 5px; }
+  .chiplabel { font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; color: var(--faint); margin-right: 2px; }
+  .btn {
+    font-family: var(--mono); font-size: 12.5px; letter-spacing: .03em; cursor: pointer;
+    background: var(--bg2); color: var(--text); border: 1px solid var(--line2);
+    border-radius: 7px; padding: 8px 14px; transition: all .14s; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--dim); transform: translateY(-1px); }
+  .btn.primary {
+    background: linear-gradient(180deg, #2bd97c22, #2bd97c0d); border-color: #2bd97c88; color: var(--green);
+    font-weight: 600; box-shadow: 0 0 18px #2bd97c1c;
+  }
+  .btn.primary:hover { box-shadow: 0 0 26px #2bd97c33; border-color: var(--green); }
+  .resultcount { font-family: var(--mono); font-size: 12px; color: var(--faint); margin-left: auto; white-space: nowrap; }
+
+  /* ───────────────────── cards ───────────────────── */
+  .card {
+    background: var(--bg1); border: 1px solid var(--line); border-left: 3px solid var(--sev, var(--line));
+    border-radius: 9px; margin-bottom: 10px; transition: border-color .15s, box-shadow .2s;
+    scroll-margin-top: 130px;
+  }
+  .card[data-sev="critical"] { box-shadow: inset 4px 0 16px -6px #ff3b5c55; }
+  .card.kfocus { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), 0 6px 26px -12px #4cc9f055; }
+  .card.decided-approve { border-left-color: var(--green); }
+  .card.decided-reject  { border-left-color: #7a3a3a; opacity: .62; }
+  .card.decided-defer   { border-left-color: var(--amber); opacity: .82; }
+  .card-head {
+    display: flex; align-items: center; gap: 10px; padding: 11px 14px; cursor: pointer; user-select: none;
+  }
+  .cid {
+    font-family: var(--mono); font-size: 11.5px; font-weight: 700; letter-spacing: .05em;
+    color: var(--catc); background: color-mix(in srgb, var(--catc) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--catc) 45%, transparent);
+    padding: 2px 8px; border-radius: 5px; white-space: nowrap;
+  }
+  .ctitle { font-weight: 600; font-size: 14.5px; color: #dde6f1; flex: 1; min-width: 200px; }
+  .badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .b {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .08em; padding: 2px 7px;
+    border-radius: 4px; white-space: nowrap; border: 1px solid transparent;
+  }
+  .b-sev { color: var(--sev); border-color: color-mix(in srgb, var(--sev) 50%, transparent); background: color-mix(in srgb, var(--sev) 10%, transparent); text-transform: uppercase; font-weight: 700; }
+  .b-eff { color: var(--dim); border-color: var(--line2); }
+  .b-area { color: var(--faint); }
+  .b-ver { color: var(--green); border-color: #2bd97c55; background: #2bd97c0e; }
+  .b-ver.partial { color: var(--amber); border-color: #ffb45455; background: #ffb4540e; }
+  .b-mock { color: var(--cat-UX); border-color: #4cc9f055; background: #4cc9f00e; }
+  .dstate { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; padding: 3px 9px; border-radius: 4px; white-space: nowrap; }
+  .dstate.approve { color: #0e2a1b; background: var(--green); font-weight: 700; }
+  .dstate.reject { color: #ffd7d7; background: #6c2f2f; }
+  .dstate.defer { color: #3a2a10; background: var(--amber); font-weight: 700; }
+  .dstate.undecided { color: var(--faint); border: 1px dashed var(--line2); }
+  .twirl { color: var(--faint); font-family: var(--mono); font-size: 11px; transition: transform .18s; }
+  .card.open .twirl { transform: rotate(90deg); }
+
+  .card-body { display: none; border-top: 1px solid var(--line); padding: 16px 18px 18px; }
+  .card.open .card-body { display: block; animation: slidein .18s ease; }
+  @keyframes slidein { from { opacity: 0; transform: translateY(-4px); } }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .sect h4 {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .18em; color: var(--faint);
+    margin: 0 0 7px; text-transform: uppercase;
+  }
+  .sect { margin-bottom: 16px; }
+  .sect p { margin: 0; color: #b9c6d6; white-space: pre-wrap; }
+  .sect.benefit p { color: #9fd9b8; }
+  .evidence { list-style: none; padding: 0; margin: 0; }
+  .evidence li {
+    font-family: var(--mono); font-size: 12px; color: var(--dim); padding: 4px 0 4px 16px; position: relative;
+  }
+  .evidence li::before { content: "▸"; position: absolute; left: 0; color: var(--faint); }
+  .evidence .file { color: var(--cyan); }
+  .evidence .note { color: var(--faint); }
+  .mergedfrom { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+
+  .mockbox { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-top: 8px; }
+  .mockbox iframe { width: 100%; height: 360px; border: 0; background: #0b0e13; display: block; resize: vertical; overflow: auto; }
+  .mocknote { font-size: 12px; color: var(--faint); padding: 7px 10px; background: var(--bg2); border-top: 1px solid var(--line); }
+
+  /* decision row */
+  .decide { display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
+  .dbtn {
+    font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: .04em; cursor: pointer;
+    padding: 7px 16px; border-radius: 6px; border: 1px solid var(--line2); background: var(--bg2); color: var(--dim);
+    transition: all .13s;
+  }
+  .dbtn:hover { transform: translateY(-1px); }
+  .dbtn .key { opacity: .5; font-weight: 400; }
+  .dbtn.approve:hover, .dbtn.approve.on { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+  .dbtn.reject:hover,  .dbtn.reject.on  { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+  .dbtn.defer:hover,   .dbtn.defer.on   { background: var(--amber-dim); border-color: var(--amber); color: var(--amber); }
+  .dbtn.clear { border-style: dashed; }
+  .notes {
+    width: 100%; margin-top: 10px; background: var(--bg0); color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px; padding: 9px 12px; font-family: var(--body);
+    font-size: 13px; min-height: 38px; resize: vertical; outline: none;
+  }
+  .notes:focus { border-color: var(--cyan); }
+  .notes::placeholder { color: var(--faint); }
+
+  /* ───────────────────── modal ───────────────────── */
+  .overlay {
+    position: fixed; inset: 0; background: #04060acc; backdrop-filter: blur(6px);
+    z-index: 100; display: none; align-items: center; justify-content: center; padding: 4vh 4vw;
+  }
+  .overlay.show { display: flex; animation: fadein .15s ease; }
+  @keyframes fadein { from { opacity: 0; } }
+  .modal {
+    background: var(--bg1); border: 1px solid var(--line2); border-radius: 12px;
+    width: min(1000px, 100%); max-height: 90vh; display: flex; flex-direction: column;
+    box-shadow: 0 30px 90px -20px #000;
+  }
+  .modal-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  .modal-head h3 { margin: 0; font-family: var(--mono); font-size: 15px; letter-spacing: .08em; color: #e8eef7; flex: 1; }
+  .mtabs { display: flex; gap: 6px; }
+  .mtab { font-family: var(--mono); font-size: 11.5px; padding: 5px 12px; border-radius: 6px; cursor: pointer; color: var(--dim); border: 1px solid transparent; }
+  .mtab.active { color: var(--green); border-color: #2bd97c66; background: #2bd97c10; }
+  .modal-body { padding: 0; overflow: auto; flex: 1; }
+  .modal-body textarea {
+    width: 100%; height: 56vh; background: var(--bg0); color: #c4d2e2; border: 0; outline: none;
+    padding: 18px 20px; font-family: var(--mono); font-size: 12px; line-height: 1.6; resize: none; display: block;
+  }
+  .modal-foot { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); align-items: center; }
+  .modal-foot .hint { font-size: 12px; color: var(--faint); flex: 1; }
+  .xbtn { background: none; border: 0; color: var(--faint); font-size: 20px; cursor: pointer; padding: 2px 8px; }
+  .xbtn:hover { color: var(--text); }
+
+  /* keyboard help */
+  .kbdhelp { position: fixed; right: 18px; bottom: 18px; z-index: 60; }
+  .kbdhelp .btn { border-radius: 100px; padding: 9px 14px; }
+  .helpcard {
+    position: fixed; right: 18px; bottom: 66px; z-index: 60; background: var(--bg2);
+    border: 1px solid var(--line2); border-radius: 10px; padding: 14px 18px; display: none;
+    font-family: var(--mono); font-size: 12px; color: var(--dim); box-shadow: 0 18px 50px -12px #000;
+  }
+  .helpcard.show { display: block; }
+  .helpcard b { color: var(--text); display: inline-block; min-width: 56px; }
+  kbd {
+    font-family: var(--mono); background: var(--bg3); border: 1px solid var(--line2); border-bottom-width: 2px;
+    border-radius: 4px; padding: 0 6px; font-size: 11px; color: var(--text);
+  }
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(80px);
+    background: var(--bg3); color: var(--green); border: 1px solid #2bd97c66; font-family: var(--mono);
+    font-size: 12.5px; padding: 10px 20px; border-radius: 8px; z-index: 200; transition: transform .25s ease; box-shadow: 0 10px 40px -8px #000;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .empty { text-align: center; color: var(--faint); font-family: var(--mono); padding: 60px 0; }
+  footer { margin-top: 60px; color: var(--faint); font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 18px; }
+  footer code { font-family: var(--mono); color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="promptline"><span class="host">nos@ssh-helper</span><span class="path">:~/audit</span>$ run --full-sweep --agents=300 --verify=adversarial<span class="cursor"></span></div>
+    <h1>ENHANCEMENT AUDIT <span class="thin">//</span> SSH_HELPER</h1>
+    <p class="subtitle">Multi-agent deep-dive across <b>every subsystem</b> — each finding was located by a specialist agent and <b>adversarially re-verified against the code</b> before inclusion. Triage each card: <b style="color:var(--green)">Approve</b> what you want built, <b style="color:var(--red)">Reject</b> what you don't, <b style="color:var(--amber)">Defer</b> the rest — then hit <b style="color:var(--green)">GENERATE PROMPT</b> and paste the result back to Claude.</p>
+    <div class="meta-row" id="metaRow"></div>
+    <div class="statgrid" id="statGrid"></div>
+    <div class="meterbox">
+      <div class="meter" id="meter"></div>
+      <div class="meterlegend">
+        <span><i style="background:var(--green)"></i><span id="mApp">0</span> approved</span>
+        <span><i style="background:var(--red)"></i><span id="mRej">0</span> rejected</span>
+        <span><i style="background:var(--amber)"></i><span id="mDef">0</span> deferred</span>
+        <span><i style="background:#1a2230"></i><span id="mUnd">0</span> undecided</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="toolbar" id="toolbar">
+    <div class="tb-row">
+      <input class="search" id="search" type="search" placeholder="/ search id, title, file, text…">
+      <select id="sortSel" title="Sort">
+        <option value="sev">sort: severity</option>
+        <option value="cat">sort: category</option>
+        <option value="eff">sort: effort</option>
+        <option value="area">sort: area</option>
+      </select>
+      <select id="areaSel" title="Area"><option value="">area: all</option></select>
+      <button class="btn" id="expandAll">expand all</button>
+      <button class="btn" id="collapseAll">collapse</button>
+      <button class="btn" id="exportBtn" title="Download decisions as JSON">export ⭳</button>
+      <button class="btn" id="importBtn" title="Load a decisions JSON">import ⭱</button>
+      <input type="file" id="importFile" accept=".json" style="display:none">
+      <button class="btn primary" id="genBtn">▶ GENERATE PROMPT</button>
+    </div>
+    <div class="tb-row" id="sevChips"><span class="chiplabel">SEV</span></div>
+    <div class="tb-row" id="decChips"><span class="chiplabel">STATE</span><span class="resultcount" id="resultCount"></span></div>
+  </div>
+
+  <main id="list"></main>
+
+  <footer>
+    <p><b>Feeding back:</b> click <code>GENERATE PROMPT</code> (or press <kbd>g</kbd>) and paste the generated prompt into Claude Code. Decisions live in this browser's localStorage — use <code>export</code> to snapshot them to a file (works across machines via <code>import</code>). Reject notes become candidate entries for <code>rejected_ideas.md</code>.</p>
+    <p id="buildStamp"></p>
+  </footer>
+</div>
+
+<div class="kbdhelp"><button class="btn" id="helpBtn">⌨ keys</button></div>
+<div class="helpcard" id="helpCard">
+  <div><b>j / k</b> next / previous card</div>
+  <div><b>o / Enter</b> open / close card</div>
+  <div><b>a r d</b> approve · reject · defer</div>
+  <div><b>u</b> clear decision</div>
+  <div><b>/</b> focus search</div>
+  <div><b>g</b> generate prompt</div>
+  <div><b>?</b> toggle this help</div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle">IMPLEMENTATION PROMPT</h3>
+      <div class="mtabs">
+        <span class="mtab active" data-tab="prompt">prompt.md</span>
+        <span class="mtab" data-tab="verdicts">verdicts.json</span>
+      </div>
+      <button class="xbtn" id="closeModal">✕</button>
+    </div>
+    <div class="modal-body"><textarea id="modalText" spellcheck="false"></textarea></div>
+    <div class="modal-foot">
+      <span class="hint" id="modalHint"></span>
+      <button class="btn" id="dlBtn">download</button>
+      <button class="btn primary" id="copyBtn">⧉ copy to clipboard</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const META = __META_JSON__;
+const FINDINGS = __FINDINGS_JSON__;
+const MOCKUPS = __MOCKUPS_JSON__;
+
+const CATS = ["SEC","BUG","UX","FEAT","ENH","PERF","ARCH"];
+const CAT_DESC = { SEC:"security", BUG:"defects", UX:"experience", FEAT:"new features", ENH:"enhancements", PERF:"performance", ARCH:"architecture" };
+const SEVS = ["critical","high","medium","low"];
+const SEV_RANK = { critical:0, high:1, medium:2, low:3 };
+const EFF_RANK = { S:0, M:1, L:2, XL:3 };
+const DECS = ["undecided","approve","reject","defer"];
+const LS_KEY = "ssh-helper-audit-v2-decisions";
+
+let decisions = {};
+try { decisions = JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch (e) { decisions = {}; }
+const saveDecisions = () => localStorage.setItem(LS_KEY, JSON.stringify(decisions));
+const getDec = id => (decisions[id] && decisions[id].decision) || "undecided";
+const getNotes = id => (decisions[id] && decisions[id].notes) || "";
+
+const state = { cats: new Set(), sevs: new Set(), decs: new Set(), area: "", q: "", sort: "sev", focus: -1 };
+let visible = [];
+
+/* ── header meta ── */
+document.getElementById("metaRow").innerHTML =
+  `<span>generated <b>${META.generated}</b></span><span>branch <b>${META.branch}</b></span>` +
+  `<span>commit <b>${META.commit}</b></span><span>findings <b>${FINDINGS.length}</b></span>` +
+  `<span>agents <b>${META.agents}</b></span><span>verified <b>${FINDINGS.filter(f=>f.verification).length}</b></span>`;
+document.getElementById("buildStamp").textContent =
+  `Built ${META.generated} from ${META.commit} (${META.branch}) — ${FINDINGS.length} findings, ${META.agents} agents, ${META.raw} raw reports merged & adversarially verified.`;
+
+/* ── stat tiles (category filter) ── */
+const statGrid = document.getElementById("statGrid");
+CATS.forEach(c => {
+  const n = FINDINGS.filter(f => f.category === c).length;
+  const el = document.createElement("div");
+  el.className = "stat"; el.style.setProperty("--c", `var(--cat-${c})`);
+  el.innerHTML = `<div class="n">${n}</div><div class="lbl">${c}</div><div class="desc">${CAT_DESC[c]}</div>`;
+  el.onclick = () => { toggleSet(state.cats, c); el.classList.toggle("active"); render(); };
+  statGrid.appendChild(el);
+});
+
+/* ── chips ── */
+const sevRow = document.getElementById("sevChips");
+SEVS.forEach(s => {
+  const n = FINDINGS.filter(f => f.severity === s).length;
+  const el = document.createElement("span");
+  el.className = "chip"; el.style.setProperty("--c", `var(--sev-${s})`);
+  el.innerHTML = `${s}<span class="cnt">${n}</span>`;
+  el.onclick = () => { toggleSet(state.sevs, s); el.classList.toggle("active"); render(); };
+  sevRow.appendChild(el);
+});
+const decRow = document.getElementById("decChips");
+DECS.forEach(d => {
+  const el = document.createElement("span");
+  el.className = "chip"; el.dataset.dec = d;
+  el.style.setProperty("--c", d === "approve" ? "var(--green)" : d === "reject" ? "var(--red)" : d === "defer" ? "var(--amber)" : "var(--dim)");
+  el.onclick = () => { toggleSet(state.decs, d); el.classList.toggle("active"); render(); };
+  decRow.insertBefore(el, document.getElementById("resultCount"));
+});
+function refreshDecChips() {
+  decRow.querySelectorAll(".chip").forEach(el => {
+    const d = el.dataset.dec;
+    const n = FINDINGS.filter(f => getDec(f.id) === d).length;
+    el.innerHTML = `${d}<span class="cnt">${n}</span>`;
+  });
+}
+
+/* ── area select ── */
+const areaSel = document.getElementById("areaSel");
+[...new Set(FINDINGS.map(f => f.area))].sort().forEach(a => {
+  const o = document.createElement("option"); o.value = a; o.textContent = "area: " + a; areaSel.appendChild(o);
+});
+areaSel.onchange = () => { state.area = areaSel.value; render(); };
+
+function toggleSet(set, v) { set.has(v) ? set.delete(v) : set.add(v); }
+
+/* ── card DOM ── */
+const list = document.getElementById("list");
+const cardEls = new Map();
+function esc(s) { return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+function buildCard(f) {
+  const el = document.createElement("article");
+  el.className = "card"; el.id = "card-" + f.id;
+  el.dataset.sev = f.severity;
+  el.style.setProperty("--sev", `var(--sev-${f.severity})`);
+  el.style.setProperty("--catc", `var(--cat-${f.category})`);
+  const ver = f.verification;
+  const verBadge = ver
+    ? (ver.verdict === "confirmed"
+        ? `<span class="b b-ver" title="${esc(ver.notes || "")}">✓ verified·${ver.confidence}</span>`
+        : `<span class="b b-ver partial" title="${esc(ver.notes || "")}">◐ partial·${ver.confidence}</span>`)
+    : "";
+  const mockBadge = MOCKUPS[f.id] ? `<span class="b b-mock">▣ mockup</span>` : "";
+  el.innerHTML = `
+    <div class="card-head">
+      <span class="twirl">▶</span>
+      <span class="cid">${f.id}</span>
+      <span class="ctitle">${esc(f.title)}</span>
+      <span class="badges">
+        <span class="b b-sev">${f.severity}</span>
+        <span class="b b-eff" title="S<½d · M=1-2d · L≈1w · XL=weeks">effort ${f.effort}</span>
+        <span class="b b-area">${esc(f.area)}</span>
+        ${verBadge}${mockBadge}
+      </span>
+      <span class="dstate"></span>
+    </div>
+    <div class="card-body"></div>`;
+  el.querySelector(".card-head").onclick = (e) => {
+    if (e.target.closest(".dbtn")) return;
+    toggleOpen(el, f);
+    setFocus(visible.indexOf(f));
+  };
+  cardEls.set(f.id, el);
+  refreshCardState(f);
+  return el;
+}
+
+function fillBody(el, f) {
+  const body = el.querySelector(".card-body");
+  if (body.dataset.filled) return;
+  body.dataset.filled = "1";
+  const ev = (f.evidence || []).map(e =>
+    `<li><span class="file">${esc(e.file)}${e.lines ? ":" + esc(String(e.lines)) : ""}</span>${e.note ? ` <span class="note">— ${esc(e.note)}</span>` : ""}</li>`).join("");
+  const mock = MOCKUPS[f.id]
+    ? `<div class="sect"><h4>Mockup</h4><div class="mockbox"><iframe loading="lazy" sandbox="allow-same-origin" data-mock="${f.id}"></iframe>${f.mockup_idea ? `<div class="mocknote">${esc(f.mockup_idea)}</div>` : ""}</div></div>`
+    : (f.mockup_idea ? `<div class="sect"><h4>Mockup concept</h4><p style="color:var(--faint)">${esc(f.mockup_idea)}</p></div>` : "");
+  const verNote = f.verification && f.verification.notes
+    ? `<div class="sect"><h4>Verifier notes</h4><p style="color:var(--faint);font-size:13px">${esc(f.verification.notes)}</p></div>` : "";
+  body.innerHTML = `
+    <div class="cols">
+      <div>
+        <div class="sect"><h4>Current state</h4><p>${esc(f.existing_state)}</p></div>
+        <div class="sect"><h4>Evidence</h4><ul class="evidence">${ev}</ul>
+          ${f.merged_from > 1 ? `<div class="mergedfrom">↳ independently reported by ${f.merged_from} agents</div>` : ""}</div>
+        ${verNote}
+      </div>
+      <div>
+        <div class="sect"><h4>Recommendation</h4><p>${esc(f.recommendation)}</p></div>
+        <div class="sect benefit"><h4>Why it matters</h4><p>${esc(f.user_benefit)}</p></div>
+        ${mock}
+        <div class="sect">
+          <h4>Your decision</h4>
+          <div class="decide">
+            <button class="dbtn approve">✓ Approve <span class="key">a</span></button>
+            <button class="dbtn reject">✕ Reject <span class="key">r</span></button>
+            <button class="dbtn defer">◷ Defer <span class="key">d</span></button>
+            <button class="dbtn clear">clear <span class="key">u</span></button>
+          </div>
+          <textarea class="notes" placeholder="Notes for Claude — constraints, tweaks to the recommendation, why rejected…">${esc(getNotes(f.id))}</textarea>
+        </div>
+      </div>
+    </div>`;
+  body.querySelector(".dbtn.approve").onclick = () => setDecision(f, "approve");
+  body.querySelector(".dbtn.reject").onclick = () => setDecision(f, "reject");
+  body.querySelector(".dbtn.defer").onclick = () => setDecision(f, "defer");
+  body.querySelector(".dbtn.clear").onclick = () => setDecision(f, "undecided");
+  const notes = body.querySelector(".notes");
+  notes.addEventListener("input", () => {
+    decisions[f.id] = decisions[f.id] || {};
+    decisions[f.id].notes = notes.value;
+    saveDecisions();
+  });
+  const ifr = body.querySelector("iframe[data-mock]");
+  if (ifr) ifr.srcdoc = MOCKUPS[f.id];
+  refreshCardState(f);
+}
+
+function toggleOpen(el, f, force) {
+  const open = force !== undefined ? force : !el.classList.contains("open");
+  if (open) { fillBody(el, f); el.classList.add("open"); } else el.classList.remove("open");
+}
+
+function refreshCardState(f) {
+  const el = cardEls.get(f.id); if (!el) return;
+  const d = getDec(f.id);
+  el.classList.remove("decided-approve","decided-reject","decided-defer");
+  if (d !== "undecided") el.classList.add("decided-" + d);
+  const ds = el.querySelector(".dstate");
+  ds.className = "dstate " + d;
+  ds.textContent = d === "undecided" ? "· · ·" : d.toUpperCase();
+  el.querySelectorAll(".dbtn").forEach(b => b.classList.remove("on"));
+  if (d !== "undecided") { const b = el.querySelector(".dbtn." + d); if (b) b.classList.add("on"); }
+}
+
+function setDecision(f, d) {
+  decisions[f.id] = decisions[f.id] || {};
+  decisions[f.id].decision = d === "undecided" ? undefined : d;
+  decisions[f.id].ts = new Date().toISOString();
+  saveDecisions();
+  refreshCardState(f);
+  refreshMeter(); refreshDecChips();
+}
+
+/* ── filtering & render ── */
+function matches(f) {
+  if (state.cats.size && !state.cats.has(f.category)) return false;
+  if (state.sevs.size && !state.sevs.has(f.severity)) return false;
+  if (state.decs.size && !state.decs.has(getDec(f.id))) return false;
+  if (state.area && f.area !== state.area) return false;
+  if (state.q) {
+    const q = state.q.toLowerCase();
+    const hay = (f.id + " " + f.title + " " + f.area + " " + f.existing_state + " " + f.recommendation + " " +
+      (f.evidence || []).map(e => e.file).join(" ")).toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
+function sorter(a, b) {
+  switch (state.sort) {
+    case "cat": return CATS.indexOf(a.category) - CATS.indexOf(b.category) || SEV_RANK[a.severity] - SEV_RANK[b.severity];
+    case "eff": return EFF_RANK[a.effort] - EFF_RANK[b.effort] || SEV_RANK[a.severity] - SEV_RANK[b.severity];
+    case "area": return a.area.localeCompare(b.area) || SEV_RANK[a.severity] - SEV_RANK[b.severity];
+    default: return SEV_RANK[a.severity] - SEV_RANK[b.severity] || CATS.indexOf(a.category) - CATS.indexOf(b.category);
+  }
+}
+function render() {
+  visible = FINDINGS.filter(matches).sort(sorter);
+  list.textContent = "";
+  visible.forEach(f => list.appendChild(cardEls.get(f.id) || buildCard(f)));
+  if (!visible.length) list.innerHTML = `<div class="empty">∅ no findings match the current filters</div>`;
+  document.getElementById("resultCount").textContent = `${visible.length} / ${FINDINGS.length} shown`;
+  state.focus = -1;
+  refreshMeter(); refreshDecChips();
+}
+function refreshMeter() {
+  const n = { approve: 0, reject: 0, defer: 0, undecided: 0 };
+  FINDINGS.forEach(f => n[getDec(f.id)]++);
+  const t = FINDINGS.length || 1;
+  document.getElementById("meter").innerHTML =
+    `<div class="m-app" style="width:${n.approve/t*100}%"></div><div class="m-rej" style="width:${n.reject/t*100}%"></div>` +
+    `<div class="m-def" style="width:${n.defer/t*100}%"></div><div class="m-und" style="width:${n.undecided/t*100}%"></div>`;
+  document.getElementById("mApp").textContent = n.approve;
+  document.getElementById("mRej").textContent = n.reject;
+  document.getElementById("mDef").textContent = n.defer;
+  document.getElementById("mUnd").textContent = n.undecided;
+}
+
+/* ── keyboard ── */
+function setFocus(i) {
+  if (state.focus >= 0 && visible[state.focus]) cardEls.get(visible[state.focus].id).classList.remove("kfocus");
+  state.focus = i;
+  if (i >= 0 && visible[i]) {
+    const el = cardEls.get(visible[i].id);
+    el.classList.add("kfocus");
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
+document.addEventListener("keydown", e => {
+  if (e.target.matches("input, textarea, select")) {
+    if (e.key === "Escape") e.target.blur();
+    return;
+  }
+  const f = visible[state.focus];
+  switch (e.key) {
+    case "j": setFocus(Math.min(state.focus + 1, visible.length - 1)); break;
+    case "k": setFocus(Math.max(state.focus - 1, 0)); break;
+    case "o": case "Enter": if (f) toggleOpen(cardEls.get(f.id), f); break;
+    case "a": if (f) { fillBody(cardEls.get(f.id), f); setDecision(f, "approve"); } break;
+    case "r": if (f) { fillBody(cardEls.get(f.id), f); setDecision(f, "reject"); } break;
+    case "d": if (f) { fillBody(cardEls.get(f.id), f); setDecision(f, "defer"); } break;
+    case "u": if (f) setDecision(f, "undecided"); break;
+    case "/": e.preventDefault(); document.getElementById("search").focus(); break;
+    case "g": openModal(); break;
+    case "?": document.getElementById("helpCard").classList.toggle("show"); break;
+    case "Escape": document.getElementById("overlay").classList.remove("show"); break;
+  }
+});
+
+/* ── toolbar wiring ── */
+document.getElementById("search").addEventListener("input", e => { state.q = e.target.value.trim(); render(); });
+document.getElementById("sortSel").onchange = e => { state.sort = e.target.value; render(); };
+document.getElementById("expandAll").onclick = () => visible.forEach(f => toggleOpen(cardEls.get(f.id), f, true));
+document.getElementById("collapseAll").onclick = () => visible.forEach(f => toggleOpen(cardEls.get(f.id), f, false));
+document.getElementById("helpBtn").onclick = () => document.getElementById("helpCard").classList.toggle("show");
+
+document.getElementById("exportBtn").onclick = () => {
+  download("ssh-helper-audit-decisions.json", JSON.stringify({ exported: new Date().toISOString(), decisions }, null, 2));
+  toast("decisions exported");
+};
+document.getElementById("importBtn").onclick = () => document.getElementById("importFile").click();
+document.getElementById("importFile").onchange = e => {
+  const file = e.target.files[0]; if (!file) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const j = JSON.parse(r.result);
+      decisions = j.decisions || j;
+      saveDecisions();
+      FINDINGS.forEach(f => {
+        refreshCardState(f);
+        const el = cardEls.get(f.id);
+        if (el) { const n = el.querySelector(".notes"); if (n) n.value = getNotes(f.id); }
+      });
+      refreshMeter(); refreshDecChips();
+      toast("decisions imported");
+    } catch (err) { toast("import failed: not valid JSON"); }
+  };
+  r.readAsText(file);
+};
+
+/* ── prompt generation ── */
+function groupByCat(items) {
+  const g = {}; CATS.forEach(c => g[c] = []);
+  items.forEach(f => g[f.category].push(f));
+  return g;
+}
+function buildPrompt() {
+  const app = FINDINGS.filter(f => getDec(f.id) === "approve").sort(sorter);
+  const rej = FINDINGS.filter(f => getDec(f.id) === "reject");
+  const def = FINDINGS.filter(f => getDec(f.id) === "defer");
+  const L = [];
+  L.push(`# SSH_Helper — Approved Enhancement Implementation Plan`);
+  L.push(``);
+  L.push(`Source: Enhancement_Report_v2.html (multi-agent audit of ${META.commit} on ${META.branch}, generated ${META.generated}). I have triaged all ${FINDINGS.length} findings; this prompt carries my decisions.`);
+  L.push(``);
+  L.push(`## Ground rules`);
+  L.push(`- Work the approved items below. IDs are stable — reference them in commits/PRs (e.g. "fix(history): ... [${app[0] ? app[0].id : "BUG-001"}]").`);
+  L.push(`- Plan first: group items into phased batches (small/safe first, max ~5 files per phase), present the plan, then execute phase by phase with verification (build + tests) between phases.`);
+  L.push(`- My per-item notes override the written recommendation wherever they conflict.`);
+  L.push(`- If an item turns out to be already fixed or based on a stale reading of the code, say so and skip it — don't force a change.`);
+  if (rej.length) L.push(`- Do NOT implement anything from the rejected list at the bottom; add those to rejected_ideas.md.`);
+  L.push(``);
+  L.push(`## Approved (${app.length})`);
+  const g = groupByCat(app);
+  CATS.forEach(c => {
+    if (!g[c].length) return;
+    L.push(``); L.push(`### ${c} — ${CAT_DESC[c]}`);
+    g[c].forEach(f => {
+      L.push(``);
+      L.push(`#### ${f.id} · ${f.title}  \`[${f.severity} | effort ${f.effort} | ${f.area}]\``);
+      L.push(`- Current state: ${f.existing_state}`);
+      L.push(`- Approved change: ${f.recommendation}`);
+      const ev = (f.evidence || []).map(e => e.file + (e.lines ? ":" + e.lines : "")).join(", ");
+      if (ev) L.push(`- Key locations: ${ev}`);
+      const n = getNotes(f.id).trim();
+      if (n) L.push(`- MY NOTES (authoritative): ${n}`);
+    });
+  });
+  if (def.length) {
+    L.push(``); L.push(`## Deferred — do not implement now, keep for later (${def.length})`);
+    def.forEach(f => L.push(`- ${f.id} ${f.title}${getNotes(f.id).trim() ? " — " + getNotes(f.id).trim() : ""}`));
+  }
+  if (rej.length) {
+    L.push(``); L.push(`## Rejected — record in rejected_ideas.md, never re-propose without new context (${rej.length})`);
+    rej.forEach(f => L.push(`- ${f.id} ${f.title}${getNotes(f.id).trim() ? " — reason: " + getNotes(f.id).trim() : ""}`));
+  }
+  L.push(``);
+  L.push(`Start by replying with the phased plan for the approved items (no code yet).`);
+  return L.join("\n");
+}
+function buildVerdicts() {
+  const out = {};
+  FINDINGS.forEach(f => {
+    const d = getDec(f.id);
+    if (d === "undecided" && !getNotes(f.id)) return;
+    out[f.id] = { decision: d, notes: getNotes(f.id) || undefined };
+  });
+  return JSON.stringify({ source: "Enhancement_Report_v2.html", commit: META.commit, decided: new Date().toISOString(), verdicts: out }, null, 2);
+}
+
+let modalTab = "prompt";
+function openModal() {
+  modalTab = "prompt";
+  document.querySelectorAll(".mtab").forEach(t => t.classList.toggle("active", t.dataset.tab === "prompt"));
+  refreshModal();
+  document.getElementById("overlay").classList.add("show");
+}
+function refreshModal() {
+  const app = FINDINGS.filter(f => getDec(f.id) === "approve").length;
+  document.getElementById("modalText").value = modalTab === "prompt" ? buildPrompt() : buildVerdicts();
+  document.getElementById("modalTitle").textContent = modalTab === "prompt" ? "IMPLEMENTATION PROMPT" : "VERDICT SNAPSHOT";
+  document.getElementById("modalHint").textContent = modalTab === "prompt"
+    ? `${app} approved item${app === 1 ? "" : "s"} included — paste into Claude Code`
+    : "Compact machine-readable verdicts — also fine to paste to Claude";
+}
+document.querySelectorAll(".mtab").forEach(t => t.onclick = () => {
+  modalTab = t.dataset.tab;
+  document.querySelectorAll(".mtab").forEach(x => x.classList.toggle("active", x === t));
+  refreshModal();
+});
+document.getElementById("genBtn").onclick = openModal;
+document.getElementById("closeModal").onclick = () => document.getElementById("overlay").classList.remove("show");
+document.getElementById("overlay").addEventListener("click", e => { if (e.target.id === "overlay") e.currentTarget.classList.remove("show"); });
+document.getElementById("copyBtn").onclick = async () => {
+  const txt = document.getElementById("modalText").value;
+  try { await navigator.clipboard.writeText(txt); toast("copied to clipboard ✓"); }
+  catch (e) { document.getElementById("modalText").select(); document.execCommand("copy"); toast("copied (fallback)"); }
+};
+document.getElementById("dlBtn").onclick = () => {
+  download(modalTab === "prompt" ? "ssh-helper-approved-prompt.md" : "ssh-helper-verdicts.json", document.getElementById("modalText").value);
+};
+
+function download(name, content) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+let toastTimer;
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+render();
+</script>
+</body>
+</html>

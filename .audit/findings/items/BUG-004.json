@@ -1,0 +1,46 @@
+{
+ "id": "BUG-004",
+ "title": "Flow Canvas copy/paste keeps stale container-membership metadata — pasted blocks silently vanish from exported YAML or duplicate steps inside the original container",
+ "category": "BUG",
+ "severity": "critical",
+ "effort": "M",
+ "area": "flowcanvas-state",
+ "lens": "data-integrity",
+ "existing_state": "Ctrl+C/Ctrl+V uses an internal clipboard that deep-copies the whole node including data.props (FlowCanvas/src/utils/clipboard.ts:44-57). It re-ids nodes and remaps edge endpoints via idMap (clipboard.ts:59-67) but never strips or remaps the structural metadata `_isChildOf`, `_stepPath`, `_membershipFromConnect`, `_forceGraphExport`, or band cosmetics; the paste site adds nodes as-is (FlowCanvas/src/hooks/useKeyboardShortcuts.ts:63-74). A pasted copy of any block that lives inside a container (most blocks in a real preset — every imported block has `_stepPath`) still points at the ORIGINAL container with the ORIGINAL index. Verified consequences: (1) On Apply, the C# exporter skips every node with `_isChildOf` from top-level emission (Services/FlowCanvasBridge.cs:1278-1281, 'Visual-only child nodes do not emit YAML') — if the original container exports via its stored snippet, the pasted block is silently absent from the saved YAML and vanishes on next open, despite being editable and wireable on canvas. (2) If the container regenerates from graph (any prop edit walks `_forceGraphExport` up the `_isChildOf` ancestor chain), children are collected purely by `_isChildOf == containerId` + `_stepPath` (FlowCanvasBridge.cs:1509-1542), so the pasted copy is emitted as a duplicate step INSIDE the original container — e.g. a duplicated `send` runs twice per loop iteration against every host, regardless of where the user placed the copy. (3) Duplicate `_stepPath` values break debug correlation: BuildStepPathToNodeMap is first-wins (Form1.cs:13713-13723), so step highlighting/output lands on the wrong copy. (4) Branch bands fold the pasted node into the original container's lane (utils/branchBands.ts:156-169) and removal-triggered renumbering treats it as a real sibling (utils/childMembership.ts:229-296). (5) The clipboard is module-level and survives `load-graph` (clipboard.ts:9; nothing in stores/messageBridge.ts clears it), and node ids are `node-{counter}` per import (FlowCanvasBridge.cs:331), so pasting after switching presets can attach the block to an unrelated container in the new preset whose id collides.",
+ "recommendation": "In pasteNodes (utils/clipboard.ts), post-process each pasted node's data.props: if the `_isChildOf` target was part of the copied set, remap it through idMap (preserving copied-container subtrees); otherwise strip `_isChildOf`, `_stepPath`, `_membershipFromConnect`, `_forceGraphExport`, `_blankLinesBefore`, and the cosmetic keys (`_branchLabel`, `_branchColor`, `_depth`) — keeping `_yamlSnippet` so a pasted top-level block still round-trips its content. Sanitized pastes then behave like fresh palette drops: they export as orphan/root steps and the existing childMembership.ts onConnect path confers correct membership when wired in. Also clear the module clipboard on `load-graph` (or stamp it with a preset token) to kill the cross-preset id-collision case. Add a unit test that pastes an imported container child and asserts the exported YAML neither drops nor duplicates it and the clone carries no underscore metadata.",
+ "user_benefit": "Copy/paste is the most natural way to duplicate a step; today it can silently make a fleet run execute an extra SSH command inside a loop, or silently lose the pasted block on save. Both are invisible until something runs wrong.",
+ "mockup_idea": "",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\clipboard.ts",
+   "lines": "9, 44-67",
+   "note": "deep copy keeps _isChildOf/_stepPath/_forceGraphExport; only id/position/edge endpoints remapped; module-level clipboard survives preset switches"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\hooks\\useKeyboardShortcuts.ts",
+   "lines": "63-74",
+   "note": "Ctrl+V inserts pasted nodes/edges into the store unsanitized"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "1278-1281",
+   "note": "main export loop: nodes with _isChildOf emit no top-level YAML — silent drop when the container round-trips its snippet"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "1509-1542",
+   "note": "container regeneration collects children by _isChildOf + _stepPath — pasted clone joins the ORIGINAL branch as a duplicate step"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13713-13723",
+   "note": "BuildStepPathToNodeMap is first-wins on duplicate _stepPath — wrong debug correlation"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\branchBands.ts",
+   "lines": "156-169",
+   "note": "pasted node visually grouped into the original container's band"
+  }
+ ]
+}

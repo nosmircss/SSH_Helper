@@ -1,0 +1,31 @@
+{
+ "id": "PERF-015",
+ "title": "Forced blocking full GC with LOH compaction on every history list selection change makes browsing history stutter",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "form1-b",
+ "lens": "perf",
+ "existing_state": "ApplySelectedHistoryEntry's finally block (Form1.cs:8328-8335) calls RunHistorySwitchGc whenever the selected entry id differs from the last one (gate at 8256-8260) — i.e. on every distinct selection, including arrow-keying down the history list. RunHistorySwitchGc -> RunGcCompaction (Form1.cs:1332-1343) performs GCSettings.LargeObjectHeapCompactionMode = CompactOnce; GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect() — a blocking gen2 collection with LOH compaction, unconditionally, with no payload-size threshold and no cooldown. On a long session with a sizable managed heap (big outputs, many cached strings) each collection costs tens to hundreds of milliseconds, so each item the user selects adds a visible hitch. A smarter mechanism already exists right next to it: CacheLoadedHistoryPayload (Form1.cs:1126-1138) triggers MaybeCompactAfterPayloadSwap (1305-1311), which only compacts when a large payload (>= LargeHistoryPayloadCharThreshold) was actually released and respects AutomaticHistoryCompactionCooldown (1319-1330). The per-switch GC is redundant with — and undermines — that gated path.",
+ "recommendation": "Delete the RunHistorySwitchGc call from ApplySelectedHistoryEntry's finally block (and the _lastHistorySelectionGcEntryId bookkeeping at 8256-8260/8330) and rely solely on the existing threshold+cooldown compaction in MaybeCompactAfterPayloadSwap/MaybeCompactAfterPayloadClear. If memory pressure was the original motivation, raise the cooldown/threshold rather than forcing a collection per click.",
+ "user_benefit": "Scrolling through run history becomes smooth instead of hitching on every entry; the existing size-gated compaction still reclaims memory after genuinely large payloads.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "8256-8260, 8328-8335",
+   "note": "per-selection trigger in ApplySelectedHistoryEntry finally"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "1332-1343",
+   "note": "RunGcCompaction: LOH CompactOnce + double GC.Collect + WaitForPendingFinalizers, no gate"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "1126-1138, 1305-1330",
+   "note": "existing threshold- and cooldown-gated compaction path this duplicates"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

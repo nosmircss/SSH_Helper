@@ -1,0 +1,36 @@
+{
+ "id": "ENH-044",
+ "title": "Terminal appearance is fully hardcoded — ignores the app's code font setting, no zoom, fixed scrollback",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "terminal",
+ "lens": "ux",
+ "existing_state": "The terminal always renders Courier New 10pt in #BBBBBB-on-black (Forms/InteractiveTerminalForm.cs:117-119; both theme branches at 154-165 set the identical colors). The app already has FontSettings.CodeFontFamily (default \"Cascadia Code\", Models/AppConfiguration.cs:227) used by the rest of the UI, but the terminal ignores it. There is no font-size control and no Ctrl+wheel/Ctrl+= zoom, even though the viewport already invalidates cell metrics on FontChanged (UI/InteractiveTerminalViewportControl.cs:76-80), so live resizing would just work. Scrollback is hardcoded at 10,000 lines (Services/SshTerminalOptionsFactory.cs:15 DefaultHistoryMaxLength) with no setting; SettingsDialog.cs contains zero terminal/scrollback options (grep: 0 hits). Window position is remembered only in a per-process static (form 50-51, 739-771), unlike every other window which persists to WindowState.",
+ "recommendation": "Use config.FontSettings.CodeFontFamily (+ a new TerminalFontSize) when constructing the viewport font in InteractiveTerminalForm's ctor (line 117), and add Ctrl+MouseWheel zoom in TerminalView_MouseWheel (form 366-377) that rescales the Font (the FontChanged hook recomputes cells and EmitTerminalSizeChanged renegotiates cols/rows automatically). Surface scrollback length as a setting feeding SshTerminalOptionsFactory.CreateScriptingWithHistory's historyMaxLength parameter, and persist terminal window bounds to WindowState alongside the other windows.",
+ "user_benefit": "Daily-driver legibility: users get their preferred monospace font and can zoom during demos or on high-DPI monitors, and long device outputs (show tech-support easily exceeds 10k lines) stop silently scrolling out of reach.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs",
+   "lines": "117-119, 154-165",
+   "note": "Courier New 10pt and fixed colors hardcoded; both theme branches identical"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs",
+   "lines": "227",
+   "note": "CodeFontFamily setting exists app-wide but the terminal never reads it"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshTerminalOptionsFactory.cs",
+   "lines": "15",
+   "note": "DefaultHistoryMaxLength = 10000, not configurable; SettingsDialog has no terminal options"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\InteractiveTerminalViewportControl.cs",
+   "lines": "76-80",
+   "note": "FontChanged already invalidates cell metrics — zoom support is nearly free"
+  }
+ ],
+ "mockup_idea": "Settings dialog 'Terminal' section: Font family dropdown (inherits Code font), Size spinner, Scrollback lines field; beside it a terminal screenshot at Cascadia Code 12pt vs the current Courier New 10pt.",
+ "merged_from": 1
+}

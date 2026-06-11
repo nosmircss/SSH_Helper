@@ -1,0 +1,26 @@
+{
+ "id": "PERF-016",
+ "title": "'Save All' history export hydrates every payload from disk sequentially on the UI thread with no progress or cancel",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "form1-b",
+ "lens": "perf",
+ "existing_state": "SaveAllHistory (Form1.cs:14288-14342) loops over every history entry (14309-14325) and calls TryLoadHistoryPayload per entry on the UI thread; each call performs a disk read plus full JSON deserialize of the run payload via _historyStorage.TryLoadRunPayload (Form1.cs:1232-1236). Each loaded payload also displaces the single-entry selection cache through CacheLoadedHistoryPayload (Form1.cs:1238-1242 -> 1126-1138), and the body is rewritten with a double string Replace chain (CRLF -> LF -> CRLF) at 14322, allocating two full copies of each multi-megabyte output. With MaxHistoryEntries in the hundreds and large run outputs, the form freezes for the entire export with no progress indication and no way to cancel; the only feedback is the final missing-payload warning dialog (14327-14335).",
+ "recommendation": "Move the export loop to a background task: snapshot the entry list, then read each payload off the UI thread (add a path that bypasses CacheLoadedHistoryPayload so the export does not churn the selection cache), writing to the StreamWriter as it goes. Show a simple progress dialog with a cancel button (entries exported / total). Replace the double Replace with a single normalization while writing lines (e.g. a TextWriter that normalizes line endings), avoiding the two full-string copies per entry.",
+ "user_benefit": "Exporting a large history archive no longer locks the application for the duration; the user sees progress and can cancel instead of waiting on an apparently hung window.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "14303-14342",
+   "note": "sequential per-entry hydration loop and double Replace at 14322, all on UI thread"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "1201-1258",
+   "note": "TryLoadHistoryPayload: disk load + deserialize per entry; caches each payload into the single-entry selection cache (1238-1242)"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

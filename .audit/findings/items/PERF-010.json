@@ -1,0 +1,36 @@
+{
+ "id": "PERF-010",
+ "title": "Run Now performs jobs.json writes and per-host Vault credential resolution synchronously on the UI thread",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "jobs-scheduling",
+ "lens": "perf",
+ "existing_state": "The Run Now click path never leaves the UI thread until deep inside execution. JobListDialog.OnRunNowClick (async void, JobListDialog.cs:1061-1069) awaits the invoker, Form1.RunJobNowAsync awaits _jobExecutionService.RunNowAsync directly (Form1.cs:15319) — no Task.Run anywhere. RunNowAsync therefore runs synchronously on the UI thread through TryStartJob (a jobs.json + .bak disk write, Services/JobExecutionService.cs:768-774) and the whole prefix of ExecuteJobCoreAsync up to the first real await at sshService.ExecutePresetAsync (687): ResolveCredentials (592-645 — a Vault HTTP call for Vault-mode jobs) and BuildHostConnections (487-544), which for every host row carrying a vault_path calls VaultCredentialProvider.TryGetPassword — a sync-over-async network call (Services/Vault/VaultCredentialProvider.cs:48-49) — sequentially, one row at a time. VaultService has a 300s TTL cache (Services/Vault/VaultService.cs:109-143, 1065), so repeated identical paths are cheap once warm, but a fleet with distinct per-host vault paths pays N cold sequential round-trips on the UI thread: 100 hosts at 100ms RTT freezes the window for ~10 seconds with no feedback. The same sequential resolution also delays scheduled runs (off the UI thread) while holding a concurrency slot.",
+ "recommendation": "Cheapest fix: in RunNowAsync (or Form1.RunJobNowAsync), move the execution onto the thread pool — e.g. await Task.Run(() => ExecuteTrackedJobAsync(job, isRunNow: true)) — so the UI thread returns immediately after the already-running check. Follow-up: make BuildHostConnections resolve distinct vault paths concurrently with a small parallelism cap (the VaultService cache already deduplicates identical paths), which also shortens scheduled-run startup for large fleets.",
+ "user_benefit": "Clicking Run Now on a Vault-backed fleet no longer freezes the app for the duration of N sequential network calls; the job appears as Running instantly and the window stays responsive.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobListDialog.cs",
+   "lines": "1061-1069, 1515-1523",
+   "note": "async void click handler awaits straight into the service on the UI thread"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "15313-15325",
+   "note": "Form1 invoker awaits RunNowAsync directly, no Task.Run"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobExecutionService.cs",
+   "lines": "222-247, 382-414, 487-544",
+   "note": "synchronous prefix: TryStartJob disk write, ResolveCredentials, per-row sequential Vault lookups before first await"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Vault/VaultCredentialProvider.cs",
+   "lines": "48-49",
+   "note": "sync-over-async: ReadSecretKeysAsync(...).GetAwaiter().GetResult() per host row"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

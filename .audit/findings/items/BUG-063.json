@@ -1,0 +1,31 @@
+{
+ "id": "BUG-063",
+ "title": "Run Now is an async-void handler with no try/catch over code paths that perform throwing disk writes",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-jobs-history",
+ "lens": "reliability",
+ "existing_state": "OnRunNowClick (JobListDialog.cs:1061-1076) is async void with no try/catch; it awaits RunNowJobAsync (JobListDialog.cs:1515-1523), which in production routes to Form1.RunTrackedJobNowAsync (Form1.cs:15311-15326, also no try/catch) and then JobExecutionService.RunNowAsync. RunNowAsync's own catch blocks only cover ExecuteTrackedJobAsync — but its start path TryStartJob persists RunningState via _jobStorage.Save (Services/JobExecutionService.cs:768-774), its finally path CompleteJob also calls _jobStorage.Save (827-832), and the exception handlers themselves call HandlePostExecution which can call Save (251, 258 -> 877-888). JobStorageService.PersistToDisk does real file I/O on jobs.json, so a locked file, disk-full, or AV interference throws straight through the awaited chain into the async-void continuation on the UI thread. The repo registers no Application.ThreadException / AppDomain.UnhandledException handler anywhere (see BUG-037), so the user gets the raw WinForms unhandled-exception dialog — or process termination — instead of an error message, while the job may actually be mid-run.",
+ "recommendation": "Wrap the body of OnRunNowClick in try/catch and surface failures via the existing DialogTheme.Show error pattern used by every sibling handler (e.g. OnNewClick at JobListDialog.cs:1043-1052). Defense in depth: have RunNowAsync catch persistence failures from TryStartJob/CompleteJob (RunningState persistence is best-effort crash-recovery metadata — a failed write should log and continue, not abort/crash the run).",
+ "user_benefit": "A transient jobs.json write failure during Run Now degrades to a readable error message instead of crashing the whole application mid-fleet-run.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs",
+   "lines": "1061-1076, 1515-1523",
+   "note": "async void handler with no try/catch, unlike every neighboring handler"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "222-268, 768-774, 820-833",
+   "note": "TryStartJob and CompleteJob (finally) perform _jobStorage.Save outside the catch coverage; HandlePostExecution Saves inside the catch blocks"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "15311-15326",
+   "note": "RunTrackedJobNowAsync passes exceptions through; no global ThreadException/UnhandledException handler exists in the repo"
+  }
+ ]
+}

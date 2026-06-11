@@ -1,0 +1,36 @@
+{
+ "id": "UX-029",
+ "title": "Settings dialog is a fixed 544x620 box for ~80 settings — not resizable, 430px hardcoded rows, and font auto-scaling deliberately suppressed",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "dialogs-general",
+ "lens": "ux",
+ "existing_state": "SettingsDialog is FormBorderStyle.FixedDialog at 544x620 with MaximizeBox disabled (SettingsDialog.cs:211-216), even though the tab control already carries full four-way resize anchors that are dead code under the fixed border (219-224). The dialog declares AutoScaleMode.Font (208-209), but Form1 then applies the user's configured dialog font through DialogTheme.SetDialogFont (Form1.cs:5718), which intentionally flips AutoScaleMode to None (UI/DialogTheme.cs:522-529) — so when a user raises the UI font size (a feature this app prominently offers), the text grows but the 544x620 shell and absolutely-positioned rows do not, clipping labels and controls. The Vault and Notifications detail panes hardcode every row to Width = 430 (e.g. SettingsDialog.cs:543-551, 576-642) — long Vault addresses, namespaces, and SMTP recipient lists get cramped single-line boxes — and the Appearance tab packs 13 font spinners plus a live preview into a scrolling panel. Contrast: EnvironmentDialog in the same app is sizable with persisted geometry in WindowState (EnvironmentDialog.cs:66-75, 303-323). There is also no way to find a setting — six tabs must be hunted through manually.",
+ "recommendation": "Switch to FormBorderStyle.Sizable with MinimumSize = current 544x620, and persist geometry to WindowState exactly as EnvironmentDialog does (the tab control's existing anchors then start working for free). Replace the hardcoded 430px Vault/Notification rows with Dock=Top / TableLayoutPanel rows that grow with the dialog and reflow at larger fonts instead of clipping. As a follow-up, add a small filter TextBox above the tab control that hides non-matching rows across tabs (each setting row already has a label to match against) — the VS Code settings-search pattern.",
+ "user_benefit": "Users with long Vault URLs, multi-recipient SMTP lists, high-DPI displays, or enlarged fonts (the audience the app's own font settings target) stop fighting a cramped, clipping fixed window; a settings filter cuts 'which tab was that on?' time to zero.",
+ "evidence": [
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "208-224",
+   "note": "FixedDialog 544x620; AutoScaleMode.Font declared; tab anchors dead under fixed border"
+  },
+  {
+   "file": "UI/DialogTheme.cs",
+   "lines": "522-529",
+   "note": "SetDialogFont assigns user font with AutoScaleMode.None — layout never scales with font"
+  },
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "541-584, 597-642",
+   "note": "Vault detail rows/panels hardcoded Width=430"
+  },
+  {
+   "file": "EnvironmentDialog.cs",
+   "lines": "66-75, 303-323",
+   "note": "In-house precedent: sizable dialog with geometry persisted to WindowState"
+  }
+ ],
+ "mockup_idea": "Before/after pair: 'before' = the current cramped 544px dialog at 125% font with a truncated Vault address field and a scrollbar on the Appearance tab; 'after' = the same dialog stretched to ~900x700 with full-width reflowed fields, no scrolling, and a 'Search settings…' filter box above the tabs showing 'timeout' filtering down to 3 highlighted rows.",
+ "merged_from": 2
+}

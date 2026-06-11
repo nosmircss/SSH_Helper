@@ -1,0 +1,31 @@
+{
+ "id": "UX-033",
+ "title": "Notification profiles cannot be tested from Settings — Vault gets a Test Connection button, notifications get nothing",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "integrations",
+ "lens": "ux",
+ "existing_state": "The Vault settings tab has a 'Test Connection' button that exercises the in-dialog values end-to-end (SettingsDialog.cs:731). The Notifications tab (CreateNotificationsTab, SettingsDialog.cs:1180 onward) has only Add/Remove profile buttons (SettingsDialog.cs:1217-1220) and the config fields (webhook URL, SMTP host/port/from/to/credentials). There is no way to verify a Slack webhook URL, Teams flow URL, or SMTP relay actually works without leaving Settings, writing a YAML preset containing a notify: step, and running it — and since webhook URLs are stored write-only in Credential Manager and displayed masked (isPassword: true, SettingsDialog.cs:1295), a paste error is invisible until that first real send fails.",
+ "recommendation": "Add a 'Send Test' button to the Notifications tab that builds a throwaway NotificationService from the current in-dialog field values (mirroring how the Vault Test Connection builds a throwaway VaultService from in-dialog textboxes) and sends a canned 'SSH_Helper test notification' to the selected profile, reporting the NotificationResult (status code / error body) inline next to the button.",
+ "user_benefit": "Turns notification setup from a multi-step trial-and-error loop (save settings, write script, run, inspect) into a one-click verification — the same affordance every comparable tool (Grafana, Rundeck) provides.",
+ "evidence": [
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "731",
+   "note": "Vault tab Test Connection button — the precedent"
+  },
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "1217-1220",
+   "note": "Notifications tab has only Add/Remove buttons"
+  },
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "1295",
+   "note": "webhook URL field is masked (isPassword: true), so typos are invisible"
+  }
+ ],
+ "mockup_idea": "Settings > Notifications tab mockup: a 'Send Test' button below the profile fields with an inline result label — green check 'Delivered (HTTP 200)' or red 'Failed: 404 no_service — check webhook URL'.",
+ "merged_from": 1
+}

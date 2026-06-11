@@ -1,0 +1,31 @@
+{
+ "id": "UX-048",
+ "title": "Ctrl+S saves nothing outside the script editor — CSV grid has dirty tracking but no save shortcut",
+ "category": "UX",
+ "severity": "low",
+ "effort": "S",
+ "area": "form1-b",
+ "lens": "ux",
+ "existing_state": "ProcessCmdKey (Form1.cs:14450-14480) handles Ctrl+S only when txtCommand or txtPreset has focus, calling SaveCurrentPreset (14454-14460); with focus anywhere else — including the host grid — Ctrl+S is silently swallowed and does nothing. Yet the CSV grid maintains full dirty tracking (_csvDirty), has Save/SaveAs plumbing (SaveCurrentCsv/SaveCsvAs, 9245-9325), and guards exit with a save prompt (TryResolvePendingCsvChangesForExit, 14919-14945). A user who just pasted 200 rows and habitually hits Ctrl+S gets no save and no feedback, and only learns about the unsaved state at exit time.",
+ "recommendation": "In the Ctrl+S case, add a grid-focused branch: when dgv_variables (or its editing control) contains focus and a CSV file is loaded, call SaveCurrentCsv(); when no path exists yet, fall through to SaveCsvAs. Optionally flash the saved filename in the status bar as confirmation. Consider Ctrl+Shift+S for Save As to round out the convention.",
+ "user_benefit": "The universal save shortcut works where users expect it; bulk grid edits stop living dangerously until app exit.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "14454-14461",
+   "note": "Ctrl+S gated on txtCommand/txtPreset focus only"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "9245-9325",
+   "note": "SaveCurrentCsv/SaveCsvAs plumbing exists and is shortcut-less"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "14919-14945",
+   "note": "exit-time CSV save prompt proves dirty tracking exists"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

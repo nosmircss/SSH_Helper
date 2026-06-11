@@ -1,0 +1,26 @@
+{
+ "id": "BUG-059",
+ "title": "Cancelling the import-destination prompt imports all presets to root level anyway",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "form1-b",
+ "lens": "ux",
+ "existing_state": "ImportAllPresets asks for a destination via PromptForImportDestination (Form1.cs:10804). If the user answers Yes ('choose a folder') and then presses Cancel on the VB InputBox, the empty return is indistinguishable from 'leave empty for root' — the code comment admits this (Form1.cs:10880-10885) and returns the empty string, so the import proceeds dumping every preset at root level (10810) with '_imported' suffixes on collisions. The bulk import then clears the preset-delete undo history (10824), and there is no import-undo, so cleanup of a bad import is fully manual. A proper wrapper already exists (`ShowInputBox`, Form1.cs:11304 area, with test seam) but this call site uses `Microsoft.VisualBasic.Interaction.InputBox` directly (10875).",
+ "recommendation": "Replace the VB InputBox with a small themed dialog (or extend ShowInputBox) that returns a real cancelled/ok result plus the text — e.g. a folder picker combo seeded from _presetManager.GetFolders() with OK/Cancel — and abort the import on cancel. Same fix applies to the other three direct InputBox call sites (8093, 9391, 9419).",
+ "user_benefit": "Pressing Cancel should never mutate the preset library; today it can flood the root level with dozens of imported presets that must be cleaned up one by one (and it wipes the delete-undo stack in the process).",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "10846-10886",
+   "note": "Cancel/empty ambiguity acknowledged in comment; empty returned as 'import to root'"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "10804-10825",
+   "note": "Only the first dialog's ESC sentinel aborts; import proceeds and clears undo history"
+  }
+ ]
+}

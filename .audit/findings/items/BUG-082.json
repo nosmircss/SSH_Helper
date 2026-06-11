@@ -1,0 +1,26 @@
+{
+ "id": "BUG-082",
+ "title": "range() ignores the parse result of its step argument — an unparseable step zeroes it and returns null, silently skipping loops",
+ "category": "BUG",
+ "severity": "low",
+ "effort": "S",
+ "area": "scripting-functions",
+ "lens": "correctness",
+ "existing_state": "Range initializes step to 1 but then calls `TryResolveInt(parts[2], context, out step)` without checking the return value (Services/Scripting/Functions/CollectionFunctions.cs:151-153). TryResolveInt sets its out parameter to 0 before attempting the parse (CollectionFunctions.cs:291-297), so when the third argument is an unset variable or non-numeric — e.g. `range(0, 10, {{stride}})` with stride undefined — step becomes 0 and the function returns null at line 155 instead of either erroring or keeping the default of 1. A foreach over that result resolves null to an empty list and iterates zero times, so the loop body is silently skipped for the whole run.",
+ "recommendation": "Check the boolean: `if (parts.Count >= 3 && !TryResolveInt(parts[2], context, out step)) return null;` is the minimal honest fix, but better is to treat an unparseable step as an error (consistent with how start/end already return null at lines 148-149 — and ideally all three should fail loudly rather than null out, per BUG-010's philosophy).",
+ "user_benefit": "A loop that quietly runs zero iterations looks identical to a successful no-op run; fixing the ignored return makes a bad step argument behave deterministically instead of depending on which argument failed to parse.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\CollectionFunctions.cs",
+   "lines": "143-172",
+   "note": "step default 1 overwritten to 0 by failed TryResolveInt (151-153), then `step == 0 -> return null` (155)"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\CollectionFunctions.cs",
+   "lines": "291-297",
+   "note": "TryResolveInt sets result = 0 before parsing; return value ignored at call site"
+  }
+ ]
+}

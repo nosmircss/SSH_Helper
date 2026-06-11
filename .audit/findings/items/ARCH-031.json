@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-031",
+ "title": "Execution wrap-up (cancel detection, details, history, error handling, cleanup) is copy-pasted three times in Form1, plus duplicated history-store methods — a proven drift hazard",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "form1-b",
+ "lens": "perf",
+ "existing_state": "ExecutePresetOnRowsAsync contains two ~70-line near-identical try/catch/finally blocks: the dialog-options branch (Form1.cs:12381-12452, executes via _sshService.ExecuteFolderAsync with a single-preset dictionary) and the plain branch (Form1.cs:12457-12509, executes via _executionCoordinator.ExecutePresetAsync). Both duplicate WasManualExecutionCancelled handling, the 15-argument BuildExecutionDetails call, StoreExecutionHistory, status-bar updates, the catch dialog, and the finally cleanup (CleanupFlowCanvasExecutionStateAfterRun + SetExecutionMode(false)) — differing only in the execute call and timestamps. ExecuteFolderWithOptionsAsync (Form1.cs:12920-12976) repeats the same wrap-up a third time. The two branches already diverge subtly: the dialog path bypasses _executionCoordinator entirely, so any future fix in the coordinator path (e.g. cancellation or timeout behavior) silently won't apply to multi-host dialog runs. Separately, StoreExecutionHistory (Form1.cs:14217-14251) and StoreFolderExecutionHistory (Form1.cs:12979-13020) are near-duplicates differing only in label construction and an output fallback — including the duplicated Invoke/SaveRun/SaveConfiguration/error-dialog block. All of this lives in a 15,360-line Form1.cs, against the project's own 'Keep Form1 thin' guideline.",
+ "recommendation": "Extract one execution-wrapper, e.g. private async Task RunExecutionAsync(Func<Task<List<ExecutionResult>>> execute, ExecutionDetailsSeed seed, Func<List<ExecutionResult>, string> completionStatus) that owns timing, cancel detection, BuildExecutionDetails, history storage, error dialog, and the finally cleanup; the three call sites shrink to building the execute delegate and the seed. Merge StoreExecutionHistory/StoreFolderExecutionHistory into a single method taking label/output-fallback parameters. Longer term this wrapper is the natural seam to lift into an ExecutionRunner service outside Form1, but the in-class extraction already removes the triple-maintenance burden.",
+ "user_benefit": "Fixes to cancellation, history persistence, or error handling land once instead of needing to be remembered in three places — eliminating the class of bug where preset runs and folder/dialog runs behave differently after a change.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "12381-12452",
+   "note": "dialog-options branch: full wrap-up block #1 (via ExecuteFolderAsync)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "12457-12509",
+   "note": "plain branch: full wrap-up block #2 (via ExecutePresetAsync), near-verbatim copy"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "12920-12976",
+   "note": "ExecuteFolderWithOptionsAsync: wrap-up block #3"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "14217-14251, 12979-13020",
+   "note": "StoreExecutionHistory vs StoreFolderExecutionHistory near-duplicates incl. identical Invoke/SaveRun/SaveConfiguration block"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

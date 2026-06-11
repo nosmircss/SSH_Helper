@@ -1,0 +1,26 @@
+{
+ "id": "BUG-031",
+ "title": "Password-only Vault secrets can never authenticate (all-or-nothing username+password read)",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "integrations",
+ "lens": "correctness",
+ "existing_state": "VaultCredentialProvider always requests BOTH keys: `var keys = new[] { usernameKey, passwordKey }` with defaults username/password (Services/Vault/VaultCredentialProvider.cs:47, 86-87). VaultService.ReadSecretKeysAsync is all-or-nothing: if ANY requested key is absent from the secret it throws a VaultException 'Secret ... has no key ...' (Services/Vault/VaultService.cs:132-139). That exception is then swallowed by the provider's catch (line 59-63) -> returns false -> silent fallback to the toolbar default password. Net effect: a very common Vault layout where the secret stores only `password` (and the username comes from the grid's username column) is impossible to use via vault_path — the read always throws on the missing `username` key, and the user gets no message explaining why. The `result.TryGetValue(usernameKey,...)` tolerance at lines 51-52 is unreachable because the read already threw.",
+ "recommendation": "Make the username key optional. Either (a) read keys independently so a missing username key yields a null username instead of failing the whole read, or (b) when usernameKey wasn't explicitly specified via the `#user,pass` suffix, request only the password key and let host.Username keep the grid value. Add a ReadSecretKeysAsync overload (or a `requiredKeys` set) so the provider can tolerate a missing username while still requiring the password.",
+ "user_benefit": "Lets operators store just a password in Vault (the most common pattern) with the username coming from the host grid, instead of being forced to duplicate usernames into every secret or silently failing.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultCredentialProvider.cs",
+   "lines": "47-57",
+   "note": "always asks for username+password; success requires non-empty password"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+   "lines": "132-139",
+   "note": "throws if any requested key missing -> whole read fails"
+  }
+ ]
+}

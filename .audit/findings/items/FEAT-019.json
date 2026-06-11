@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-019",
+ "title": "No list aggregation functions: sum/avg/median missing, and min/max cannot take a list",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-functions",
+ "lens": "ux",
+ "existing_state": "MathFunctions registers abs, min, max, round, floor, ceil, random, pow, sqrt, clamp, iif (Services/Scripting/Functions/MathFunctions.cs:14-27) — and that is the entire math surface. min/max iterate scalar varargs only, silently skipping non-numeric args (MathFunctions.cs:37-71), so `min(latencies)` where latencies is a list returns null/garbage rather than the list minimum. There is no sum, avg, median, or mod anywhere (registry, legacy switch, or json.*). The only workaround is reduce() with manual float() casts (CollectionFunctions.cs:58-78 is the one type-preserving collection function), e.g. `reduce(latencies, (acc,x) => acc + float(x), 0)` — and avg additionally needs a separate length() division. Notably the app itself knows users want aggregates: the autocomplete's into-derived suffixes include _avg/_min/_max/_count for the ping command (ScriptAutocompleteProvider.cs:106-114), but script authors processing extracted values get nothing equivalent.",
+ "recommendation": "In MathFunctions, add sum(list), avg(list), median(list), and mod(a, b); teach min/max to detect a single list-typed argument (resolve via ValueResolver.ResolveListValue, same pattern CollectionFunctions uses) and aggregate over it while keeping the existing varargs behavior. Follow the existing IsInteger int-collapse convention for return values, register the names in MathFunctions.Register, and document in SCRIPTING.md.",
+ "user_benefit": "Computing 'average latency across 200 devices' or 'total interface errors' is the bread and butter of fleet scripting; today it requires a reduce-lambda-plus-float-cast incantation most users will never find.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\MathFunctions.cs",
+   "lines": "14-27, 37-71",
+   "note": "Full registration list; min/max are scalar-varargs loops that skip unresolvable args"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\CollectionFunctions.cs",
+   "lines": "58-78",
+   "note": "reduce() is the only aggregation path today; requires a 2-param lambda and manual casts"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptAutocompleteProvider.cs",
+   "lines": "106-114",
+   "note": "_avg/_min/_max derived suffixes for ping show the aggregate demand already exists in the product"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

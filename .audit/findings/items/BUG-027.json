@@ -1,0 +1,26 @@
+{
+ "id": "BUG-027",
+ "title": "Host CSV save truncates the file in place — a failed save destroys the host inventory with no backup",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "persistence-config",
+ "lens": "data-integrity",
+ "existing_state": "CsvManager.SaveToFile opens the target with `new StreamWriter(filePath, false, ...)` (Services/CsvManager.cs:78), which truncates the existing file immediately, then streams the grid out row by row (:83-102). There is no temp-file swap and no backup copy anywhere in the path (Form1.SaveCsvToFile at Form1.cs:9310-9325 calls it directly). If the process dies or the disk fills mid-write, the operator's source-of-truth host list is gone; the catch in TrySaveCsvToPath (Form1.cs:9303-9306) shows \"Failed to save file\" after the original content has already been destroyed. This is the file driving which hosts every command and scheduled job targets.",
+ "recommendation": "Write to filePath + \".tmp\" and finish with File.Replace (mirroring JsonFileWriter.WriteJsonAtomic, Utilities/JsonFileWriter.cs:21-88 — extract a text variant or generalize it), optionally keeping a .bak of the previous CSV. One method change in CsvManager.SaveToFile plus a unit test for the interrupted-write case.",
+ "user_benefit": "A crash or full disk during Save can no longer delete the entire host inventory; the worst case becomes \"old file still intact\".",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\CsvManager.cs",
+   "lines": "76-103",
+   "note": "StreamWriter(filePath, false) truncate-in-place, no temp/backup"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "9288-9325",
+   "note": "TrySaveCsvToPath/SaveCsvToFile call it directly; error dialog fires after truncation"
+  }
+ ]
+}

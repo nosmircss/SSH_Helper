@@ -1,0 +1,41 @@
+{
+ "id": "PERF-028",
+ "title": "Capture transcript caps count lines only — no byte cap — and the full transcript is copied 3-4x and persisted whole into history",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "terminal",
+ "lens": "perf",
+ "existing_state": "The interactive transcript cap is 500,000 lines and the mirror cap 50,000 lines (Services/Terminal/InteractiveTerminalService.cs:71-76), enforced purely by counting CR/LF in AppendTranscriptWithCap (2420-2465) and GetMirrorChunkPrefixLengthWithinCaps (2545-2599). There is no character/byte cap anywhere, so newline-poor output (e.g., cat-ing a minified JSON/log blob — exactly what capture mode is used for) grows the transcript StringBuilder without bound regardless of the line cap. Even within the cap, a full 500k-line transcript (~50-60MB at typical widths) is materialized repeatedly: transcriptBuilder.ToString() (1184), the PrependStartupPromptIfMissing concat (2898), CleanTranscriptForAudit's Normalize pass (2962-2977), and in window mode InteractiveCommand re-normalizes and emits the entire transcript as one RawChunk to the UI (Services/Scripting/Commands/InteractiveCommand.cs:35-39). The final copy is stored on InteractiveTerminalSessionDetails and rides ExecutionDetails into the history JSON on disk (Form1.cs:1756, 13094) plus optionally a script variable (InteractiveCommand.cs:43-46).",
+ "recommendation": "Add a character cap alongside the line cap in AppendTranscriptWithCap / ApplyMirrorOutputCap (e.g., 10-20MB for the transcript, ~1MB for mirror, reusing the existing cap-notice mechanism), and truncate the transcript that gets persisted into history/session details to a saner audit size. Both checks slot into the existing GetMirrorChunkPrefixLengthWithinCaps scan with a length counter, so this is a small, well-tested-area change (the cap helpers already have unit coverage).",
+ "user_benefit": "A single runaway capture step can no longer balloon the process by tens-to-hundreds of MB (or bloat history JSON files that are reloaded every time the run is opened); worst-case memory becomes predictable.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "71-76",
+   "note": "caps defined in lines only (500k transcript / 50k mirror)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "2545-2599",
+   "note": "cap scan counts only CR/LF; a chunk with no newlines is always appended in full with addedLines=0"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "1184, 2898, 2962-2977",
+   "note": "full-transcript copies: ToString, prefix concat, audit Normalize"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/InteractiveCommand.cs",
+   "lines": "35-46",
+   "note": "whole transcript re-normalized + emitted as one RawChunk, and stored into a capture variable"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "1756, 13094",
+   "note": "InteractiveSessions (incl. full transcript) mapped into history payloads"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

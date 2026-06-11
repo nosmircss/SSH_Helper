@@ -1,0 +1,36 @@
+{
+ "id": "PERF-035",
+ "title": "Folder runs re-parse and re-validate every script preset per host, and library imports are re-read from disk on every editor validation",
+ "category": "PERF",
+ "severity": "low",
+ "effort": "S",
+ "area": "scripting-core",
+ "lens": "perf",
+ "existing_state": "Two redundant parse paths. (1) The single-script multi-host path parses and validates exactly once for all hosts (Services/SshExecutionService.cs:505-516), but the folder path does not: ExecutePresetOnHost -> ExecuteScriptTextOnHost runs a fresh ScriptParser.Parse + Validate(enforceCanonicalSyntax) + ScriptDependencyAnalyzer.AnalyzeSshRequirements for every (host, preset) pair (1105-1132), and FindSingleHostOnlyFolderPresets parses each preset once more in preflight (901-925) — a 100-host x 10-preset folder run performs ~1,000 redundant YamlDotNet parse+validate passes (plus 1,000 dependency analyses) on already-oversubscribed worker threads, where 10 would do. (2) Every ScriptParser.Validate call rebuilds the subroutine registry (Services/Scripting/ScriptParser.cs:4238-4242), and ScriptSubroutineRegistryBuilder.LoadImports does File.ReadAllText + a full Parse + Validate for each imported library file with no caching (Services/Scripting/ScriptSubroutineRegistryBuilder.cs:100-118); the Scintilla editor's live linting runs this on every debounce tick while typing (Services/Editor/ScriptEditorValidationService.cs:57, 73-83, 118-128), so editing a script with imports hits the disk and re-parses every library several times per minute.",
+ "recommendation": "In ExecuteFolderAsync, pre-parse each selected script preset once into a Dictionary<presetName, (Script, SshRequirementResult)> (merged with the FindSingleHostOnlyFolderPresets preflight pass so parsing happens exactly once) and pass the parsed Script down — ExecuteScriptOnHost (1280) already accepts a Script + SshRequirementResult, so ExecutePresetOnHost just needs a parsed-preset overload; parse failures then surface once up front instead of per host mid-run. Add a parsed-library cache keyed by (absolute path, File.GetLastWriteTimeUtc) — a static ConcurrentDictionary in ScriptSubroutineRegistryBuilder suffices — so unchanged library files are parsed once per session.",
+ "user_benefit": "Snappier editor linting for users who maintain shared YAML libraries, and thousands of redundant parse/validate cycles plus their GC churn removed from large folder runs.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "1105-1132",
+   "note": "per-host per-preset Parse + Validate + AnalyzeSshRequirements"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "505-516, 901-925",
+   "note": "single-preset path parses once for all hosts; folder preflight parses the same presets yet again"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptSubroutineRegistryBuilder.cs",
+   "lines": "100-118",
+   "note": "File.ReadAllText + Parse + Validate per import, every Validate, no cache"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptEditorValidationService.cs",
+   "lines": "57, 73-83, 118-128",
+   "note": "debounced editor loop re-runs Parse+Validate (and thus import IO) repeatedly while typing"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

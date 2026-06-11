@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-037",
+ "title": "Layout and band geometry are built on hand-mirrored height heuristics instead of React Flow's measured dimensions",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-state",
+ "lens": "perf",
+ "existing_state": "All block heights used by the layout engine and branch bands are estimates that must manually mirror BaseBlock's CSS: estimateNodeHeight encodes header ~30px, SUMMARY_PAD 14, row heights 20/32, footer 24, and a 16-chars-per-line label-wrap budget (FlowCanvas/src/utils/nodeSize.ts:29-57, header comment :1-3 'height is an ESTIMATE'); comment space uses a separate 33-chars/17px heuristic (utils/layout/hierarchicalLayout.ts:60-72). Any styling change in BaseBlock silently desynchronizes five constants. This estimate-vs-DOM split has already produced shipped overlap defects: nodeSize.ts:49-50 documents 'the estimate undershoots and the next block overlaps', and the preset-switch leak fix comment describes blocks rendering expanded while the layout estimated them collapsed, producing overlap (stores/messageBridge.ts:164-168). Meanwhile the app is on @xyflow/react ^12.10.1 (FlowCanvas/package.json:23), where node.measured.width/height are populated after first render -- and most reflows (expand/collapse via debugSlice.ts, display-settings changes via settingsSlice.ts, comment add/remove, the sizing restore that fires after load-graph) run post-render, when real measurements exist. The nodeSize.ts:2 comment ('xyflow exposes no measured height at layout time') is only true for the very first import layout.",
+ "recommendation": "Thread measured dimensions into reflows: in computeHierarchicalLayout (and computeBranchBands), prefer node.measured?.height when present and fall back to estimateNodeHeight only for unmeasured nodes (first import, freshly added blocks). Optionally add a one-frame measure-then-relayout pass after load-graph so even the initial layout self-corrects. This shrinks the heuristics to a cold-start fallback instead of the single source of geometry, eliminating the estimate-drift overlap class and the need to keep five constants in sync with BaseBlock CSS.",
+ "user_benefit": "Blocks and bands stop overlapping at unusual text scales / long labels / future styling tweaks, and styling changes to blocks no longer require remembering to retune layout constants.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/utils/nodeSize.ts",
+   "lines": "1-3, 29-57",
+   "note": "estimate constants that mirror BaseBlock CSS; comment admits undershoot causes overlap"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/utils/layout/hierarchicalLayout.ts",
+   "lines": "60-72, 79-87",
+   "note": "comment-size heuristic and advanceFor built on the estimate"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/messageBridge.ts",
+   "lines": "164-168",
+   "note": "documented shipped overlap bug from estimate-vs-render divergence"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/package.json",
+   "lines": "23",
+   "note": "@xyflow/react ^12.10.1 -- measured dims available post-render"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,46 @@
+{
+ "id": "BUG-001",
+ "title": "config.json and jobs.json are written non-atomically, and corrupt-load recovery destroys the last-good .bak within seconds — one torn write permanently wipes all presets, environments, and job definitions",
+ "category": "BUG",
+ "severity": "critical",
+ "effort": "S",
+ "area": "persistence-config",
+ "lens": "data-integrity",
+ "existing_state": "The two highest-value files bypass the project's own atomic writer. ConfigurationService.Save writes config.json — which holds ALL presets/scripts, environments, host lists, and the compressed ApplicationState blob — with a plain File.WriteAllText (Services/ConfigurationService.cs:144) after a best-effort .bak copy with an empty catch (ConfigurationService.cs:116-120); JobStorageService.PersistToDisk writes jobs.json the same way (Services/JobStorageService.cs:243, .bak copy at :230-233). Utilities/JsonFileWriter.WriteJsonAtomic (JsonFileWriter.cs:21-88, temp file + File.Replace) exists and is used by both history stores (JobHistoryService.cs:227,425; HistoryStorageService.cs:739-740), and CLAUDE.md names it as the convention. Exposure is constant: config saves fire on every Update()/settings change and app close (ConfigurationService.cs:156-161; Form1.cs:3947), and jobs.json is rewritten TWICE per scheduled run for RunningState bookkeeping (Services/JobExecutionService.cs:768-774, 827-832). Worse, recovery cascades into total loss: on a corrupt load, ConfigurationService.Load COPIES the bad file to .corrupt (TryBackupCorrupt default useMove:false, Utilities/JsonFileWriter.cs:103-117), leaves the corrupt config.json in place, never attempts .bak, and returns defaults (ConfigurationService.cs:91-102). The very next Save() copies the still-corrupt on-disk file OVER the good config.json.bak (ConfigurationService.cs:116-120) before writing defaults — and that save is guaranteed within seconds because the silent startup update check writes LastCheckTime via _configService.Update (Form1.cs:439-441, 14983; CheckOnStartup defaults true at Models/AppConfiguration.cs:457), or at latest at app close. After one corruption event plus one save: live file = defaults, .bak = corrupt, .corrupt = corrupt. JobStorageService has the identical cascade (TryBackupCorrupt copy at JobStorageService.cs:92, .bak clobber at :230-233, empty job roster at :95-97, no .bak fallback in Load at :65-99). The warning dialog (Form1.cs:350-354) mentions only .corrupt, never the good .bak, and offers no restore. Compounding the jobs.json exposure, the scheduler's Saves run on ThreadPool threads against the unsynchronized plain Dictionary _jobs (JobStorageService.cs:15) while the UI thread enumerates Jobs.Values every 5 s (Form1.cs:15205, 15224) and the evaluation loop enumerates it too (JobExecutionService.cs:313): two jobs completing in the same instant collide in File.WriteAllText (IOException 'file in use') and mutate the Dictionary mid-enumeration (undefined behavior); if CompleteJob's Save throws, RunningState is never cleared, so the NEXT launch falsely reports 'Application crashed during execution' for a run that finished fine.",
+ "recommendation": "Route both saves through JsonFileWriter.WriteJsonAtomic(path, json, createBackup: true) — a near drop-in replacement that subsumes the hand-rolled .bak copies and makes backup+swap atomic. In both corrupt-load paths: call TryBackupCorrupt with useMove:true (so the corrupt file can never be re-copied over .bak), then attempt to parse {path}.bak and restore from it before falling back to defaults/empty list, surfacing 'restored from backup' via ConfigLoadError/LoadError; additionally, skip the .bak refresh in Save while a load-failure flag is set. Make the Form1.cs:350-354 dialog actionable (Restore from backup (last saved <time>) / Start with defaults / Open config folder). In JobStorageService, add a private lock taken in Save/Delete/RestoreSnapshots/Load/PersistToDisk and have the Jobs property snapshot under it; optionally move RunningState out of the full jobs.json roster rewrite (sidecar file) so roster rewrites only happen on actual edits.",
+ "user_benefit": "A power cut or crash during one of the app's frequent automatic saves — or two jobs finishing simultaneously — can currently wipe every saved preset, environment, host list, and scheduled-job definition beyond recovery, even though a perfect backup existed moments earlier. This closes the data-loss hole using a helper the codebase already ships.",
+ "mockup_idea": "Before/after dialog mockup: current passive 'Configuration file was corrupted... defaults applied' vs a recovery dialog with 'Restore from backup (last saved 2026-06-09 18:42)' / 'Start with defaults' / 'Open config folder' buttons.",
+ "merged_from": 8,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\ConfigurationService.cs",
+   "lines": "108-151",
+   "note": "Save: best-effort .bak copy (116-120) then raw File.WriteAllText at :144 — truncate-then-write, non-atomic; after a corrupt load the .bak copy source is the still-corrupt file"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\ConfigurationService.cs",
+   "lines": "91-102",
+   "note": "corrupt path: COPY to .corrupt (useMove:false), corrupt config.json left in place, defaults returned, .bak never tried"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobStorageService.cs",
+   "lines": "15, 89-98, 227-244",
+   "note": "plain Dictionary, corrupt->empty fallback, .bak copy at :232 then File.WriteAllText at :243, no .bak fallback in Load"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JsonFileWriter.cs",
+   "lines": "21-88, 103-117",
+   "note": "WriteJsonAtomic exists and is used by the history services; TryBackupCorrupt default is COPY not MOVE"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "768-774, 827-832, 875-888",
+   "note": "RunningState persistence rewrites jobs.json on ThreadPool threads at start and end of every scheduled run — two corruption windows per run plus concurrent-save collisions"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "439-441, 14983, 350-354, 15205, 15224",
+   "note": "startup update check triggers Update->Save seconds after launch (CheckOnStartup default true); warning dialog offers no restore; UI thread enumerates Jobs.Values every 5 s concurrently with writes"
+  }
+ ]
+}

@@ -1,0 +1,41 @@
+{
+ "id": "BUG-036",
+ "title": "Breakpoints leak across preset switches on both sides of the bridge — runs pause at invisible breakpoints and the first gutter click does nothing",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "flowcanvas-state",
+ "lens": "reliability",
+ "existing_state": "When a new graph loads, `resetGraphSessionState` clears dirty/history/execution/timeline/exportStatus/iterations (FlowCanvas/src/stores/messageBridge.ts:74-81) and the load handler explicitly re-restores `disabledBlocks` and `expandedNodes` from node data — the comment at messageBridge.ts:164-168 documents that this exact leak was fixed for those two Sets because preset node ids collide. The `breakpoints` Set got no such treatment: debugSlice has no clear or restore action for it (stores/slices/debugSlice.ts:36, 41-56) and nothing in the load path touches it. The host mirrors the leak: Form1's `_pendingBreakpoints` accumulates via toggle messages (Form1.cs:182, 6756-6771) and is only cleared inside the run-start path, which immediately re-adds every stale id that exists in the new preset's node map (Form1.cs:12322, 12346-12349, 13811-13824) before feeding them into the executor's debug state (Form1.cs:12358-12361, 13878-13879). Since node ids are reassigned sequentially per import (`node-{_idCounter++}`, Services/FlowCanvasBridge.cs:331), a stale `node-5` from preset A almost always matches an unrelated block in preset B. Concrete failure: set a breakpoint in preset A, switch the open canvas to preset B, run — execution pauses at an arbitrary block with NO visible dot (BaseBlock renders the dot from data.breakpoint, nodes/BaseBlock.tsx:149, which the fresh load doesn't carry), looking like a hang against live SSH hosts. Toggling a breakpoint on a stale id also inverts: the first gutter click REMOVES the hidden entry, so the user must click twice to actually set a breakpoint.",
+ "recommendation": "Mirror the disabled/expanded fix: in the `load-graph` handler (or resetGraphSessionState) always reset the breakpoints Set — clear it, restoring from node data if the host ever stamps breakpoints — and notify the host to clear `_pendingBreakpoints` (a lightweight 'breakpoints-clear' message handled next to OnBreakpointToggle in Form1, or clear it directly when a new graph is loaded into the canvas). The run-start id-existence filter (Form1.cs:12346-12349) is not a sufficient guard because ids collide across presets by construction. Symmetry with the existing always-restore pattern makes this a small, well-precedented change.",
+ "user_benefit": "Debugging a preset no longer inherits ghost breakpoints from the previously opened preset — fleet runs against live SSH hosts won't mysteriously freeze at an unmarked block (currently the only recovery is guessing or restarting the canvas), and gutter clicks set breakpoints on the first try.",
+ "mockup_idea": "",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\messageBridge.ts",
+   "lines": "74-81, 162-183",
+   "note": "session reset + load-graph always-restore cover disabled/expanded only; breakpoints Set untouched"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\debugSlice.ts",
+   "lines": "36, 41-56",
+   "note": "breakpoints Set has toggle only — no clear/restore API; stale entry makes the first click a removal"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "182, 6756-6771, 12322-12361, 13811-13824",
+   "note": "_pendingBreakpoints survives preset switches; run-start filter passes colliding ids into the executor debug state"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "331",
+   "note": "NextId() => node-{_idCounter++} — ids guaranteed to collide across presets"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\nodes\\BaseBlock.tsx",
+   "lines": "149",
+   "note": "dot renders from data.breakpoint, so the stale Set entry is invisible on the new preset"
+  }
+ ]
+}

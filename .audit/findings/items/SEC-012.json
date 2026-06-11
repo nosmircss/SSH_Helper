@@ -1,0 +1,26 @@
+{
+ "id": "SEC-012",
+ "title": "readfile path guard only blocks a tiny C: denylist; other drives, UNC shares, and prefix tricks pass",
+ "category": "SEC",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "bugs",
+ "existing_state": "ValidateReadPath only rejects six hardcoded C: directories plus other users' profile folders (Services/Scripting/ScriptFileAccessValidator.cs:12-20, 35-63); every other location is readable. A script `readfile:` can therefore read D:\\, E:\\, the root of C:\\, and arbitrary UNC paths like \\\\attacker-host\\share\\x — none of which match any blocked prefix. The matching is plain fullPath.StartsWith(blocked, OrdinalIgnoreCase) with no trailing-separator check (line 46), so 'C:\\Windows' also falsely blocks a legitimate 'C:\\WindowsCustom\\...' (over-broad) while extended-length syntax \\\\?\\C:\\Windows\\... bypasses the blocklist entirely (under-broad). The write allowlist has the analogous bug: it checks fullPath.StartsWith(UserProfile) (line 113), so a sibling directory whose name extends the username (e.g. C:\\Users\\nos_evil) satisfies both the 'other users' read check and the write allowlist.",
+ "recommendation": "Replace prefix-string matching with canonicalized, separator-aware containment checks: normalize with Path.GetFullPath, append a trailing separator before comparing, resolve/deny reparse points (symlinks/junctions), and reject UNC and extended-length (\\\\?\\) prefixes for both read and write unless explicitly allowed. Treat the read guard as a real boundary (deny-by-default to a configured root list) rather than a six-entry denylist.",
+ "user_benefit": "Shared/imported presets can no longer read arbitrary local drives or pull files off network shares through the scripting engine, and legitimately-named directories stop being falsely blocked.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptFileAccessValidator.cs",
+   "lines": "35-72",
+   "note": "Read guard: 6-entry denylist, prefix StartsWith without separator, no UNC/extended-path handling"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptFileAccessValidator.cs",
+   "lines": "100-118",
+   "note": "Write allowlist uses bare StartsWith(UserProfile), matches sibling dirs"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

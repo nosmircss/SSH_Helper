@@ -1,0 +1,41 @@
+{
+ "id": "FEAT-005",
+ "title": "Interactive terminal has no UI entry point — opening a shell on a host requires authoring a YAML interactive: step",
+ "category": "FEAT",
+ "severity": "high",
+ "effort": "M",
+ "area": "terminal",
+ "lens": "ux",
+ "existing_state": "A complete professional terminal stack exists (Rebex VirtualTerminal emulation, owner-drawn viewport with scrollback/selection/auto-copy, dark theming), but the ONLY way to reach it is authoring a YAML preset containing an `interactive:` step, dispatched through InteractiveCommand.ExecuteAsync (Services/Scripting/Commands/InteractiveCommand.cs:13-28) into InteractiveTerminalService.RunAsync (Services/Terminal/InteractiveTerminalService.cs:231). InteractiveTerminalForm is only ever constructed inside the service (InteractiveTerminalService.cs:824, 1777), and grep confirms no other code path instantiates it. There is no menu item, toolbar button, or host-grid context-menu entry anywhere — the string 'Terminal' does not appear once in Form1.Designer.cs, the host grid's right-click menu offers only \"Test Connection(s)\" / \"Clear Test Results\" plus column/row/selection ops (Form1.cs:8848-8861, Form1.Designer.cs:343-402), and the feature is documented only in the GitHub-hosted SCRIPTING.md (line 2648). RunSeparateAsync (InteractiveTerminalService.cs:335-357) already dials a fresh standalone SSH session from host + resolved credentials, so the plumbing for ad-hoc sessions exists. A user who just ran a fleet command and wants to poke at one failing device must leave the app for PuTTY/SecureCRT.",
+ "recommendation": "Add \"Open Terminal\" to the host-grid context menu (next to \"Test Connection(s)\" in Form1.cs InitializeConnectionTesting, ~line 8848) and optionally as a double-click action on the selected host row. Cheapest robust implementation: synthesize a one-step script (`- interactive: {session: separate}`) for the selected host and run it through the existing single-host execution path — this reuses credential resolution (including per-host username/password/vault_path columns), timeouts, the session audit trail, and the history \"Interactive\" tab for free. Alternatively extract RunSeparateAsync's context dependencies (CurrentHost, ResolvedUsername/Password, Timeouts) into a small parameter object so the launcher can call the service directly without a ScriptContext. Per Development Guideline 1, keep the launch logic in the service; Form1 only wires the menu item.",
+ "user_benefit": "Eliminates the constant app-switch to PuTTY/SecureCRT: after a fleet run flags one device, the operator can drop into a live shell on it in one click — table stakes for any SSH management tool, and it finally makes the already-built terminal emulator discoverable.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\InteractiveCommand.cs",
+   "lines": "13-28",
+   "note": "Sole consumer-facing route into the terminal service is the `interactive:` YAML step"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "822-840, 1777",
+   "note": "the only construction sites of InteractiveTerminalForm — both inside script-driven session flow"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "335-357",
+   "note": "RunSeparateAsync already builds a standalone connection from host + resolved credentials, independent of prior script state"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8848-8861",
+   "note": "Host grid context menu has Test Connection(s) but no terminal action; no 'terminal' UI string anywhere in Form1 or the Designer"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SCRIPTING.md",
+   "lines": "2648",
+   "note": "'### interactive - In-App SSH Terminal' — the feature is documented only in the GitHub-hosted reference"
+  }
+ ],
+ "mockup_idea": "Host grid right-click menu before/after: current menu (Test Connection(s) / Clear Test Results) vs. new menu with an \"Open Terminal on 10.0.0.5\" item with a console icon at top, and a terminal window opening beside the main form titled \"10.0.0.5 - Interactive (separate)\".",
+ "merged_from": 2
+}

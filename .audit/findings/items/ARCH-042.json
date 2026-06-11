@@ -1,0 +1,26 @@
+{
+ "id": "ARCH-042",
+ "title": "Two WebView2 host forms duplicate the bridge shell line-for-line and have already diverged; pop-out costs a second full browser process",
+ "category": "ARCH",
+ "severity": "low",
+ "effort": "M",
+ "area": "flowcanvas-bridge",
+ "lens": "perf",
+ "existing_state": "FlowCanvasForm and RunOutputWindowForm each hand-roll the same WebView2 host shell: ready-flag + ConcurrentQueue handshake and drain (UI/FlowCanvasForm.cs:222-227, 352-362 vs UI/RunOutputWindowForm.cs:140-145, 159-165), SendMessage/PostOrQueue marshaling (FlowCanvasForm.cs:337-350 vs RunOutputWindowForm.cs:152-157), WebMessageReceived parse-and-swallow (200-212 vs 130-134), and the init/navigate/dist-mapping sequence (109-192 vs 91-128). They have already drifted: FlowCanvasForm persists size only, from Dispose (518-541), with location session-static (31-32); RunOutputWindowForm persists full geometry from FormClosing (71-73, 223-240). FlowCanvasForm logs unknown inbound message types (301-303); RunOutputWindowForm silently ignores them (138-149). On the PERF side, RunOutputWindowForm deliberately creates a second CoreWebView2Environment with its own user-data dir (96-101) citing lock contention — but sharing one CoreWebView2Environment instance across both controls is the supported pattern; the current design spawns a complete extra Chromium process tree (~100MB+ working set) to render a text console, felt on the resource-constrained jump boxes this tool targets.",
+ "recommendation": "Extract the shared shell — ready-queue handshake, PostOrQueue, WebMessageReceived dispatch, dist virtual-host mapping, and Normal-state geometry persistence (FormClosing-based, both size and location) — into a WebView2HostForm base class or a composed helper both forms use. Create the CoreWebView2Environment once (static Task<CoreWebView2Environment>, single user-data folder) and pass it to both EnsureCoreWebView2Async calls so the pop-out reuses the existing browser process.",
+ "user_benefit": "Protocol and lifecycle fixes (handshake watchdog, geometry, message logging) land in one place for both windows instead of drifting, and popping out the Run Output console stops costing a second 100MB+ browser process.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/FlowCanvasForm.cs",
+   "lines": "200-212, 222-227, 337-362, 518-541",
+   "note": "Handshake/queue/post plumbing; size-only persistence from Dispose; unknown messages logged"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/RunOutputWindowForm.cs",
+   "lines": "91-165, 71-73, 223-240, 96-101",
+   "note": "Same plumbing duplicated; full-geometry persistence from FormClosing; separate CoreWebView2Environment + user-data dir = second browser process; unknown messages silently dropped"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

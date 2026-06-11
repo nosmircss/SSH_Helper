@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>UX-001 — Corrupt-config recovery mockup</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;margin:12px;font:12px "Cascadia Code",Consolas,monospace}
+  .cols{display:flex;gap:14px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px 2px}
+  .cap b{font-weight:700}
+  .cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+
+  /* BEFORE: stock light MessageBox the dark-mode user actually sees */
+  .msgbox{background:#fff;color:#000;border:1px solid #999;border-radius:6px;
+    box-shadow:0 8px 24px rgba(0,0,0,.6);font-family:"Segoe UI",sans-serif;font-size:11.5px;overflow:hidden}
+  .msgbox .tb{display:flex;justify-content:space-between;align-items:center;padding:6px 4px 6px 10px;font-size:11px}
+  .msgbox .tb .x{color:#444;padding:0 8px}
+  .msgbox .body{display:flex;gap:10px;padding:6px 14px 16px}
+  .warn{width:26px;height:26px;flex:none;background:#ffb454;color:#5a3c00;border-radius:50%;
+    text-align:center;line-height:26px;font-weight:700;font-size:15px}
+  .msgbox .btns{background:#f0f0f0;padding:8px 12px;text-align:right}
+  .msgbox button{background:#e1e1e1;border:1px solid #adadad;padding:3px 26px;font:11px "Segoe UI",sans-serif;border-radius:3px}
+
+  /* AFTER: DialogTheme-dark recovery dialog */
+  .dlg{background:#161b24;border:1px solid #2a3447;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.6);overflow:hidden}
+  .dlg .tb{padding:7px 12px;font-size:11px;color:#c9d4e3;background:#10141c;border-bottom:1px solid #1c2330}
+  .dlg .body{display:flex;gap:10px;padding:12px 14px 4px}
+  .dlg p{margin:2px 0 8px;line-height:1.45}
+  .bak{background:#10141c;border:1px solid #1c2330;border-left:3px solid #2bd97c;border-radius:4px;
+    padding:7px 10px;margin:0 14px 10px;font-size:11px}
+  .bak .f{color:#4cc9f0}
+  .bak .m{color:#8294a8}
+  .dlg .btns{display:flex;gap:8px;justify-content:flex-end;padding:10px 14px 12px;background:#10141c;border-top:1px solid #1c2330}
+  .dlg button{font:11px "Cascadia Code",Consolas,monospace;border-radius:4px;padding:5px 12px;cursor:default}
+  .b-pri{background:#173526;border:1px solid #2bd97c;color:#2bd97c}
+  .b-sec{background:#161b24;border:1px solid #2a3447;color:#c9d4e3}
+
+  .notes{margin:8px 2px 0;padding:0;list-style:none;font-size:11px;line-height:1.5}
+  .notes li{padding-left:14px;position:relative;margin-bottom:3px}
+  .notes li::before{content:"▸";position:absolute;left:0}
+  .n-bad li{color:#ff8a8a}.n-bad li::before{color:#ff5c5c}
+  .n-good li{color:#9fe8bf}.n-good li::before{color:#2bd97c}
+  .mut{color:#8294a8}
+</style></head>
+<body>
+<div class="cols">
+
+  <div class="col">
+    <p class="cap"><b class="bad">Before</b> — current dialog (Form1.cs:352)</p>
+    <div class="msgbox">
+      <div class="tb"><span>Configuration Warning</span><span class="x">✕</span></div>
+      <div class="body">
+        <div class="warn">!</div>
+        <div>Configuration file was corrupted and could not be loaded. A backup was saved to config.json.corrupt. Default settings have been applied.</div>
+      </div>
+      <div class="btns"><button>OK</button></div>
+    </div>
+    <ul class="notes n-bad">
+      <li>Light dialog for dark-mode users — shown before ApplyTheme()</li>
+      <li>Never mentions the good <span class="mut">config.json.bak</span> sitting on disk</li>
+      <li>OK = only option; corrupt file stays as config.json</li>
+      <li>Next Save() (startup update check) copies corrupt file over .bak — presets, environments &amp; saved state gone for good</li>
+    </ul>
+  </div>
+
+  <div class="col">
+    <p class="cap"><b class="good">After</b> — recovery dialog, themed via config.DarkMode</p>
+    <div class="dlg">
+      <div class="tb">SSH Helper — Settings Recovery</div>
+      <div class="body">
+        <div class="warn">!</div>
+        <p>Your settings file was corrupted. A good backup from your last session is available.</p>
+      </div>
+      <div class="bak">
+        <span class="f">config.json.bak</span> <span class="m">— saved 2 minutes ago (2026-06-10 08:41)</span><br>
+        <span class="m">184 KB · 23 presets · 4 environments · 61 hosts</span><br>
+        <span class="m">corrupt file kept as config.corrupt-20260610-0843.json</span>
+      </div>
+      <div class="btns">
+        <button class="b-sec">Continue with defaults</button>
+        <button class="b-sec">Open data folder</button>
+        <button class="b-pri">Restore backup</button>
+      </div>
+    </div>
+    <ul class="notes n-good">
+      <li>Restore = File.Replace(.bak → config.json) + reload, one click</li>
+      <li>.bak is write-protected until the first clean save</li>
+      <li>Dark-mode flag passed explicitly — no mis-themed flash</li>
+    </ul>
+  </div>
+
+</div>
+</body></html>

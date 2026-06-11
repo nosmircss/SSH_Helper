@@ -1,0 +1,31 @@
+{
+ "id": "PERF-011",
+ "title": "jobs.json (all jobs + their full embedded host grids) is rewritten twice per job execution just to flip the RunningState marker",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "models-samples-build",
+ "lens": "perf",
+ "existing_state": "Each JobDefinition embeds a complete snapshot of its host grid (Hosts + HostColumns, Models/JobDefinition.cs:159-164) — deliberate, so jobs are immune to grid edits. But the crash-recovery marker RunningState also lives on JobDefinition (219-223, doc: persisted to jobs.json while executing), and JobStorageService has only whole-file persistence: PersistToDisk serializes every job and does a full .bak copy first (Services/JobStorageService.cs:227-244). JobExecutionService sets job.RunningState and calls _jobStorage.Save(job) at every run start (Services/JobExecutionService.cs:768-774) and clears it at every completion (827-832) — so one scheduled run = two full rewrites + two full .bak copies of a file whose size is dominated by every job's host snapshot. With several fleet-sized jobs on minute-level cron schedules, that is continuous multi-MB write amplification for a one-field change, all to a single contended file (and each Save also fires JobsChanged, amplifying the Job List dialog refresh storm).",
+ "recommendation": "Move the in-flight marker out of the monolith: persist running-state to a tiny sidecar (e.g. running-jobs.json mapping jobId -> StartedUtc) written atomically via JsonFileWriter.WriteJsonAtomic, and have the startup crash-recovery scan read that sidecar instead of JobDefinition.RunningState (keep deserializing the old field for one release to migrate). jobs.json then only changes when a job definition actually changes. Alternatively (bigger): per-job definition files under a jobs/ directory so any save touches only the affected job.",
+ "user_benefit": "Stops the scheduler from hammering the disk proportionally to fleet size on every single run, and removes the risk window where a crash mid-rewrite of the whole jobs file is in play twice per execution.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/JobDefinition.cs",
+   "lines": "159-164, 219-223",
+   "note": "embedded host snapshot per job; RunningState persisted to jobs.json while executing"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobExecutionService.cs",
+   "lines": "768-774, 827-832",
+   "note": "_jobStorage.Save(job) on every run start and completion"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobStorageService.cs",
+   "lines": "227-244",
+   "note": "PersistToDisk: .bak File.Copy + serialize ALL jobs + File.WriteAllText on every Save"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

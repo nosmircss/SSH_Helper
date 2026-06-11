@@ -1,0 +1,75 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+.ctx{color:#8294a8;font-size:11px;margin:0 0 10px}
+.ctx b{color:#c9d4e3;font-weight:600}
+.cols{display:flex;gap:14px;align-items:flex-start}
+.col{flex:1;min-width:0}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+.stack{position:relative;padding:0 8px 8px 0}
+.stack::before,.stack::after{content:"";position:absolute;inset:8px 0 0 8px;background:#10141c;border:1px solid #1c2330;border-radius:6px}
+.stack::after{inset:4px 4px 4px 4px}
+.dlg{position:relative;background:#11151d;border:1px solid #1c2330;border-radius:6px;overflow:hidden;z-index:1}
+.tbar{background:#161b26;border-bottom:1px solid #1c2330;padding:5px 9px;font-size:11px;color:#c9d4e3;display:flex;justify-content:space-between}
+.tbar span{color:#8294a8}
+.bdy{padding:9px 10px 10px}
+.hdr{font-weight:600;margin:0 0 6px}
+.cmd{background:#0b0e13;border:1px solid #1c2330;border-radius:4px;padding:6px 8px;color:#c9d4e3;margin:0 0 7px;white-space:pre-wrap}
+.cmd .var{color:#4cc9f0}.cmd .sub{color:#4cc9f0;background:rgba(76,201,240,.12);border-radius:2px;padding:0 2px}
+.meta{color:#8294a8;font-size:11px;margin:0 0 7px;line-height:1.5}
+.scope{font-size:10.5px;color:#8294a8;border-top:1px dashed #1c2330;padding-top:6px;margin:0 0 8px;line-height:1.45}
+.opts{border:1px solid #1c2330;border-radius:4px;padding:6px 8px;margin:0 0 8px;font-size:11px;line-height:1.7}
+.opts .r{display:block}
+.dot{display:inline-block;width:9px;height:9px;border:1px solid #8294a8;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.dot.on{border-color:#4cc9f0;box-shadow:inset 0 0 0 2.5px #0b0e13;background:#4cc9f0}
+.opts small{color:#8294a8;margin-left:16px;display:block;font-size:10px}
+.btns{display:flex;gap:6px;justify-content:flex-end}
+.btn{background:#161b26;border:1px solid #2a3447;border-radius:4px;color:#c9d4e3;padding:4px 11px;font-size:11px}
+.btn.pri{border-color:#4cc9f0;color:#4cc9f0}
+.badge{display:inline-block;background:rgba(255,92,92,.12);border:1px solid #ff5c5c;color:#ff5c5c;border-radius:3px;padding:1px 7px;font-size:10px;margin-left:6px}
+.badge.amb{background:rgba(255,180,84,.1);border-color:#ffb454;color:#ffb454}
+.note{font-size:10.5px;line-height:1.5;margin:8px 0 0;color:#8294a8}
+.note b{font-weight:600}
+.note.bad b{color:#ff5c5c}.note.good b{color:#2bd97c}
+</style></head><body>
+
+<p class="ctx">Preset <b>fleet-health</b> &rarr; 200 hosts &rarr; step 3 is <b>localcmd: ping -n 2 {{Host_IP}}</b> (confirm: always). Approval is keyed to the <b>resolved text + one host slot</b>, and each host gets a fresh ScriptContext.</p>
+
+<div class="cols">
+<div class="col">
+<p class="cap"><span class="bad">Before</span> &mdash; one modal per host, &ldquo;Run Same Command&rdquo; never sticks</p>
+<div class="stack"><div class="dlg">
+<div class="tbar">Local Command Confirmation <span>&#10005;</span></div>
+<div class="bdy">
+<p class="hdr">A script wants to run a local command: <span class="badge">prompt 1 of 200</span></p>
+<div class="cmd">ping -n 2 10.0.3.17</div>
+<p class="meta">Shell: cmd &nbsp;&middot;&nbsp; Directory: C:\Ops\scripts<br>Host: edge-fw-bos-01 (10.0.3.17)</p>
+<p class="scope">Run Same Command approves this resolved command for the current host for the rest of this run.</p>
+<div class="btns"><button class="btn pri">Run</button><button class="btn">Run Same Command</button><button class="btn">Cancel</button></div>
+</div>
+</div></div>
+<p class="note bad"><b>Next host resolves to ping -n 2 10.0.3.18 &rarr; new text, new context, new modal.</b> Same storm inside a foreach over {{item}}. Only escape: <b>confirm: never</b> in the YAML &mdash; guardrail gone permanently.</p>
+</div>
+
+<div class="col">
+<p class="cap"><span class="good">After</span> &mdash; approval scoped to the step template, this run only</p>
+<div class="dlg">
+<div class="tbar">Local Command Confirmation <span>&#10005;</span></div>
+<div class="bdy">
+<p class="hdr">A script wants to run a local command: <span class="badge amb">200 hosts in this run</span></p>
+<div class="cmd">Template:  ping -n 2 <span class="var">{{Host_IP}}</span>
+On this host:  ping -n 2 <span class="sub">10.0.3.17</span>  (edge-fw-bos-01)</div>
+<p class="meta">Shell: cmd &nbsp;&middot;&nbsp; Directory: C:\Ops\scripts &nbsp;&middot;&nbsp; Step: steps/2</p>
+<div class="opts">
+<span class="r"><span class="dot"></span>Run once <small>this exact resolved command only (re-prompts next host)</small></span>
+<span class="r"><span class="dot on"></span>Run for all hosts &mdash; this step, this run <small>approves the template for the remaining 199 hosts; expires when the run ends</small></span>
+</div>
+<div class="btns"><button class="btn pri">Run</button><button class="btn">Cancel</button></div>
+</div>
+</div>
+<p class="note good"><b>One approval, run proceeds unattended.</b> Keyed to StepPath/template in a run-level store injected into each per-host context &mdash; other localcmd steps still prompt, and confirm: never is no longer the only way out.</p>
+</div>
+</div>
+
+</body></html>

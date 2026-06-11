@@ -1,0 +1,7 @@
+[
+ {
+  "id": "UX-048",
+  "title": "Ctrl+S saves nothing outside the script editor — CSV grid has dirty tracking but no save shortcut",
+  "why": "The recommendation is already implemented. The Ctrl+S case in ProcessCmdKey (Form1.cs:14454-14461) breaks — it does not return true — so outside the script editor the keystroke falls to base.ProcessCmdKey, which dispatches the File menu shortcut: saveToolStripMenuItem has ShortcutKeys = Ctrl+S (Form1.Designer.cs:1511) and its handler (Form1.cs:5697-5700) calls SaveCurrentCsv(promptIfNoPath: true), which commits any in-progress grid cell edit, falls through to Save-As when no path exists, and shows a \"Saved: <file>\" status-bar confirmation (Form1.cs:9300). Ctrl+Shift+S → SaveCsvAs is also already bound (Form1.Designer.cs:1519). The only real behavior is the intentional override that Ctrl+S saves the preset instead when the script editor is focused; \"silently swallowed and does nothing\" with grid focus is factually wrong."
+ }
+]

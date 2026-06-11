@@ -1,0 +1,26 @@
+{
+ "id": "BUG-061",
+ "title": "Notifications tab: clicking Add silently discards all unsaved edits (including a just-typed password) on the currently selected profile",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-general",
+ "lens": "ux",
+ "existing_state": "BtnNotificationAdd_Click (SettingsDialog.cs:1424-1440) creates the new profile, suppresses selection events (_suppressNotificationProfileSelection = true at 1429), selects the new row, and overwrites _activeNotificationProfileIndex (1433) — without ever calling PersistCurrentNotificationProfile. Because the selection-change handler that normally flushes edits (1396-1401) is suppressed, everything the user typed into the previously selected profile (SMTP host/port/recipients, webhook URL, SMTP password, rename) is lost the moment they click Add. The vault tab's Add does this correctly — BtnVaultAdd_Click flushes first via PersistCurrentVaultProfile() (820).",
+ "recommendation": "Add `PersistCurrentNotificationProfile();` as the first line of BtnNotificationAdd_Click, mirroring BtnVaultAdd_Click at line 820. (Once the credential-staging fix in BUG-020 is implemented, this flush goes to the staged model instead of Credential Manager.)",
+ "user_benefit": "Users no longer lose a fully-configured SMTP/webhook profile by clicking Add before clicking away — a one-line fix for a silent input-loss path.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "1424-1440",
+   "note": "No persist call; selection events suppressed; active index overwritten"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "818-835",
+   "note": "Vault Add shows the correct pattern: PersistCurrentVaultProfile() first"
+  }
+ ]
+}

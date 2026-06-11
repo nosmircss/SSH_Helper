@@ -1,0 +1,41 @@
+{
+ "id": "BUG-074",
+ "title": "Flow Canvas undo/redo restores only nodes+edges — breakpoint/expanded Sets, the host's pending breakpoints, isDirty, and the persisted layout all desync",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-state",
+ "lens": "correctness",
+ "existing_state": "UndoSnapshot holds nodes and edges only (FlowCanvas/src/stores/slices/undoSlice.ts:7-12); undo/redo swap them wholesale and clear export status, nothing else (undoSlice.ts:46-98 — no Set state, no `sendLayoutAutosave`, and `isDirty` is neither set nor restored). Three resulting desyncs from the one incomplete restore: (1) Phantom debugger state — toggleBreakpoint writes the breakpoints Set + node data.breakpoint + notifies the host (debugSlice.ts:41-56), and toggleExpanded writes the expandedNodes Set + data.expanded (debugSlice.ts:78-91). Make any snapshotted edit, toggle a breakpoint on, then Ctrl+Z: node data reverts (the gutter dot disappears — BaseBlock.tsx:149 renders from data.breakpoint) but the Set AND the host's _pendingBreakpoints still hold the id, so the next run pauses at a block with no visible breakpoint; the mirror case leaves a dot the executor ignores. The expandedNodes desync recreates the render-expanded vs layout-collapsed mismatch class that previously caused block overlap on preset switches. (2) Stale persisted layout — the host's saved layout is only updated by explicit autosave triggers (drag stop App.tsx:176-179, comment edits, expand/disable toggles, settings commits — utils/layoutAutosave.ts:14-23), so after drag + Ctrl+Z the canvas shows the restored arrangement while the host still holds the pre-undo positions; in Manual layout mode the next open merges the stale positions back via the tuple merge (Services/FlowCanvasBridge.cs:5403-5441), silently resurrecting the exact arrangement the user undid (same for undone comment moves/additions). (3) Undoing all changes back to the loaded state still reports the graph dirty.",
+ "recommendation": "After every undo/redo in undoSlice.ts: rebuild the three Sets (breakpoints/expandedNodes/disabledBlocks) from the restored node data (data.breakpoint/expanded/disabled carry the truth — one source of truth, ~30 lines) and send the host the breakpoint delta so _pendingBreakpoints stays in sync; call the debounced `sendLayoutAutosave()` so the host's persisted layout always reflects the visible graph; and track the snapshot index at load time to clear `isDirty` when undo returns to the loaded state. (Alternative: include the Sets in UndoSnapshot and diff/replay on restore — more state, same outcome.)",
+ "user_benefit": "Undo stops creating phantom debugger state (runs pausing at blocks with no breakpoint mark), Manual-mode users' undone layout experiments stop silently resurrecting on the next open, and the dirty flag stops lying after a full undo.",
+ "mockup_idea": "",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\undoSlice.ts",
+   "lines": "7-12, 46-98",
+   "note": "snapshots restore nodes/edges only; no Set state, no host re-notification, no autosave, no isDirty handling"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\debugSlice.ts",
+   "lines": "41-56, 78-91",
+   "note": "breakpoint/expanded live in Set + node.data + (for breakpoints) host pending set — three copies, only one undone"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\nodes\\BaseBlock.tsx",
+   "lines": "149",
+   "note": "visual reads data.breakpoint — desynced Set entries are invisible"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\layoutAutosave.ts",
+   "lines": "14-23",
+   "note": "autosave only fires from explicit edit triggers — never from undo/redo"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "5403-5441",
+   "note": "Manual-mode reopen merges the stale saved positions back onto the graph"
+  }
+ ]
+}

@@ -1,0 +1,36 @@
+{
+ "id": "SEC-016",
+ "title": "Password and token block properties render in cleartext in the Flow Canvas Properties panel and are matchable via canvas search",
+ "category": "SEC",
+ "severity": "low",
+ "effort": "S",
+ "area": "flowcanvas-ui",
+ "lens": "bugs",
+ "existing_state": "Block schemas define secret-bearing props as plain text: sftp 'password' Override (FlowCanvas/src/blockDefs/registry.ts:119) and http 'password'/'token' (registry.ts:368-369). PropertyField renders all text-type props as <input type=\"text\"> (FlowCanvas/src/panels/Properties.tsx:782-798), so selecting one of these blocks shows the credential in cleartext in the right rail. The app already treats these keys as secrets elsewhere — the on-canvas block summary masks exactly 'password' and 'token' with bullets (FlowCanvas/src/utils/blockSummary.ts:10, 64-70) — creating a false sense that secrets are hidden. Additionally, Ctrl+F search matches against JSON.stringify(props) (FlowCanvas/src/stores/slices/uiSlice.ts:226-243), so secret VALUES are part of the search haystack (a query matching part of a password highlights the block).",
+ "recommendation": "In PropertyField, render props whose key is in the shared SECRET_KEYS set (import it from blockSummary.ts so the two stay aligned) as type=\"password\" with a small eye/reveal toggle; in uiSlice.setSearchQuery, build the props haystack from non-secret keys only (or keys-plus-non-secret-values).",
+ "user_benefit": "Credentials stop being displayed on screen during screen shares or over-the-shoulder viewing whenever a block is selected, matching the masking the canvas card already promises.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\blockDefs\\registry.ts",
+   "lines": "119, 368-369",
+   "note": "password/token props declared type 'text'"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\Properties.tsx",
+   "lines": "782-798",
+   "note": "Text case renders a plain type=\"text\" input — no password masking"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\blockSummary.ts",
+   "lines": "10, 64-70",
+   "note": "Same keys are bullet-masked on the canvas card — masking intent already established"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\uiSlice.ts",
+   "lines": "226-243",
+   "note": "Search haystack includes JSON.stringify(props) — secret values are searchable"
+  }
+ ],
+ "mockup_idea": "Side-by-side of the http block's Properties panel: before — Password field showing 'hunter2' in a plain input; after — bullets with an eye-icon reveal toggle, matching the bullet masking already shown on the collapsed block card next to it.",
+ "merged_from": 1
+}

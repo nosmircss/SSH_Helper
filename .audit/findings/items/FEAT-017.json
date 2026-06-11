@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-017",
+ "title": "http command cannot download or upload files (string-only body and response)",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-a",
+ "lens": "ux",
+ "existing_state": "The http command's request body is `StringContent(body, Encoding.UTF8)` from a substituted string (Services/Scripting/Commands/HttpCommand.cs:89, 130-137), and the response is always read with `ReadAsStringAsync` into the `into` variable (HttpCommand.cs:156, 162-169). The allowed-key table (Services/Scripting/ScriptParser.cs:128) has no save-to-file, upload-file, or proxy key. So a script cannot fetch a firmware image, config archive, certificate bundle, or vendor-API binary artifact to disk (the bytes get mangled through string decoding into a variable), nor POST a file as multipart or raw body. The neighboring sftp command covers SSH transfers only — HTTP(S) downloads, which are common in network-device workflows (vendor portals, controller REST APIs), have no path to disk.",
+ "recommendation": "Add `save_to: <path>` to HttpOptions (Models/ScriptStep.cs http options block): when set, stream `response.Content` to the file (gated through ScriptFileAccessValidator like WriteFileCommand) and capture `into_file`/`into_bytes` instead of decoding the body to a string; skip the response-body debug echo in that mode. Add `body_file: <path>` (raw file body with content_type) and optionally multipart upload. Register the new keys in ScriptParser.cs:128 and the http option parser so validation/autocomplete work, and mirror the fields in the Flow Canvas http block definition per Development Guideline 8.",
+ "user_benefit": "Closes a real gap for fleet workflows — pull a config backup or OS image from a controller's REST API and push it to devices in one script, instead of shelling out to curl via localcmd (which today also triggers confirmation prompts).",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\HttpCommand.cs",
+   "lines": "89, 130-137",
+   "note": "body is substituted string -> StringContent only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\HttpCommand.cs",
+   "lines": "156, 162-169",
+   "note": "response always ReadAsStringAsync into a variable; no file sink"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs",
+   "lines": "128",
+   "note": "http key whitelist has no save_to/body_file/proxy"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

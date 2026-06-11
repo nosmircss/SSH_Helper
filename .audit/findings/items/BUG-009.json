@@ -1,0 +1,26 @@
+{
+ "id": "BUG-009",
+ "title": "A failed inline vault read silently substitutes an empty string, sending blank credentials to hosts",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "security",
+ "existing_state": "ResolveVaultExpression catches a failed secret read and returns `string.Empty` after only setting `_last_error` (ScriptContext.cs:751-755); the missing-configuration and missing-`#` paths do the same (ScriptContext.cs:709-713, 720-724, 740-744). Because this happens inside string interpolation (SubstituteVariables, ScriptContext.cs:769/777), there is no channel to fail the step — the surrounding `send`/`print`/`set` proceeds with the secret silently collapsed to empty. So if Vault is unreachable, the token/key is wrong, or auth lapsed, `send: \"login -u admin -p{{vault:db#password}}\"` transmits `login -u admin -p` with no password to every host. On network gear and SSH logins this can trigger lockouts or auth-failure storms across the fleet, and the only signal is `_last_error` which most scripts never check.",
+ "recommendation": "Give inline vault failures a hard-fail path: have ResolveVaultExpression throw a dedicated exception on read/config failure and let the consuming command (send/print/set) convert it into a CommandResult.Fail so the step stops instead of sending an empty secret. At minimum, log the failure through EmitOutput at Error level rather than only writing the silent `_last_error` variable.",
+ "user_benefit": "A transient Vault outage or a bad secret path fails the step loudly instead of quietly logging in with a blank password across every host, preventing account lockouts and confusing partial runs.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+   "lines": "707-756",
+   "note": "all failure branches return empty string, only set _last_error"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+   "lines": "758-786",
+   "note": "substitution has no failure channel; empty value flows into command text"
+  }
+ ]
+}

@@ -1,0 +1,31 @@
+{
+ "id": "SEC-008",
+ "title": "SshConfigParser ignores OpenSSH negated host patterns — settings the user excluded from specific hosts get applied to them anyway",
+ "category": "SEC",
+ "severity": "high",
+ "effort": "S",
+ "area": "ui-utilities",
+ "lens": "bugs",
+ "existing_state": "MatchesHost returns true if ANY pattern matches (Utilities/SshConfigParser.cs:177-185), and MatchesPattern regex-escapes the pattern verbatim (:190-212), so an OpenSSH negation like 'Host * !prod.example.com' is treated as two literals: '*' matches everything (including prod) and '!prod.example.com' simply never matches. OpenSSH semantics are the opposite — a matching negated pattern excludes the host from the entire block. The result: User, Port, IdentityFile, HostKeyAlgorithms, and Ciphers from a block the user deliberately scoped away from a host are silently applied to that host via SshConfigService.GetConfigForHost (Services/SshConfigService.cs:82), which feeds connection settings. Concrete hazard: a common pattern like 'Host * !bastion' with weakened Ciphers/HostKeyAlgorithms for legacy gear gets those weak algorithms applied to the bastion too. Compounding it, Parse swallows every I/O and parse exception and returns an empty config (SshConfigParser.cs:32-41), so a locked or malformed ~/.ssh/config is silently ignored rather than reported.",
+ "recommendation": "In GetConfigForHost/MatchesHost, implement OpenSSH negation: for each Host block, first check negated patterns (leading '!', stripped before wildcard matching) — if any negated pattern matches the hostname, the block does not apply at all; otherwise require at least one positive pattern match. Add a unit test mirroring 'Host * !x' from ssh_config(5). For the silent catch in Parse(string), surface the failure (e.g., a ParseError property on SshConfigFile that the settings UI can show) instead of returning an indistinguishable empty config.",
+ "user_benefit": "Honors the user's explicit security exclusions in ~/.ssh/config — no more weak ciphers, wrong identities, or wrong usernames silently applied to hosts the user carved out of a wildcard block.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\SshConfigParser.cs",
+   "lines": "177-212",
+   "note": "Any-pattern-matches semantics; '!' patterns regex-escaped as literals, never excluding anything"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\SshConfigParser.cs",
+   "lines": "32-41",
+   "note": "Bare catch returns empty config — user's ssh config silently ignored on any read/parse error"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConfigService.cs",
+   "lines": "82",
+   "note": "GetConfigForHost feeds per-host connection settings (User/Port/IdentityFile/Ciphers/HostKeyAlgorithms)"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

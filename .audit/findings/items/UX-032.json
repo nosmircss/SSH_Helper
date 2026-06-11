@@ -1,0 +1,31 @@
+{
+ "id": "UX-032",
+ "title": "Choose prompt dialog has no search/filter and a fixed 10-row, non-resizable list",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-a",
+ "lens": "ux",
+ "existing_state": "The `choose` script command shows a plain ListBox capped at 10 visible rows (Services/Scripting/Commands/ChooseCommand.cs:112, visibleItems = Math.Min(options.Count, 10)) inside a FixedDialog form (ChooseCommand.cs:119) — no filter box, no type-ahead beyond the ListBox's default first-letter jump, no resizing. Options are frequently runtime data: options: accepts a variable reference or list resolved via ChoiceOptionResolver (ChooseCommand.cs:35-39), so scripts routinely feed it host lists, interfaces, VLANs, or extracted device output. Picking one entry out of 200 hosts means scrolling a 10-row viewport with a mouse.",
+ "recommendation": "Add a filter TextBox above the ListBox in ScriptChooseDialog (ChooseCommand.cs:97-225): live substring filtering of _options into the ListBox (keep a filtered-index map so SelectedValue still resolves to the right ChoiceOption), Enter in the filter accepts when one item remains, and keystrokes typed while the list has focus route into the filter. Make the form resizable (FormBorderStyle.Sizable with a sensible MinimumSize) and anchor the list. Apply the same pattern to the multiselect dialog, which shares ChoiceOptionResolver plumbing.",
+ "user_benefit": "Selecting from realistic option lists (hundreds of hosts/interfaces) becomes a two-keystroke operation instead of a scroll hunt — the standard set by every command palette and SecureCRT's session picker.",
+ "evidence": [
+  {
+   "file": "Services/Scripting/Commands/ChooseCommand.cs",
+   "lines": "112-119",
+   "note": "10-row cap and FixedDialog non-resizable form"
+  },
+  {
+   "file": "Services/Scripting/Commands/ChooseCommand.cs",
+   "lines": "135-147",
+   "note": "plain ListBox, no filter control anywhere in the dialog"
+  },
+  {
+   "file": "Services/Scripting/Commands/ChooseCommand.cs",
+   "lines": "35-39",
+   "note": "options resolve from runtime variables, so large lists are the expected case"
+  }
+ ],
+ "mockup_idea": "Before/after of the Script Choice dialog: left shows today's 10-row list with a scrollbar buried in 200 hostnames; right shows the same dialog with a 'Type to filter...' box on top, list filtered to 3 matches for 'edge-07', match substring highlighted, and a resize grip.",
+ "merged_from": 1
+}

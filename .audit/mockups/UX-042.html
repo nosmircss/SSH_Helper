@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX-042 — Export diagnostics calibration</title>
+<style>
+  body { margin: 12px; background: #0b0e13; color: #c9d4e3;
+         font: 11px/1.45 "Cascadia Code", Consolas, monospace; }
+  .cols { display: flex; gap: 14px; }
+  .col { flex: 1; min-width: 0; }
+  .cap { font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
+         color: #8294a8; margin: 0 0 6px; }
+  .cap b { color: #c9d4e3; }
+  .toolbar { display: flex; align-items: center; gap: 6px; background: #10151f;
+             border: 1px solid #1c2330; border-radius: 6px; padding: 5px 8px; }
+  .tbtn { background: #161d2a; border: 1px solid #1c2330; border-radius: 4px;
+          padding: 3px 7px; color: #8294a8; font-size: 10px; white-space: nowrap; }
+  .tbtn.on { color: #4cc9f0; border-color: #2a3a52; }
+  .badge { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 8px;
+           font-size: 9px; font-weight: 700; color: #0b0e13; }
+  .badge.amber { background: #ffb454; }
+  .panel { margin-top: 8px; background: #10151f; border: 1px solid #1c2330;
+           border-radius: 6px; overflow: hidden; }
+  .phead { padding: 4px 9px; border-bottom: 1px solid #1c2330; font-weight: 700;
+           font-size: 10px; }
+  .row { display: flex; gap: 6px; padding: 4px 8px; border-left: 3px solid #ffb454;
+         border-bottom: 1px solid #141a25; font-size: 10px; color: #8294a8; }
+  .row:last-child { border-bottom: 0; }
+  .row .ic { color: #ffb454; flex: none; }
+  .row.real { color: #c9d4e3; background: #161d2a; }
+  .row.info { border-left-color: #2a3a52; }
+  .row.info .ic { color: #4cc9f0; }
+  .note { font-size: 9px; color: #8294a8; margin: 5px 0 0; }
+  .note .a { color: #ffb454; } .note .g { color: #2bd97c; } .note .r { color: #ff5c5c; }
+  .toast { margin-top: 8px; display: flex; gap: 7px; align-items: center;
+           background: #1a1610; border: 1px solid #5c4420; border-radius: 6px;
+           padding: 5px 9px; font-size: 10px; color: #ffb454; }
+  .ghost { opacity: .45; text-decoration: line-through; }
+  .foot { margin-top: 12px; padding-top: 8px; border-top: 1px solid #1c2330;
+          font-size: 9.5px; color: #8294a8; }
+  .foot b { color: #c9d4e3; }
+</style>
+</head>
+<body>
+<div class="cols">
+
+  <div class="col">
+    <p class="cap"><b>Before</b> — Apply on unmodified imported preset (fw-upgrade.yaml)</p>
+    <div class="toolbar">
+      <span class="tbtn">✓ Apply</span>
+      <span class="tbtn">▶ Run</span>
+      <span class="tbtn">⚠ Problems</span>
+    </div>
+    <p class="note">No badge (errors only) · panel hidden by default → <span class="r">6 warnings, zero visibility</span></p>
+    <div class="panel">
+      <div class="phead">Problems (6)</div>
+      <div class="row"><span class="ic">⚠</span>Container block 'if' is exported from its stored YAML snippet.</div>
+      <div class="row"><span class="ic">⚠</span>Container block 'foreach' is exported from its stored YAML snippet.</div>
+      <div class="row real"><span class="ic">⚠</span>Parallel branch contains multiple sequential nodes; exporting the first node only.</div>
+      <div class="row"><span class="ic">⚠</span>Container block 'try' is exported from its stored YAML snippet.</div>
+      <div class="row"><span class="ic">⚠</span>Container block 'while' is exported from its stored YAML snippet.</div>
+      <div class="row"><span class="ic">⚠</span>Container block 'switch' is exported from its stored YAML snippet.</div>
+    </div>
+    <p class="note">5 rows describe the <i>intended</i> lossless export path. The one warning that <span class="a">silently drops steps</span> (set_var + send to 10.20.4.11) is buried at row 3.</p>
+  </div>
+
+  <div class="col">
+    <p class="cap"><b>After</b> — snippet notices demoted; badge counts warnings</p>
+    <div class="toolbar">
+      <span class="tbtn">✓ Apply</span>
+      <span class="tbtn">▶ Run</span>
+      <span class="tbtn on">⚠ Problems<span class="badge amber">1</span></span>
+    </div>
+    <div class="toast">⚠ <span>Exported YAML differs from canvas — 1 warning</span></div>
+    <p class="note">Toast (or auto-open) fires only when a warning <i>changes the emitted YAML</i>.</p>
+    <div class="panel">
+      <div class="phead">Problems (1)</div>
+      <div class="row real"><span class="ic">⚠</span>Parallel branch contains multiple sequential nodes; exporting the first node only.&nbsp;<span style="color:#4cc9f0">↗ parallel 'fan-out-upgrade'</span></div>
+      <div class="row info ghost"><span class="ic">ℹ</span>Container 'if' exported from stored snippet (5×) — dropped, or Info at most</div>
+    </div>
+    <p class="note"><span class="g">Click row → selects &amp; centers the parallel block</span>; user trims the branch chain before the run hits edge-fw-01 / edge-fw-02.</p>
+  </div>
+
+</div>
+<div class="foot">
+  <b>Rule:</b> amber means “the YAML you just exported differs from what the canvas shows” — never “business as usual”.
+  Changes: FlowCanvasBridge.cs:1331 (drop/demote snippet notice) · Toolbar.tsx:257 (warning badge) · effort S.
+</div>
+</body>
+</html>

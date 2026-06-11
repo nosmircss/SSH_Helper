@@ -1,0 +1,31 @@
+{
+ "id": "UX-027",
+ "title": "Validate Script (Ctrl+Shift+V) silently does nothing for plain command lists and folder selections",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "editor",
+ "lens": "ux",
+ "existing_state": "validateScriptToolStripMenuItem_Click returns silently when a folder is selected (Form1.cs:5777-5778) and when the editor content isn't detected as a YAML script (Form1.cs:5782-5783). The command is exposed in two always-enabled places — the Edit menu with the global Ctrl+Shift+V shortcut (Form1.Designer.cs:1604-1610) and the editor context menu (ctxValidateScript, Form1.Designer.cs:849, 911-916) — and neither is ever disabled or annotated. So a user with a plain command-list preset presses Validate and gets absolutely no response: no dialog, no output line, no status flash. Because the YAML path pops a success MessageBox with rich feedback (Form1.cs:5793-5812), 'no error appeared' is easy to misread as 'my preset validated clean' when in fact nothing ran. Inline validation has the same silent posture for non-YAML (diagnostics just cleared, UI/ScintillaScriptEditorControl.cs:2247-2257), so no channel ever tells the user their content isn't being checked.",
+ "recommendation": "Make the no-op states explicit: for non-YAML content show a lightweight info response ('This preset is a plain command list — YAML validation does not apply. Scripts must start with steps:/vars: to be validated.'); for folder selection either validate every YAML preset in the folder (genuinely useful before a folder run) or disable the menu items in the context-menu Opening / DropDownOpening handlers with a tooltip ('Select a preset to validate'). One MessageBox/output-append per branch in validateScriptToolStripMenuItem_Click is enough.",
+ "user_benefit": "Removes a trust trap: users learn immediately whether their script was actually checked instead of inferring success from silence, and the folder-validation variant would let operators sanity-check an entire folder before a multi-preset run.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "5775-5783",
+   "note": "Two silent early returns: folder selected, or content not YAML"
+  },
+  {
+   "file": "Form1.Designer.cs",
+   "lines": "1604-1610",
+   "note": "Ctrl+Shift+V global shortcut on a handler that can silently no-op; item never disabled"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "5793-5812",
+   "note": "YAML path gives rich feedback (success dialog, warnings/errors in output) — silence reads as success"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

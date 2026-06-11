@@ -1,0 +1,41 @@
+{
+ "id": "PERF-005",
+ "title": "Every run completion rewrites the entire config twice on the UI thread: grid state serialized twice, Credential Manager written three times per password row, double GZip+JSON to disk",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "form1-b",
+ "lens": "perf",
+ "existing_state": "Both execution-history writers marshal to the UI thread and run the entire persistence pipeline inside Invoke() at every run completion: Form1.cs:13005-13017 (folder runs) and 14236-14248 (single runs) call _historyStorage.SaveRun — which serializes the full run payload (all host outputs + ExecutionDetails transcripts) to a string and writes it (HistoryStorageService.cs:459-475) — then call SaveConfiguration(). SaveConfiguration (Form1.cs:14625-14702) performs TWO complete config saves back-to-back: (1) SaveCurrentGridToEnvironment (14632), which itself calls BuildApplicationState() (Form1.cs:2232) and flows through EnvironmentService.SaveCurrentGridToEnvironment (EnvironmentService.cs:114-149), deep-cloning every environment twice before ConfigurationService.Save; then (2) the _configService.Update block at 14635-14688 rebuilds the full ApplicationState a second time (14681) and saves again — so the full host grid is walked and serialized twice per save. Each BuildApplicationState pass performs a Credential Manager CredWrite for every row with a password (Form1.cs:14731-14734), and MigratePasswordsToCredentialManager (14692) walks the grid a third time repeating the CredWrites (1501-1523). Each ConfigurationService.Save (108-151) copies a .bak, GZip-compresses the entire ApplicationState, serializes the whole config — including every environment's full host table — as indented JSON, and writes it synchronously. The same double-write also fires per update_environment script command, marshalled to the UI thread mid-run (Form1.cs:14166-14188 -> EnvironmentService.UpdateActiveEnvironmentVariable:272-299 -> full Save). Net per run ending: 1 payload write + 2 .bak copies + 2 GZip passes + 2 full-config serializations + 2 file writes + ~3 CredWrites per password row, all blocking the UI — a visible multi-second stall on large fleets.",
+ "recommendation": "Make SaveConfiguration produce exactly one Save: build the ApplicationState once and fold the grid-to-environment snapshot into the same Update(...) callback (change SaveCurrentGridToEnvironment to accept a prebuilt state) instead of letting it save independently first. At run completion persist only what changed — the history index is already persisted by _historyStorage.SaveRun on the line above, so most of SaveConfiguration is redundant there; keep the full save for exit, settings changes, and explicit saves. Make credential persistence a single explicit pass instead of a side effect of BuildApplicationState plus a separate migration sweep. Move the serialize+GZip+write of both ConfigurationService.Save and HistoryStorageService.SaveRun off the UI thread (snapshot on the UI thread, write on a single-writer background queue). For update_environment, batch/debounce variable writes during script execution and flush once at run end.",
+ "user_benefit": "Removes the end-of-run UI stall that grows with grid size, environment count, and output volume, halves the disk IO spent per run, and stops hammering the Windows Credential Manager with hundreds of duplicate writes per run.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "13005-13017, 14236-14248",
+   "note": "SaveRun + SaveConfiguration invoked inside Invoke() at every run completion (both history-store paths)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "14625-14702",
+   "note": "SaveConfiguration: SaveCurrentGridToEnvironment (full save #1) + second BuildApplicationState at 14681 inside Update (full save #2) + MigratePasswordsToCredentialManager (14692)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "2230-2240, 14718-14754, 1501-1523",
+   "note": "SaveCurrentGridToEnvironment calls BuildApplicationState; CredWrite per password row inside BuildApplicationState, repeated by the migration pass"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+   "lines": "108-151",
+   "note": "Save(): .bak copy + GZip of full ApplicationState + indented full-config serialize + synchronous File.WriteAllText, per save"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/EnvironmentService.cs",
+   "lines": "114-149, 272-299",
+   "note": "SaveCurrentGridToEnvironment and UpdateActiveEnvironmentVariable each end in SaveEnvironmentState -> full Save; the latter fires per update_environment command mid-run"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

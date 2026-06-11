@@ -1,0 +1,36 @@
+{
+ "id": "UX-005",
+ "title": "Environment Manager: Cancel button doesn't cancel — every edit and destructive action persists to disk immediately",
+ "category": "UX",
+ "severity": "high",
+ "effort": "M",
+ "area": "dialogs-general",
+ "lens": "ux",
+ "existing_state": "EnvironmentDialog presents classic Save/Cancel semantics (_btnSave/_btnCancel with DialogResult.OK/Cancel, EnvironmentDialog.cs:249-250, AcceptButton/CancelButton at 264-265), but nothing is actually staged. Every list selection change calls PersistCurrentEnvironmentDetails() (EnvironmentDialog.cs:403-414), which writes description, label color, variables, and vault-profile binding straight through EnvironmentService.UpdateEnvironmentDetails to config on disk (802-823) — and silently swallows any write failure (819-822). New/Duplicate/Rename/Delete/Import all execute immediately through the service (427, 449, 471, 499, 595). BtnSave_Click's only real effect is setting SelectedEnvironmentName so Form1 switches environments (639-643). A user who deletes an environment, fat-fingers a variable value, or imports over an existing environment and then clicks Cancel has still permanently committed all of it — the opposite of what the button promises.",
+ "recommendation": "Pick one model and make the UI honest about it. Option A (preferred): stage edits in an in-memory working set (clone the environment list on open; route New/Duplicate/Rename/Delete/Import and detail edits against the clone) and commit everything in one EnvironmentService transaction on Save — mirroring how SettingsDialog batches its ~80 settings into a single _configService.Update (SettingsDialog.cs:2663). Option B (cheap): keep immediate-apply but remove the false affordance — rename Save to 'Switch & Close' and Cancel to 'Close', and add a small caption ('Changes are saved as you go').",
+ "user_benefit": "Users can experiment safely in the environment manager and trust Cancel to mean cancel — today a misclick on Delete or a bad import is unrecoverable even after cancelling the dialog.",
+ "evidence": [
+  {
+   "file": "EnvironmentDialog.cs",
+   "lines": "249-265",
+   "note": "Save/Cancel buttons with DialogResult semantics implying a staged transaction"
+  },
+  {
+   "file": "EnvironmentDialog.cs",
+   "lines": "403-414, 802-823",
+   "note": "Selection change persists details to disk via EnvironmentService; exceptions swallowed"
+  },
+  {
+   "file": "EnvironmentDialog.cs",
+   "lines": "416-507, 547-602, 639-643",
+   "note": "New/Rename/Delete/Import act immediately; Save only sets SelectedEnvironmentName"
+  },
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "2657-2663",
+   "note": "In-house precedent: SettingsDialog stages everything into one Update on Save"
+  }
+ ],
+ "mockup_idea": "EnvironmentDialog footer before (Save/Cancel) and after (single Close + 'changes apply immediately' hint, with 'Switch to selected' as the primary action) — or the transactional variant keeping Save/Cancel but with a pending-changes indicator.",
+ "merged_from": 2
+}

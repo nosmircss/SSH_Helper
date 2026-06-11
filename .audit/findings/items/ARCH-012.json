@@ -1,0 +1,26 @@
+{
+ "id": "ARCH-012",
+ "title": "Release pipeline has zero test gates: dotnet test and the vitest suite never run, and push/PR CI is disabled",
+ "category": "ARCH",
+ "severity": "high",
+ "effort": "S",
+ "area": "models-samples-build",
+ "lens": "perf",
+ "existing_state": "The only workflow is build-release.yml, triggered solely by `v*` tags and manual dispatch — the `branches: [\"master\"]` push trigger and the entire pull_request trigger are commented out (build-release.yml:5, 8-9). No workflow anywhere runs `dotnet test`, so the whole SSH_Helper.Tests xUnit suite (including the ScriptSamples validation suite and the FlowCanvasBridge parity tests that the project leans on heavily) never executes in CI. The FlowCanvas vitest unit suite (`npm test`) also never runs. The single gate that does exist is the heaviest, most environment-sensitive layer: the full Playwright e2e suite (line 43) chained via `needs: flowcanvas-browser-tests` (line 56) in front of the release build — meaning known-flaky e2e specs can block a tagged release while fast deterministic regressions sail onto master completely unchecked.",
+ "recommendation": "Add a CI job (or separate ci.yml) that runs on push/PR to master: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj -p:SkipFlowCanvasBuild=true` (windows runner) and `npm test` in FlowCanvas/ (ubuntu runner) — both are minutes, not the e2e half-hour. In build-release.yml, make the release `build` job `need` these fast suites; keep the full Playwright run as a parallel signal or a tag-only gate depending on its current stability. Re-enable the commented push/PR triggers.",
+ "user_benefit": "Regressions get caught at commit time instead of at release-tag time (or in users' hands). Right now the most valuable test assets in the repo are invisible to the pipeline that ships binaries.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/.github/workflows/build-release.yml",
+   "lines": "3-10",
+   "note": "push branches and pull_request triggers commented out; tags + dispatch only"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/.github/workflows/build-release.yml",
+   "lines": "41-43, 55-56",
+   "note": "only test step is the full Playwright e2e; release build gated on it via needs; no dotnet test or vitest anywhere in the file"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

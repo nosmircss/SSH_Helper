@@ -1,0 +1,31 @@
+{
+ "id": "ENH-046",
+ "title": "23 of 43 script commands have zero sample coverage — the newest, most differentiating features are the least demonstrated",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "samples-docs",
+ "lens": "cross",
+ "existing_state": "A per-command grep of every ScriptSamples/**/*.yaml shows repeat, try, break, exists, playsound, updateenvironment, ping, dns, portcheck, sftp, parse, choose, multiselect, confirm, interactive, switch, parallel, localcmd, vault, sethistorylabel and notify each appear in 0 files; assert and browser_callback_capture appear only inside the JSON preset bundle (browser_callback_self_contained_presets.json), not as YAML. That is 23 of the 43 commands (ScriptStep.cs:1400-1446) with no example — including the entire interactive-prompt family, all four network probes, three of the eight container commands, and the headline integrations (vault, notify, localcmd). The well-covered commands are the oldest ones (print 122 uses, set 115, send 92). Yet the samples are the app's de-facto cookbook (ScriptSamples/README.md:160-176 frames generic/ as 'Command Reference') and double as CI regression fixtures since every sample is parsed and strictly validated (CanonicalCommandMapSyntaxTests.cs:218-245) — so the features most likely to sell the tool over plain scripts (error handling, fan-out, operator prompts, Vault-sourced secrets, notifications, network probes) are exactly the ones a user cannot see working anywhere.",
+ "recommendation": "Add ~8 new generic/ samples, each a realistic scenario themed around a command family, written in the canonical map syntax the test suite enforces: (1) interactive prompts (choose/multiselect/confirm/input gating a destructive step), (2) network triage (ping/dns/portcheck + table), (3) resilient runs (try/switch/repeat/break/assert around a risky change), (4) parallel fan-out, (5) sftp backup pull, (6) vault secret read + send, (7) notify on failure (pairs with try), (8) localcmd + parse. Add each to the ScriptSamples README table. Each lands automatically inside the existing canonical-syntax CI net, so every new sample is also a free parser regression test.",
+ "user_benefit": "Examples are how operators actually learn a scripting DSL; right now the differentiating half of the engine (prompts, probes, vault, notify, parallel) has no worked example anywhere, so users stick to send/print and never find the features that justify the tool — and each new sample simultaneously hardens the parser test suite.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples",
+   "lines": "all sample YAML files",
+   "note": "per-command grep: 23 of 43 commands at zero occurrences (verified individually)"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.Tests\\Scripting\\CanonicalCommandMapSyntaxTests.cs",
+   "lines": "218-245",
+   "note": "every sample is parsed + strictly validated in CI, so new samples are free regression tests"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples\\README.md",
+   "lines": "160-176",
+   "note": "generic/ is explicitly positioned as the command reference"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

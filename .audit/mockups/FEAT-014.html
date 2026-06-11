@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap b{color:#ff5c5c;font-weight:600}.cap.g b{color:#2bd97c}
+.win{border:1px solid #1c2330;border-radius:6px;background:#0d1117;margin-bottom:16px;overflow:hidden}
+.tbar{display:flex;align-items:center;gap:8px;background:#121826;border-bottom:1px solid #1c2330;padding:5px 10px;font-size:11px;color:#8294a8}
+.ico{width:13px;height:13px;border-radius:3px;background:#4cc9f0;display:inline-block;flex:none}
+.dots{margin-left:auto;letter-spacing:3px;color:#5a6a7e}
+.term{position:relative;padding:8px 12px;font-size:11px;line-height:1.55;color:#9fb0c3;white-space:pre}
+.p{color:#2bd97c}.err{color:#ff5c5c}
+.menu{position:absolute;background:#161d2b;border:1px solid #2a3447;border-radius:4px;box-shadow:0 8px 24px #000a;padding:4px 0;font-size:11px;z-index:3;min-width:185px;white-space:normal}
+.menu div{padding:3px 14px;color:#c9d4e3}.menu .dim{color:#5a6a7e}
+.menu hr{border:0;border-top:1px solid #2a3447;margin:3px 0}
+.menu .hov{background:#1d2942}
+.note{position:absolute;font-size:10px;color:#ffb454;max-width:200px;line-height:1.4;z-index:4;white-space:normal}
+.note:before{content:"\2190 ";color:#ffb454}
+.findbar{position:absolute;top:6px;right:8px;display:flex;align-items:center;gap:6px;background:#161d2b;border:1px solid #4cc9f0;border-radius:4px;padding:4px 8px;font-size:11px;box-shadow:0 4px 14px #000a;z-index:3}
+.findbar input{background:#0b0e13;border:1px solid #2a3447;border-radius:3px;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace;width:90px;padding:1px 5px}
+.findbar .cnt{color:#8294a8}.findbar .btn{color:#8294a8;cursor:default;padding:0 2px}
+.findbar .btn.on{color:#4cc9f0}
+.hl{background:#3d3216;color:#ffb454;border-radius:2px}
+.hl.cur{background:#ffb454;color:#0b0e13;outline:1px solid #ffb454}
+.kbd{border:1px solid #2a3447;border-radius:3px;background:#161d2b;padding:0 4px;font-size:10px;color:#8294a8}
+.foot{font-size:10px;color:#8294a8;margin-top:-8px;margin-bottom:14px}
+</style></head><body>
+
+<p class="cap">Before — no search; buffer actions only via the invisible system menu (<b>Alt+Space</b> / window icon)</p>
+<div class="win">
+ <div class="tbar"><span class="ico"></span>edge-sw-04 (10.20.4.11) — Interactive Terminal<span class="dots">— □ ×</span></div>
+ <div class="term" style="height:138px">edge-sw-04# show logging | last 10000
+%LINEPROTO-5-UPDOWN: Line protocol on Gi1/0/7, changed state to up
+%SYS-5-CONFIG_I: Configured from console by admin (10.20.0.5)
+%LINK-3-UPDOWN: Interface Gi1/0/12, changed state to down
+%PM-4-ERR_DISABLE: psecure-violation <span class="err">error</span> detected on Gi1/0/12
+%LINEPROTO-5-UPDOWN: Line protocol on Gi1/0/12, changed state to down
+  ... 9,800 more lines ...
+<span class="p">edge-sw-04#</span> █
+  <div class="menu" style="top:2px;left:8px">
+   <div class="dim">Restore</div><div class="dim">Close&nbsp;&nbsp;&nbsp;&nbsp;Alt+F4</div>
+   <hr><div>Copy All to Clipboard</div><div>Clear Scrollback</div><div>Reset Terminal</div>
+  </div>
+  <div class="note" style="top:74px;left:204px">the only way to reach these — no right-click, no toolbar</div>
+ </div>
+</div>
+<p class="foot">Finding one error in 10,000 lines = scroll manually, or Copy All &rarr; paste into Notepad &rarr; Ctrl+F there.</p>
+
+<p class="cap g">After — <b>Ctrl+F</b> find bar over the viewport + a normal right-click menu (with Save Buffer As&hellip;)</p>
+<div class="win">
+ <div class="tbar"><span class="ico"></span>edge-sw-04 (10.20.4.11) — Interactive Terminal<span class="dots">— □ ×</span></div>
+ <div class="term" style="height:170px">
+  <div class="findbar"><input value="error"><span class="cnt">3/17</span><span class="btn on">&#9650;</span><span class="btn on">&#9660;</span><span class="btn">Aa</span><span class="btn">&#10005;</span></div>edge-sw-04# show logging | last 10000
+%LINEPROTO-5-UPDOWN: Line protocol on Gi1/0/7, changed state to up
+%PM-4-ERR_DISABLE: psecure-violation <span class="hl">error</span> detected on Gi1/0/12
+%PLATFORM-3-ELEMENT: rx <span class="hl">error</span> threshold on Gi1/0/12 (CRC)
+%PM-4-ERR_DISABLE: psecure-violation <span class="hl cur">error</span> detected on Gi1/0/12
+%LINEPROTO-5-UPDOWN: Line protocol on Gi1/0/12, changed state to down
+<span class="p">edge-sw-04#</span> █
+  <div class="menu" style="top:40px;left:330px">
+   <div>Paste</div><hr>
+   <div class="hov">Copy All to Clipboard</div>
+   <div>Save Buffer As&hellip;</div><hr>
+   <div>Clear Scrollback</div>
+   <div>Reset Terminal</div>
+  </div>
+ </div>
+</div>
+<p class="foot"><span class="kbd">Ctrl+F</span> searches the full Rebex scrollback (same data path Copy All uses) &middot; <span class="kbd">Enter</span>/<span class="kbd">Shift+Enter</span> next/prev &middot; <span class="kbd">Esc</span> dismisses. Right-click makes Paste + buffer actions discoverable and adds export to file.</p>
+
+</body></html>

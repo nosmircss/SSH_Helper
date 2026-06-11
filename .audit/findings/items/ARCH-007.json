@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-007",
+ "title": "Vault and Notification profile managers are copy-paste twins that have already drifted into live defects",
+ "category": "ARCH",
+ "severity": "high",
+ "effort": "M",
+ "area": "dialogs-general",
+ "lens": "perf",
+ "existing_state": "SettingsDialog.cs contains two parallel hand-rolled implementations of the same list+detail+credential-store profile manager (Vault ~lines 742-1178, Notifications ~1342-1693), and they have diverged in ways that are each a defect: (1) Rename — notifications migrate Credential Manager secrets old->new then delete the old target (1557-1564, MigrateNotificationCredential 1584-1593); Vault rename (997-1005) just relabels the list and re-saves secrets under the new name (1011-1017), permanently orphaning live ssh_helper:vault:<oldname>:* secrets in Windows Credential Manager. (2) Enum mapping — Vault uses raw (VaultKvVersion)/(VaultAuthMethod) SelectedIndex casts (981-982) while notifications use explicit switches (1374-1394) that omit NotificationChannelKind.Toast = 3 (Models/NotificationSettings.cs:95): a Toast-kind profile loads as Slack and 'profile.Kind = GetSelectedNotificationKind()' (1548) silently rewrites it to Slack on the next selection change. (3) Add — BtnVaultAdd_Click flushes pending edits first (820); BtnNotificationAdd_Click (1424-1440) does not and suppresses the selection-change persist (1429-1432), silently dropping unsaved edits to the previously selected notification profile. (4) Default profile — Vault uncheck is a no-op (early return at 808) while notifications support clearing (1418-1421). (5) Both generate names as profile-{Count+1} (821, 1426), which collides after a deletion, and colliding names silently share one Credential Manager target.",
+ "recommendation": "Extract one shared profile-manager helper (generic over the profile DTO) that owns: list wiring with suppression flags, flush-before-navigation/Add/Remove, rename credential migration, unique name generation (scan existing names instead of Count+1), and explicit bidirectional enum<->index maps. Make both tabs thin adapters over it. While extracting, fix the three live defects: add Vault rename migration mirroring MigrateNotificationCredential, add the Toast=3 arm (or guard unknown kinds from being persisted), and flush pending edits in BtnNotificationAdd_Click.",
+ "user_benefit": "Stops the slow corruption this duplication is already causing — orphaned secrets accumulating in Credential Manager after renames, notification profiles silently changing kind, and edits vanishing on Add — and makes the next profile-type tab (or field) a one-place change.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "970-1018, 1020-1027",
+   "note": "Vault persist: raw enum-index casts (981-982), rename without credential migration (997-1017)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "1539-1593",
+   "note": "Notification persist: rename DOES migrate credentials — the drifted twin"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "1374-1394, 1548",
+   "note": "Kind mapping omits Toast=3; persisted back as Slack on next selection change"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/NotificationSettings.cs",
+   "lines": "83-95",
+   "note": "NotificationChannelKind defines Toast = 3"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "818-835, 1424-1440",
+   "note": "Vault Add flushes pending edits (820); Notification Add does not and suppresses the persist"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FEAT-013 — Named steps</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .cols{display:flex;gap:14px}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:0 0 6px 2px}
+  .cap b{font-weight:600}
+  .before .cap b{color:#ff5c5c}.after .cap b{color:#2bd97c}
+  .panel{border:1px solid #1c2330;border-radius:6px;background:#0e1219;margin-bottom:10px;overflow:hidden}
+  .ph{padding:3px 8px;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#8294a8;background:#11161f;border-bottom:1px solid #1c2330}
+  .pb{padding:7px 9px;line-height:1.65;white-space:pre;overflow-x:auto}
+  .host{color:#8294a8}
+  .ok{color:#2bd97c}.fail{color:#ff5c5c}.dur{color:#8294a8}
+  .anon{color:#8294a8}
+  .named{color:#c9d4e3;font-weight:600}
+  .k{color:#4cc9f0}.s{color:#ffb454}.nk{color:#2bd97c;font-weight:600}
+  /* canvas block */
+  .blk{width:218px;margin:4px auto 8px;border:1px solid rgba(76,201,240,.45);border-radius:8px;
+       background:linear-gradient(180deg,#101a26,#0d141d);box-shadow:0 0 10px rgba(76,201,240,.12)}
+  .blk .hd{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid #1c2330}
+  .badge{width:16px;height:16px;border-radius:4px;background:rgba(76,201,240,.18);color:#4cc9f0;
+         font-size:9px;display:flex;align-items:center;justify-content:center;flex:none}
+  .title{font-size:11.5px;color:#c9d4e3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .after .title{font-weight:600}
+  .chip{flex:none;font-size:8.5px;color:#4cc9f0;background:rgba(76,201,240,.12);border:1px solid rgba(76,201,240,.3);
+        border-radius:7px;padding:0 5px;line-height:13px}
+  .blk .bd{padding:5px 8px;font-size:10px;color:#8294a8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .note{font-size:10px;color:#8294a8;margin-top:2px;line-height:1.5}
+  .note em{color:#4cc9f0;font-style:normal}
+</style>
+</head>
+<body>
+<div class="cols">
+
+  <div class="col before">
+    <p class="cap"><b>BEFORE</b> — steps identified by type + line only</p>
+    <div class="panel"><div class="ph">script.yaml</div><div class="pb"><span class="k">- send:</span> <span class="s">show running-config</span>
+  <span class="k">timeout:</span> 30
+<span class="k">- send:</span> <span class="s">get system ha status</span></div></div>
+    <div class="panel"><div class="ph">Run output — 200 hosts</div><div class="pb"><span class="host">[10.20.4.17 fw-edge-01]</span> <span class="anon">send (line 12)</span> <span class="ok">&#10003;</span> <span class="dur">1.2s</span>
+<span class="host">[10.20.4.17 fw-edge-01]</span> <span class="anon">send (line 18)</span> <span class="ok">&#10003;</span> <span class="dur">0.4s</span>
+<span class="host">[10.20.4.18 fw-edge-02]</span> <span class="anon">send (line 12)</span> <span class="fail">&#10007; timeout 30s</span></div></div>
+    <div class="blk"><div class="hd"><div class="badge">&gt;_</div><div class="title anon">send</div></div>
+      <div class="bd">show running-config</div></div>
+    <p class="note">Which "send (line 12)" failed? You have to open the script and count lines.</p>
+  </div>
+
+  <div class="col after">
+    <p class="cap"><b>AFTER</b> — optional <b>name:</b> key, surfaced everywhere</p>
+    <div class="panel"><div class="ph">script.yaml</div><div class="pb"><span class="nk">- name:</span> <span class="s">Backup running-config</span>
+  <span class="k">send:</span> <span class="s">show running-config</span>
+  <span class="k">timeout:</span> 30
+<span class="nk">- name:</span> <span class="s">Verify HA sync</span>
+  <span class="k">send:</span> <span class="s">get system ha status</span></div></div>
+    <div class="panel"><div class="ph">Run output — 200 hosts</div><div class="pb"><span class="host">[10.20.4.17 fw-edge-01]</span> <span class="named">Backup running-config</span> <span class="ok">&#10003;</span> <span class="dur">1.2s</span>
+<span class="host">[10.20.4.17 fw-edge-01]</span> <span class="named">Verify HA sync</span> <span class="ok">&#10003;</span> <span class="dur">0.4s</span>
+<span class="host">[10.20.4.18 fw-edge-02]</span> <span class="named">Backup running-config</span> <span class="fail">&#10007; timeout 30s</span></div></div>
+    <div class="blk"><div class="hd"><div class="badge">&gt;_</div><div class="title">Backup running-config</div><div class="chip">send</div></div>
+      <div class="bd">show running-config</div></div>
+    <p class="note">Failures locatable at a glance; canvas blocks self-document. <em>StepName</em> slot already exists in the event contract — today it is hardcoded to <em>null</em>.</p>
+  </div>
+
+</div>
+</body>
+</html>

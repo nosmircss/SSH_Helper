@@ -1,0 +1,26 @@
+{
+ "id": "ENH-038",
+ "title": "parallel has no fail-fast and no per-branch result capture",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-b",
+ "lens": "ux",
+ "existing_state": "ParallelCommand starts every child step and always waits for all of them to finish via Task.WhenAll (Services/Scripting/Commands/ParallelCommand.cs:40-66); failures are only examined afterwards, in original order, and the first non-suppressed failure becomes the step result identified only as 'Parallel step N failed' (:80-92). ParallelOptions exposes exactly two knobs — Steps and MaxConcurrent (Services/Scripting/Models/ScriptStep.cs:1530-1541). There is no fail_fast to cancel remaining branches when one fails, and no 'into' aggregation: a script cannot ask 'which branches failed?' — results of all branches other than the first failure are discarded.",
+ "recommendation": "Add two options to ParallelOptions: fail_fast (bool — create a linked CancellationTokenSource and cancel it when a branch returns a non-suppressed failure, so long-running siblings stop instead of burning their full timeouts) and into (capture a list of per-branch records {index, success, message, duration_ms} as a JSON-ish structure the existing table/foreach commands can consume). Both slot cleanly into the existing results collection at :52-55 and the post-WhenAll walk at :80-92. Surface the fields in the Flow Canvas parallel block per Guideline 8.",
+ "user_benefit": "Fan-out health checks (ping/portcheck/webhook across services) become reportable — 'table: ${parallel_results}' instead of one opaque first-failure message — and a dead branch no longer holds the whole step hostage for its full timeout when fail_fast is on.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ParallelCommand.cs",
+   "lines": "40-66, 80-92",
+   "note": "all branches always run to completion; ordered post-hoc check returns only the first failure"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Models\\ScriptStep.cs",
+   "lines": "1530-1541",
+   "note": "ParallelOptions = Steps + MaxConcurrent only"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,36 @@
+{
+ "id": "BUG-076",
+ "title": "F5 and Ctrl+Enter bypass the Flow Canvas toolbar's run gates — untouched presets get their YAML rewritten and marked dirty, and mid-run F5 corrupts live step correlation",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-ui",
+ "lens": "correctness",
+ "existing_state": "The toolbar Run/Test Step buttons send `graphChanged: isDirty` and are disabled while `isRunning || exportStatus.hasErrors || !targetHost` (FlowCanvas/src/panels/Toolbar.tsx:65-83, 104, 118). The keyboard equivalents check only `exportStatus.hasErrors`: F5 (hooks/useKeyboardShortcuts.ts:132-146) and Ctrl+Enter (111-130) post execute-canvas with no graphChanged flag, no targetHost check, and no isRunning check. The host defaults a missing graphChanged to TRUE (Form1.cs:6932 — `?? true`) and on true overwrites the Scintilla editor with re-serialized YAML (`txtCommand.Text = exportResult.Yaml`, Form1.cs:6963-6969), defeating the mechanism whose explicit purpose (comments at Form1.cs:6928-6931) is to preserve the user's original formatting/blank lines when nothing was modified — so pressing F5 on a freshly imported, untouched preset reformats the YAML, fires TextChanged, and flags phantom unsaved changes that persist if the user saves. Worse, pressing F5 during a run still executes ApplyFlowCanvasGraph before the `_executionCoordinator.IsRunning` abort (Form1.cs:6682, 12270-12274), rebuilding the four node<->stepPath correlation maps (Form1.cs:6971-6974) the in-flight run's step highlighting depends on, and re-persisting canvas layout mid-run (Form1.cs:7000). The missing targetHost gate is absorbed host-side as an error message (Form1.cs:12689-12702) but makes F5 behave differently from the visibly-disabled Run button.",
+ "recommendation": "In useKeyboardShortcuts.ts, make F5 and Ctrl+Enter call the exact same logic as the toolbar handlers (extract handleRun/handleTestStep into a shared store action or util): early-return when `isRunning` (read from the store), skip dispatch for run when there is no targetHost, and include `graphChanged: store.isDirty` in both messageBus.send payloads, matching Toolbar.tsx. Optionally surface a brief toast for the no-targetHost case so F5 feedback matches the disabled-button tooltip.",
+ "user_benefit": "Pressing F5 to re-run no longer silently reformats hand-written preset YAML, creates phantom unsaved-changes prompts, or desyncs live execution highlighting when pressed mid-run — and the keyboard shortcut behaves identically to the Run button instead of appearing to work in states where the button is disabled.",
+ "mockup_idea": "",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\hooks\\useKeyboardShortcuts.ts",
+   "lines": "111-146",
+   "note": "F5/Ctrl+Enter send execute-canvas with no graphChanged, no isRunning gate, no targetHost gate"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\Toolbar.tsx",
+   "lines": "65-83, 104, 118",
+   "note": "toolbar sends graphChanged: isDirty and disables Run on running/errors/no-host"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "6928-6932, 6963-6974",
+   "note": "absent graphChanged defaults to true -> txtCommand overwritten with regenerated YAML and correlation maps rebuilt, against the documented formatting-preservation intent"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "6682, 12270-12274",
+   "note": "ApplyFlowCanvasGraph runs before the IsRunning abort in ExecutePresetOnRowsAsync — mid-run F5 rebuilds maps and re-persists layout"
+  }
+ ]
+}

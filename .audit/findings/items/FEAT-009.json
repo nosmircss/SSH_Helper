@@ -1,0 +1,36 @@
+{
+ "id": "FEAT-009",
+ "title": "No retry/backoff for failed scheduled jobs — one transient blip means the run is missed until the next cron occurrence",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "M",
+ "area": "jobs-scheduling",
+ "lens": "cross",
+ "existing_state": "There is no retry concept anywhere in the scheduler. JobDefinition has no retry fields (grep for Retry/MaxAttempts/attempt in Models/JobDefinition.cs: no matches; the only 'attempt' mention in the 1119-line JobExecutionService is a comment at line 386), and the failure paths simply record the failure and stop: ExecuteScheduledJobAsync catches the exception, calls HandlePostExecution + OnJobFailed and completes (Services/JobExecutionService.cs:345-375); a partial host failure marks the run Failed (JobExecutionService.cs:433-435, 467-470) with no re-attempt of the failed hosts. The next attempt is whenever the cron fires again — for a nightly backup that is 24 hours later. One-time jobs are worse: a failed scheduled one-time run auto-disables the job permanently with reason \"One-time schedule failed\" (JobExecutionService.cs:875-889). The codebase already anticipates repeated failures — JobHistoryService.TryCollapseLatestFailure (Services/JobHistoryService.cs:237-312) collapses identical consecutive failures with ConsecutiveFailureCount. Every comparable scheduler (Windows Task Scheduler 'retry every X up to N times', Ansible Tower, cron wrappers) offers retry-on-failure.",
+ "recommendation": "Add per-job retry policy to JobDefinition (e.g. MaxRetries 0-5 default 0, RetryDelayMinutes) with editor fields on the JobEditorDialog Advanced tab next to the existing timeout overrides. In HandlePostExecution / ExecuteJobCoreAsync, when a scheduled (non-cancelled, non-RunNow) run fails and attempts remain, schedule a delayed re-dispatch — e.g. track NextRetryUtc per job and let the existing 30-second evaluation timer pick it up via IsJobDue — instead of waiting for the next cron occurrence. Record the attempt number in JobRunResult/JobRunRecord so history shows 'Failed (attempt 2/3)' then 'OK'; the existing failure-collapse logic keeps history compact. For one-time jobs, only mark 'One-time schedule failed' after retries are exhausted. Consider retrying only the failed hosts for partial failures, since results are already per-host.",
+ "user_benefit": "Transient SSH/network failures at 2 AM are the norm in fleet operations; today each one costs a full day's backup for the affected job (or permanently kills a one-time job). Automatic retry closes the most common unattended-failure gap versus Task Scheduler/Ansible.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "345-375",
+   "note": "Scheduled execution catch blocks record failure and finish; no re-dispatch path; only 'attempt' mention in the file is a comment at :386"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "875-889",
+   "note": "Failed scheduled one-time run auto-disables the job permanently"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobHistoryService.cs",
+   "lines": "237-312",
+   "note": "Consecutive-failure collapse proves repeated failures are an anticipated, designed-for scenario"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\JobDefinition.cs",
+   "lines": "",
+   "note": "No retry-related fields exist (verified by grep)"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

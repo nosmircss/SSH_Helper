@@ -1,0 +1,1034 @@
+[
+ {
+  "id": "ENH-001",
+  "title": "Expressions are never validated before run — typo'd conditions silently evaluate always-true and unknown functions explode mid-run",
+  "category": "ENH",
+  "severity": "high",
+  "effort": "M",
+  "area": "scripting-core",
+  "lens": "ux",
+  "existing_state": "Validate() checks only YAML structure: an `if` step is checked for having a `then` block (ScriptParser.cs:4419-4449) and `set` only for containing '=' (ScriptParser.cs:4539-4554) — the condition/RHS expression text is never parsed at validation time. At runtime the condition language is whitespace-sensitive string scanning: every operator must be written as \" op \" with spaces (ExpressionEvaluator.cs:151-203), so `if: x==1` (no spaces) finds no operator, falls through to a truthiness check of the literal string \"x==1\" (ExpressionEvaluator.cs:205-207), which is non-empty and not \"false\" so it is always TRUE (ValueResolver.cs:357-359) — the then-branch runs on every host regardless of x. Misspelled function names are equally invisible: ExpressionParser throws \"Unknown function\" only at runtime (ExpressionParser.cs:436); inside a condition that exception is swallowed and the unparsed string is returned (ExpressionEvaluator.cs:331-340), then coerced to 0 by ResolveNumeric (368-376), so `if: lenth(items) > 0` is silently always false. Regex errors in `matches` also silently return false (96-103). The live editor lint (Services/Editor) calls this same Parse+Validate, so it can't flag any of this either.",
+  "recommendation": "Add an expression syntax-check pass to Validate(): for every `if`/`elif`/`while`/`until`/`when`/`assert` condition and `set` RHS, run a context-free dry parse that (a) flags adjacent comparison operators lacking surrounding spaces (scan for ==/!=/>=/<= outside quotes when the spaced form was not found), (b) verifies every `name(` call site against FunctionRegistry.Instance plus the JsonUtilities legacy names (both catalogs are statically known), (c) checks balanced quotes/parens, and (d) compiles `matches` literal patterns. Skip checks for dynamic content the same way enum validation already does via IsDynamicValue (ScriptParser.cs:5202-5205). Surfacing these as validation errors automatically lights them up in the Scintilla editor lint and the pre-run validation dialog.",
+  "user_benefit": "A one-character typo today changes which branch runs on an entire fleet with zero diagnostics anywhere; this turns the most dangerous silent-wrong-answer class in the engine into red squiggles before anything is sent to a device.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionEvaluator.cs", "lines": "151-207, 327-376, 96-103", "note": "space-delimited operator scan, truthy fallback, swallowed parse/regex errors, numeric coercion to 0"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionParser.cs", "lines": "422-437", "note": "Unknown function is a runtime-only FormatException"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs", "lines": "4419-4449, 4539-4554", "note": "validation checks block structure only, never expression text"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ValueResolver.cs", "lines": "347-368", "note": "non-empty string truthiness makes unparsed conditions always-true"}
+  ],
+  "mockup_idea": "Editor screenshot mockup: `if: x==1` with a red squiggle under `x==1` and hover tooltip \"Comparison operators need surrounding spaces: did you mean 'x == 1'? Without spaces this always evaluates true.\" plus a second line `set: n = lenth(items)` flagged \"Unknown function 'lenth' — did you mean 'length'?\"",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-002",
+  "title": "Preset-delete undo restores a whole-library snapshot — it silently reverts unrelated edits, or evaporates because 26 other actions defensively clear it",
+  "category": "ENH",
+  "severity": "high",
+  "effort": "M",
+  "area": "persistence-config",
+  "lens": "ux",
+  "existing_state": "Deleting a preset or folder records an undo (TryDeletePresetWithUndo / TryDeleteFolderWithUndo, restorable via Ctrl+Z, Form1.cs:9896-9965), but the undo record is a snapshot of the ENTIRE preset library (PresetLibrarySnapshot.Capture, Services/PresetDeleteUndoService.cs:119-135). UndoLatest (PresetDeleteUndoService.cs:41-59) restores it via PresetManager.RestoreLibrarySnapshot, which clears and fully replaces all presets, folders, and ordering lists, then saves immediately (Services/PresetManager.cs:1044-1074) — so a user who deletes preset A, edits presets B and C, and later clicks \"Undo Delete Preset 'A'\" gets the B/C edits silently rolled back and the rollback persisted to config.json, with no warning and no redo. To limit exactly that damage, Form1 defensively wipes the undo history from 26 call sites — move-to-folder (7959, 8017), folder rename (8107), base-environment change (7904), add (10311), duplicate (10497), rename (10552), favorite toggles (11961, 11995), imports (10748, 10824), preset save (10216), and drag-drop paths (4722-5042) — so in practice the deleted preset becomes unrecoverable the moment the user does almost anything else (delete a preset, absent-mindedly star a favorite, and it is gone). Meanwhile rename and move are themselves destructive-ish operations with no undo of their own (ctxRenameFolder_Click, Form1.cs:8080-8113).",
+  "recommendation": "Scope the undo record to the deleted artifacts instead of a whole-library snapshot: store the deleted PresetInfo objects (name, commands, folder, favorite, canvas layout), their manual-order positions, and the affected-job references already captured (CaptureAffectedJobsForPresetDelete, Form1.cs:9836). Restoring then re-inserts the items into the CURRENT library state rather than replacing it, so unrelated mutations (edits, favorites, renames of other presets) no longer need to clear the stack — only genuine conflicts (e.g. creating a preset with the same name) do, and those prompt for a rename. With item-scoped records the same mechanism naturally extends to a 2-3 deep stack and to rename/move undo. As a cheaper interim guard, diff the snapshot against current state at undo time and warn ('Undoing this delete will also revert changes made to 3 other presets since then — continue?') before applying.",
+  "user_benefit": "Undo becomes trustworthy: deleting the wrong preset stays recoverable even after doing something else first, and Undo stops being the only operation in the app that can silently destroy and persist the loss of unrelated work.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\PresetDeleteUndoService.cs", "lines": "41-59", "note": "UndoLatest restores full snapshot, no diff/warning"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\PresetDeleteUndoService.cs", "lines": "119-135", "note": "snapshot captures entire library, not just the deleted subtree"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\PresetManager.cs", "lines": "1044-1074", "note": "RestoreLibrarySnapshot clears and replaces presets/folders/orders and saves config"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "9896-9965", "note": "UndoLatestPresetDelete restores from whole-config snapshot"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "7904-11995 (26 sites via grep)", "note": "ClearPresetDeleteUndoHistory called from every other mutation"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "8080-8113", "note": "folder rename has no undo and clears the delete undo"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 2
+ },
+ {
+  "id": "ENH-003",
+  "title": "Multi-step parallel arms are silently truncated to their first block on export",
+  "category": "ENH",
+  "severity": "high",
+  "effort": "L",
+  "area": "flowcanvas-bridge",
+  "lens": "ux",
+  "existing_state": "The canvas lets you wire a chain of blocks into a Parallel branch, but export emits only the first node of each arm: Services/FlowCanvasBridge.cs:2258-2280 collects the full branch chain via CollectBranchChain, adds a Warning diagnostic 'Parallel branch contains multiple sequential nodes; exporting the first node only' (2266-2272), then serializes branchChain[0] only (2274-2280). The apply still reports success=true, so the YAML that runs is missing user-authored blocks while the canvas keeps displaying them. The warning is effectively invisible: on success React only console.warn's warnings (FlowCanvas/src/stores/messageBridge.ts:209-211), the Problems panel is hidden by default (FlowCanvas/src/stores/slices/uiSlice.ts:140), and the toolbar Problems badge counts errors only (FlowCanvas/src/panels/Toolbar.tsx:21,257). Root cause is the YAML schema: ParallelCommand runs each item of step.Parallel.Steps as one concurrent step (Services/Scripting/Commands/ParallelCommand.cs:24-44), so a sequential chain per arm is not expressible. Not on the FLOW_CANVAS_ENHANCEMENTS.md roadmap (the multi-host cuts there are unrelated).",
+  "recommendation": "Two stages. Immediate (S): promote the truncation diagnostic from Warning to Error in TryGenerateContainerFromGraph so the apply fails loudly instead of silently dropping blocks — the existing error plumbing already blocks Run (Toolbar.tsx:104 disables Run on exportStatus.hasErrors). Full fix (L): extend the parallel schema so an arm can be a step group (e.g. allow a list item that is itself a `steps:` list, or a `do:` wrapper) in ScriptParser + ParallelCommand, expand it in TextToGraph's GetBranches, and emit the whole CollectBranchChain per arm in the parallel branch of TryGenerateContainerFromGraph (FlowCanvasBridge.cs:2258+).",
+  "user_benefit": "Users can actually author 'run these two command sequences concurrently' visually — today the canvas accepts the wiring and then runs something different from what is on screen, which is the worst kind of surprise on a 200-device fleet tool.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "2258-2280", "note": "Warning + branchChain[0]-only emission for parallel arms"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ParallelCommand.cs", "lines": "24-44", "note": "Schema: each Parallel.Steps item is one concurrent step — no per-arm chains"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\messageBridge.ts", "lines": "207-211", "note": "On success, warnings go only to console.warn"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\Toolbar.tsx", "lines": "19-21, 251-270", "note": "Problems badge renders errorCount only; warnings get no badge"}
+  ],
+  "mockup_idea": "Side-by-side: left, a canvas Parallel block with two arms of 2-3 chained blocks each; right-top, today's exported YAML showing only one step per arm with a tiny console-only warning; right-bottom, the proposed export with full per-arm step groups and (interim) a red blocking error on the Parallel block.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-004",
+  "title": "CSV import fails or silently mangles common spreadsheet exports (duplicate headers, renamed columns, truncated rows)",
+  "category": "ENH",
+  "severity": "high",
+  "effort": "M",
+  "area": "persistence-config",
+  "lens": "ux",
+  "existing_state": "CsvManager.LoadFromFile discards the user's first header name entirely and replaces it with Host_IP with no notice (Services/CsvManager.cs:32-35), silently rewrites spaces to underscores in remaining headers (CsvManager.cs:45) — which changes the {{column_name}} variable names scripts reference — and silently truncates any row longer than the header (CsvManager.cs:61-62). Duplicate header names (extremely common in Excel exports) crash the load: dt.Columns.Add(headerName) at CsvManager.cs:46 throws DuplicateNameException, and Form1.OpenCsvFile surfaces the raw framework message \"Failed to load CSV: A column named 'X' already belongs to this DataTable\" (Form1.cs:9239-9242). There is no delimiter detection (semicolon-delimited locale exports parse as one column) and no encoding handling beyond BOM strip, so Windows-1252 Excel exports load with mojibake.",
+  "recommendation": "Make LoadFromFile resilient and the import transparent: (1) dedupe duplicate headers by suffixing (Name, Name_2, ...) instead of throwing; (2) sniff the delimiter from the header line (comma vs semicolon vs tab) and detect encoding via StreamReader with detectEncodingFromByteOrderMarks plus a Windows-1252 fallback heuristic; (3) return an import summary (rows loaded, columns renamed, rows truncated, first-column-renamed-to-Host_IP) and show it once in a non-modal banner or expandable status line in Form1.OpenCsvFile instead of staying silent; (4) warn when the original first header was something like \"name\" or \"site\" that does not look host-like, since every row will then target the wrong \"host\".",
+  "user_benefit": "Operators feed this grid from spreadsheets exported by other teams; today a duplicate column kills the import with a cryptic error, and a wrong-first-column file silently targets 200 wrong hosts. Robust import with a visible summary removes the most common first-five-minutes failure for new users.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\CsvManager.cs", "lines": "32-46", "note": "first header discarded, spaces->underscores, duplicate Columns.Add throws"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\CsvManager.cs", "lines": "61-62", "note": "ragged rows silently truncated to header width"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "9239-9242", "note": "raw exception message shown as the only feedback"}
+  ],
+  "mockup_idea": "Before/after of the CSV open flow: before = error dialog with raw DataTable exception text; after = import preview strip showing '212 hosts, 6 columns — 1 duplicate header renamed (Location → Location_2), first column \"device\" mapped to Host_IP' with Continue/Cancel.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-005",
+  "title": "No global exception handling: any unhandled error is a stock crash with no log and no state flush",
+  "category": "ENH",
+  "severity": "high",
+  "effort": "S",
+  "area": "cross-startup",
+  "lens": "ux",
+  "existing_state": "Program.Main (Program.cs:13-60) wires nothing for Application.ThreadException, AppDomain.CurrentDomain.UnhandledException, or Application.SetUnhandledExceptionMode — a repo-wide search returns zero hits. Application.Run(new Form1()) at Program.cs:59 runs a 15k-line form plus async event handlers (e.g. async void Form1_Shown, Form1.cs:414) where any escaped exception kills the process with the generic .NET crash dialog: no error log is written anywhere, unsaved host-grid edits and window state are lost (state is only persisted on the orderly close path), and the user has nothing to report. Even startup-path throws (ScintillaNativeBootstrap.ConfigureSatelliteDirectory at Program.cs:58 can throw InvalidOperationException when extraction roots are unwritable) crash before any window exists.",
+  "recommendation": "In Program.Main, before Application.Run: set Application.SetUnhandledExceptionMode(CatchException), subscribe Application.ThreadException and AppDomain.CurrentDomain.UnhandledException, and route both to a handler that (1) appends the full exception to %LocalAppData%\\SSH_Helper\\logs\\crash-{date}.log via AppDataPaths, (2) shows a themed dialog with the message, an 'Open log' link, and Continue/Exit choices, and (3) asks Form1 to attempt a best-effort config/state save. Also wrap the pre-UI bootstrap (Program.cs:58) in try/catch with a friendly MessageBox mirroring the existing portable-storage gate at Program.cs:48-56.",
+  "user_benefit": "For a tool that holds an edited host grid, live SSH sessions, and a job scheduler, one stray exception currently means silent data loss and an undiagnosable crash. A handler converts that into a logged, recoverable event the owner can actually debug from a user report.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Program.cs", "lines": "13-60", "note": "Entire entry point: no exception wiring; ConfigureSatelliteDirectory (line 58) can throw pre-UI"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "414-443", "note": "async void Form1_Shown — escaped exceptions here bypass any try/catch and crash the app"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-006",
+  "title": "sftp command is password-only — no key auth, no Vault, despite both existing elsewhere in the app",
+  "category": "ENH",
+  "severity": "high",
+  "effort": "M",
+  "area": "scripting-commands-b",
+  "lens": "ux",
+  "existing_state": "SftpCommand hard-fails with 'Sftp requires password (or password in current context)' when no plaintext password is available (Services/Scripting/Commands/SftpCommand.cs:59-60) and connects via SSH.NET's password-only SftpClient ctor (:66-72). SftpOptions has no key_file, passphrase, or vault fields at all (Services/Scripting/Models/ScriptStep.cs:1224-1275). Meanwhile the main pooled shell session that 'send' uses logs in with an identity file via SshPrivateKey when the host has one (Services/SshConnectionPool.cs:464-469), and the app has CredentialMode.Vault plus a vault script command and per-host vault_path columns. So a script whose 'send' steps work fine against a key-auth or Vault-credentialed fleet cannot use sftp against the same hosts. The command is also single-file only — UploadFile/DownloadFile of one path (:79-95), no wildcard or directory transfer, and no progress output during a long transfer (only a final byte count, :85, :94).",
+  "recommendation": "Resolve sftp credentials through the same per-host resolution the pooled session uses (identity file + passphrase, Vault-sourced password, then plaintext fallback) instead of demanding a literal password; extend SftpOptions with key_file/key_passphrase overrides for explicit cases. While in the file, add wildcard/directory support (SSH.NET ListDirectory + per-file loop) and emit periodic progress via the UploadFile/DownloadFile callback so a 500 MB firmware push across 200 devices isn't a silent two-minute stall per host.",
+  "user_benefit": "Fleets that follow basic SSH hygiene (key auth, vaulted secrets) can actually use file transfer in scripts; today sftp forces them to keep plaintext passwords in the host grid just for this one command.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SftpCommand.cs", "lines": "59-60, 66-72, 79-95", "note": "password required, password-only SftpClient ctor, single-file transfer with no progress"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Models\\ScriptStep.cs", "lines": "1224-1275", "note": "SftpOptions: action/local_path/remote_path/host/port/username/password/overwrite/timeout/into — nothing else"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs", "lines": "464-469", "note": "main SSH stack already logs in with SshPrivateKey(identityFile, passphrase)"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-007",
+  "title": "No CI on push/PR — the .NET test suite and FlowCanvas vitest suite never run anywhere",
+  "category": "ENH",
+  "severity": "high",
+  "effort": "S",
+  "area": "models-samples-build",
+  "lens": "ux",
+  "existing_state": "The only workflow, .github/workflows/build-release.yml, triggers solely on v* tags and manual dispatch — the push-to-master and pull_request triggers are commented out (lines 4-10). No job anywhere runs `dotnet test` (SSH_Helper.Tests with its sample-validation, bridge round-trip/parity, scheduler and config-corruption suites is invisible to CI), and no job runs FlowCanvas `npm test` (vitest). The only automated gate before a release binary is cut is the Playwright e2e suite (line 43), which the build job `needs` (line 56). Regressions land on master completely unverified, and a tag build can ship binaries whose unit suites are red.",
+  "recommendation": "Add a lightweight ci.yml triggered on push + pull_request: job 1 (windows-latest) runs `dotnet build -p:SkipFlowCanvasBuild=true` + `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj`; job 2 (ubuntu) runs `npm ci && npm test` in FlowCanvas/ plus optionally the fast `test:e2e:parity` subset. Keep the heavyweight full-e2e + dual-publish pipeline tag-only as today. Also add the same `dotnet test` step to build-release.yml so a tag can never ship over a red suite.",
+  "user_benefit": "Every commit gets the safety net the project already paid for (a large xUnit + vitest investment that currently runs only on developer machines); release tags stop being the first time anyone discovers a broken build.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml", "lines": "3-10", "note": "tags + workflow_dispatch only; branches/pull_request triggers commented out"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml", "lines": "41-43, 55-87", "note": "Playwright e2e is the only test gate; build job publishes without ever running dotnet test or vitest"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-008",
+  "title": "Undefined variables silently resolve to empty strings at runtime — no warning, no strict mode",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scripting-core",
+  "lens": "ux",
+  "existing_state": "Any `${typo_var}` reference resolves to empty string with zero diagnostics: plain lookup ends in GetVariableString which returns \"\" for missing names (ScriptContext.cs:559-565, reached from ResolveVariableExpression at 704), and out-of-range `arr[i]` also returns \"\" silently (ScriptContext.cs:682-684). The only safety net is a pre-run dialog that frames every statically-unresolved reference as a missing *grid column* (Form1.cs:12542-12611, fed by ScriptDependencyAnalyzer whose own doc says its purpose is grid-column dependencies, ScriptDependencyAnalyzer.cs:40-44). Nothing exists at runtime: a `send: delete flash:${backup_file}` where the variable went empty mid-loop sends `delete flash:` to the device. Ansible fails on undefined variables by default; here it's invisible. Per-script the user can't opt into stricter behavior at all.",
+  "recommendation": "Two layers: (1) runtime warning — when SubstituteVariableTokens resolves a token to empty because the variable doesn't exist (HasVariable false, distinguishable from legitimately-empty), emit a once-per-name Warning via context.EmitOutput identifying the step line and token; (2) a script-level `strict_vars: true` flag (parsed alongside `debug:`/`nobanner:` in the top-level keys) that escalates an undefined reference to a step failure instead. Also reword the pre-run dialog to separate \"not a grid column AND never set in the script (likely typo)\" from \"expected grid column\" — the analyzer already knows the set/capture-defined names so the split is cheap.",
+  "user_benefit": "Empty-substitution is how half-formed commands reach live network devices; a visible warning (or opt-in hard failure) catches the misspelled capture/var before it mangles 200 hosts.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs", "lines": "559-565, 682-684, 704", "note": "missing variable and out-of-range index both yield empty string silently"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "12542-12611", "note": "only safety net is the pre-run missing-COLUMN dialog"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptDependencyAnalyzer.cs", "lines": "40-44", "note": "analyzer scoped to grid-column dependencies by design"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-009",
+  "title": "send has no failure detection for network appliances — fail_on_nonzero is POSIX-shell-only",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scripting-commands-b",
+  "lens": "ux",
+  "existing_state": "The only built-in way to make a 'send' step fail on command error is fail_on_nonzero, which rewrites the command as eval '<cmd>'; __ssh_helper_send_status=$?; printf '\\n<sentinel>:%s\\n' ... (Services/Scripting/Commands/SendCommand.cs:134-138) and regex-extracts the status afterwards (:89-100, 140-167). That mechanism only works on POSIX shells; on FortiGate/Cisco/Juniper CLIs — and FortiGate is literally the only parse format the tool ships (ParserFactory.cs:14-15) — it sends garbage commands to the device. There is no pattern-based alternative: to catch '% Invalid input detected' or 'Command fail.' the user must add capture + a separate if/contains step after every single send. Validation only rejects fail_on_nonzero combined with expect (:41-47); combined with respond it is silently allowed.",
+  "recommendation": "Add fail_pattern (and optionally success_pattern) regex options to the send step, evaluated against the echo/prompt-stripped output (after :86-87) exactly where the existing post-execution fail_on_nonzero check runs (:89-100), routed through the same ApplyOnError path so on_error: continue works. Validate mutual exclusivity with fail_on_nonzero, and also reject fail_on_nonzero+respond. Per Development Guideline 8, surface the new field in the Flow Canvas send block properties and the YAML autocomplete.",
+  "user_benefit": "One line per step ('fail_pattern: \"% Invalid|Command fail\"') replaces a capture+if+exit triplet after every device command — the difference between a 10-step and a 30-step script when pushing config to appliances, and errors stop slipping through unnoticed mid-fleet.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SendCommand.cs", "lines": "134-138, 89-100, 41-47", "note": "eval/printf sentinel wrapper; post-exec status check (natural insertion point); only expect is validated against fail_on_nonzero"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Parsers\\ParserFactory.cs", "lines": "14-15", "note": "FortiGate is the flagship device family — exactly where fail_on_nonzero cannot work"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-010",
+  "title": "Renaming an environment silently breaks YAML 'environment:' headers, and a missing declared environment only flashes the status bar before running against the wrong fleet",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "persistence-config",
+  "lens": "ux",
+  "existing_state": "Environment rename does cascade to folder base-environment overrides (EnvironmentDialog.cs:471-472 calls both EnvironmentService.RenameEnvironment and PresetManager.RenameFolderBaseEnvironment, Services/PresetManager.cs:880-904), but nothing rewrites the 'environment: <name>' headers embedded in YAML preset commands. After a rename, loading such a preset hits the missing-environment branch in ApplyPresetEnvironmentOnPresetLoad (Form1.cs:2189-2192), which only writes \"Preset 'X' requested environment 'old-name', but it was not found.\" to the status bar (Utilities/PresetEnvironmentStatusFormatter.cs:40) — a transient line that is easy to miss. The preset stays loaded against whatever environment (and host list) is currently active, and Run executes against those hosts with no further check.",
+  "recommendation": "Two parts: (1) in the rename flow (EnvironmentDialog.BtnRename), scan preset Commands for YAML scripts whose parsed script.Environment equals the old name (TryGetScriptDeclaredEnvironment already does the parse, Form1.cs:2201+) and offer \"3 presets declare environment 'prod' — update them to 'production'?\" with a one-click rewrite of the environment: line; (2) elevate the missing-environment case at preset load from a status-bar line to a persistent inline banner near the Run button (\"Declared environment 'prod' not found — running against 'staging' hosts\"), since the consequence is executing commands against the wrong device fleet.",
+  "user_benefit": "Environment auto-switch exists precisely so a prod preset cannot run against the wrong hosts; a routine rename quietly defeats it today. The cascade plus a visible warning closes the wrong-fleet footgun.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "2186-2199", "note": "missing declared environment -> status bar only, load continues on current env"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\PresetEnvironmentStatusFormatter.cs", "lines": "32-40", "note": "the only feedback text"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\EnvironmentDialog.cs", "lines": "471-472", "note": "rename cascades folders but nothing rewrites YAML environment: headers"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\PresetManager.cs", "lines": "880-904", "note": "existing folder cascade to model the preset-header cascade on"}
+  ],
+  "mockup_idea": "After-state sketch: preset header area showing an amber banner 'Environment \"prod\" declared by this preset was not found — currently targeting \"Default\" (212 hosts)' with a [Pick environment] link, replacing the transient status-bar text.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-011",
+  "title": "Scheduled jobs always execute hosts one at a time — no parallel-host option on jobs",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "ssh-execution",
+  "lens": "ux",
+  "existing_state": "Interactive runs can batch up to 100 hosts in parallel via the run dialog, but scheduled jobs cannot. Folder jobs build FolderExecutionOptions with only RunPresetsInParallel and StopOnFirstError (Services/JobExecutionService.cs:737-742); ParallelHostCount is never set so it stays at its default of 1 (Models/FolderExecutionOptions.cs:27), which the engine clamps into one-host-at-a-time batches (SshExecutionService.cs:636, 684-691). Single-preset jobs route through ExecutePresetAsync (JobExecutionService.cs:687) whose host loop is strictly sequential by construction (SshExecutionService.cs:434-451, script path 584-597). JobDefinition carries FolderExecutionMode and StopOnError (Models/JobDefinition.cs:229-235) but has no parallelism field, and JobEditorDialog therefore offers none. A nightly job against 200 devices at ~10s each runs 30+ minutes when it could finish in ~2.",
+  "recommendation": "Add ParallelHostCount to JobDefinition (default 1 for backward compatibility), surface it in JobEditorDialog next to the existing Stop-on-error option, and pass it into FolderExecutionOptions in ExecuteFolderJobAsync. For single-preset jobs, either route them through ExecuteFolderAsync with a one-entry preset dictionary (inherits batching, progress, and stop-on-first-error for free) or add the same batching to ExecuteAsync/ExecuteScriptAsync.",
+  "user_benefit": "Scheduled fleet jobs finish in minutes instead of hours, and the scheduler reaches feature parity with what the user can already do interactively — important since unattended runs are exactly where long sequential walls hurt most (maintenance windows).",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "737-744", "note": "FolderExecutionOptions built without ParallelHostCount; stays 1"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "687", "note": "Preset jobs use ExecutePresetAsync — sequential host loop"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\JobDefinition.cs", "lines": "229-235", "note": "Job model has FolderExecutionMode + StopOnError but no parallel-host knob"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "434-451, 584-597, 636", "note": "ExecuteAsync/ExecuteScriptAsync iterate hosts strictly sequentially; only ExecuteFolderAsync batches, gated on ParallelHostCount"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-012",
+  "title": "Scheduled-run output viewer forces one-host-at-a-time triage: no failed-host filter, no all-hosts view, no save-to-file, and 'Copy All' copies only the selected host",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "dialogs-jobs-history",
+  "lens": "ux",
+  "existing_state": "RunOutputViewerDialog (opened from JobListDialog View Output, JobListDialog.cs:1408-1417) navigates a job run's per-host output solely through a 220px ComboBox (RunOutputViewerDialog.cs:61-67, populated at 228-239 with an 'OK | FAIL | CANCELLED' suffix). To find which of 200 hosts failed overnight, the user must open the dropdown and visually scan entries one by one — there is no failed-only filter, no host-status summary, and no combined all-hosts view. The 'Copy All' button copies only the currently displayed host's text (_rtbOutput.Text, RunOutputViewerDialog.cs:276-285) despite its name, and there is no Save-to-File at all — in contrast, the manual-run ExecutionDetailsDialog has both Copy and Save to File (ExecutionDetailsDialog.cs:569-583). The find bar has no match count or case toggle (RunOutputViewerDialog.cs:319-387).",
+  "recommendation": "Replace the ComboBox with a left-docked host ListBox showing status-colored entries (reuse the result colors from JobListDialog.cs:689-707) plus an 'All hosts (failed only)' / 'All hosts' pseudo-entry that concatenates outputs with per-host headers, and a small filter row (All / Failed / text filter). Add a 'Save All...' button writing the combined report (host header + status + output per host) and rename 'Copy All' to 'Copy Host' (or make it copy the combined view when the All entry is selected). This is mostly UI rearrangement; JobRunPayload.HostOutputs already carries everything needed.",
+  "user_benefit": "Morning triage of an overnight 200-host job drops from ~200 dropdown selections to one click on 'Failed only'; output can finally be archived or attached to a ticket without per-host copy-paste.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\RunOutputViewerDialog.cs", "lines": "61-67, 228-239, 276-300", "note": "ComboBox-only navigation; Copy All copies _rtbOutput.Text (selected host only); no SaveFileDialog in the file"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ExecutionDetailsDialog.cs", "lines": "569-583", "note": "The sibling manual-run viewer already offers Save to File — inconsistent capability"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs", "lines": "1387-1418", "note": "Entry point: ViewSelectedOutput loads JobRunPayload and shows RunOutputViewerDialog"}
+  ],
+  "mockup_idea": "Single screenshot-style mockup: dialog with a left sidebar listing hosts with red/green/amber dots and a 'Failed (7)' filter chip active, main pane showing concatenated output with '=== 10.0.3.41 (FAIL) ===' section headers, toolbar with Find, Copy Host, Save All.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-013",
+  "title": "Breakpoints evaporate on every canvas reload or preset switch (disabled blocks survive, breakpoints don't)",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "flowcanvas-bridge",
+  "lens": "ux",
+  "existing_state": "Breakpoint toggles are stored in Form1's _pendingBreakpoints HashSet keyed by React node id (Form1.cs:182, 6756-6771). Node ids are regenerated as node-{counter} on every TextToGraph import (Services/FlowCanvasBridge.cs:330-331), so any reload — reopening the canvas, switching presets, the run-start re-map — invalidates them. At run start they are filtered against the fresh map fail-quiet (Form1.cs:12344-12356) and the set is cleared in PrepareFlowCanvasExecutionStateForRunStart (Form1.cs:13811-13824). Disabled blocks and expanded state DO persist per-preset via CanvasLayoutData and are re-applied by MergeAuxiliaryLayout (FlowCanvasBridge.cs:5444-5463), but breakpoints have no equivalent: they are absent from ExtractLayout/CanvasLayoutData entirely. The project memory also notes the React-side breakpoints Set isn't cleared across preset switches, so stale red dots can render while C# ignores them. Net effect: a user who sets breakpoints, closes the canvas, reopens it, and runs gets no pause — debugger state that VS Code-class tools always persist.",
+  "recommendation": "Persist breakpoints the same way disabled blocks already persist: add BreakpointNodeIds (stored as stepPath:blockType tuples like positions, so they survive structural-safe edits) to CanvasLayoutData, capture them in ExtractLayout/ApplyLayoutAutosave, re-key them to the fresh node ids in MergeAuxiliaryLayout during LoadCurrentScriptIntoCanvas, seed _pendingBreakpoints from the merge result, and include them in the load-graph payload so the React store replaces (not unions) its breakpoints Set on load.",
+  "user_benefit": "Debugging a 30-step provisioning script across sessions stops requiring the user to re-find and re-click every breakpoint each time they reopen the canvas or flip between presets; it also kills the confusing 'red dot shown but never pauses' state.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "182, 6756-6771", "note": "Node-id-keyed pending breakpoint set"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "12344-12356, 13811-13824", "note": "Fail-quiet filtering at run start; set cleared on every run"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "330-331", "note": "Ids regenerate per import"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "5444-5463", "note": "MergeAuxiliaryLayout restores disabled/expanded — no breakpoint equivalent"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-014",
+  "title": "Test Connection only checks TCP reachability — passes with wrong credentials or a non-SSH service",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "ssh-execution",
+  "lens": "ux",
+  "existing_state": "The grid right-click \"Test connection\" feature (Form1.cs:8875-8947, 5-way concurrent, paints per-cell pass/fail) calls SshExecutionService.TestConnectionAsync which is a raw TcpClient connect-and-close (SshExecutionService.cs:2304-2339; the comment at 2300-2303 says this is deliberate \"since hosts may not be SSH servers\"). It therefore shows green for any open port 22 — a captive portal, a telnet listener, or an SSH server that will reject the user's credentials or key algorithms. Authentication failures, algorithm-mismatch fallback (the three-tier ladder at 2365+), and per-host credential resolution problems (vault_path, Credential Manager, ssh-config) are only discovered mid-run, host by host, during a real execution.",
+  "recommendation": "Add a second test tier — e.g., a \"Test SSH login\" item next to the existing TCP test — that reuses the production connect path (CreateConnectedClientWithFallback + the same key/password login used in ExecuteSingleHost) with the same per-host credential resolution as a real run, then disconnects immediately. Return a richer ConnectionTestResult distinguishing Port-open / SSH-negotiated / Authenticated, and on failure include the already-built negotiation diagnostics (AppendSshNegotiationDiagnostics, SshExecutionService.cs:2628) in the cell tooltip.",
+  "user_benefit": "Lets the user validate credentials and SSH compatibility across the whole fleet in seconds before a change window, instead of discovering auth failures one timeout at a time during the actual run.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "2300-2339", "note": "TestConnectionAsync is TcpClient connect/close only, by design comment"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "8875-8947", "note": "UI test feature: concurrency-limited per-row test painting cell states — natural place for an SSH-tier mode"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "2365, 2628", "note": "Production fallback connect path and negotiation diagnostics already exist for reuse in a real SSH test"}
+  ],
+  "mockup_idea": "Host grid cells with a three-state indicator after test: gray dot 'port open', blue dot 'SSH OK', green check 'login OK'; a failed row shows a red X with tooltip 'Authentication failed for admin (password rejected)'.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-015",
+  "title": "Connection test cannot be cancelled and tests different rows than the one right-clicked",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "form1-b",
+  "lens": "ux",
+  "existing_state": "TestSelectedConnections (Form1.cs:8875-8961) creates _connectionTestCts (8899) and even handles OperationCanceledException with a \"Connection test cancelled\" status (8949-8953), but no code path ever calls Cancel() — the only references to _connectionTestCts in the entire file are the declaration (212), creation (8899-8900) and disposal (8958-8959). With the hardcoded SemaphoreSlim(5) concurrency (8910) and timeout of config.ConnectionTimeout seconds per host (8903), right-clicking \"Test Connection(s)\" with 200 checked rows of unreachable hosts locks the user into a multi-minute unstoppable run (re-entry is blocked by _isTestingConnections at 8877). Separately, the targeting is surprising: the menu item lives on the row context menu, but checked rows always win (8882-8887) and the right-clicked row is only used when nothing is checked (8889-8894) — right-clicking host X while others are checked tests the others, not X.",
+  "recommendation": "While a test is running, swap the \"Test Connection(s)\" menu item (or add a status-bar button next to statusProgress) to \"Cancel Test\" wired to _connectionTestCts.Cancel() — the downstream handling already exists. For targeting, split the menu into two explicit items whose visibility/captions are set in the context-menu Opening handler: \"Test This Host\" (right-clicked row) and \"Test Checked Hosts (N)\", mirroring the Run button's existing \"Run Checked (N)\" convention (UpdateRunButtonText).",
+  "user_benefit": "A mis-click no longer costs minutes of frozen progress against dead hosts, and the menu does what it says — testing the host you right-clicked instead of silently testing a different set.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "8899-8959", "note": "CTS created/disposed; grep confirms no .Cancel() caller anywhere"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "8881-8894", "note": "checked rows override the right-clicked row"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "8949-8953", "note": "cancellation handler already written, just unreachable"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-016",
+  "title": "Output find is half-finished: regex/whole-word toggles built but hidden, one-match-at-a-time selection with no highlight-all, and a permanently dark-themed find bar",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "form1-b",
+  "lens": "ux",
+  "existing_state": "The output find (Ctrl+F / F3, Form1.cs:14450-14619) builds matches with a plain IndexOf scan supporting only case sensitivity (BuildMatchList, 14583-14599) and \"highlights\" by setting the TextBox selection on one match at a time (HighlightCurrentMatch, 14601-14610) — no highlight-all (impossible on a plain TextBox), no way to jump between hosts' sections in a 200-host concatenated output: finding every \"%ERROR\" or \"down\" across a fleet run means pressing F3 repeatedly and remembering what you saw. The capability gap is already scaffolded but abandoned: FindDialog constructs whole-word and regex ToggleButtons in the VS Code style but disables and hides them with 'Hide for now - not implemented' (FindDialog.cs:115-131); a find-in-selection button is likewise hidden (147-153). The dialog also hardcodes the VS Code dark palette as static colors (FindDialog.cs:10-19) and is the only root dialog bypassing DialogTheme — in light mode it floats as a dark rectangle over a light output pane. Minor: the advertised Alt+C match-case shortcut only works while the textbox has focus (193-198); form-level OnKeyDown handles only F3/Escape (279-295).",
+  "recommendation": "Finish what's already scaffolded, then layer up. Cheap tier: implement whole-word and regex in BuildMatchList via Regex.Matches (Regex.Escape the term for literal mode, wrap with \\b for whole-word, surface invalid-pattern errors via the existing SetStatus(message, isError) at FindDialog.cs:297-301), then flip the two toggles to Visible/Enabled; add a light palette branch keyed off the app's dark-mode flag (pass _isDarkMode from Form1.ShowFindDialog); move Alt+C/Alt+W/Alt+R handling into form-level OnKeyDown so the tooltips stop lying. Full tier: render all matches at once — either swap txtOutput to a RichTextBox with background highlights (note RecreateOutputTextBoxIfNeeded at Form1.cs:14086-14142 rebuilds the control past 500K chars, so highlight state must be reapplied there) or, lower-risk, add a results strip under the find dialog listing matching lines with line numbers (click to jump), which also doubles as a per-host error index.",
+  "user_benefit": "Scanning fleet output for failures becomes one search instead of an F3 marathon; regex unlocks patterns like '(down|err-disabled)' that network operators actually search for — today they must copy output elsewhere to grep it. Light-mode users get a find bar that belongs to the app.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "14583-14599", "note": "BuildMatchList: IndexOf scan, case toggle only — the single place regex/whole-word would slot in"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "14601-14619", "note": "highlight = TextBox selection of the single current match"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FindDialog.cs", "lines": "115-131, 147-153", "note": "Whole-word, regex, find-in-selection controls built then hidden as not implemented"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FindDialog.cs", "lines": "10-19", "note": "Hardcoded VS Code dark palette regardless of app theme"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FindDialog.cs", "lines": "193-198, 279-295", "note": "Alt+C only handled in textbox KeyDown despite KeyPreview=true form"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "14086-14142", "note": "txtOutput is destroyed/recreated past 500K chars — highlight state must survive this"}
+  ],
+  "mockup_idea": "Find dialog before/after: before = current term box + case checkbox + \"3/41\" counter; after = adds [Aa][W][.*] toggle buttons and a docked results list \"line 1042: GigabitEthernet0/3 is down\" entries, with all matches tinted amber in the output pane.",
+  "merged_from": 2
+ },
+ {
+  "id": "ENH-017",
+  "title": "Password column cells display secrets in plaintext on screen",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "form1-a",
+  "lens": "ux",
+  "existing_state": "Only the toolbar password box is masked (InitializePasswordMasking, Form1.cs:1599-1606 sets tsbPassword.TextBox.UseSystemPasswordChar). The grid's 'password' column — an explicitly recognized special column (Form1.cs:139) — renders values as plain text. Passwords are visible whenever the user types them (until the next environment load migrates them to Credential Manager per Form1.cs:2292-2303), and permanently visible when Credential Manager is unavailable or the CSV was just opened from disk. On a NOC workstation or during screen sharing, every per-host password in a loaded CSV is readable on screen.",
+  "recommendation": "Mask the 'password' column display: in a CellFormatting handler on dgv_variables, replace non-empty values in the password column with bullet characters (display-only — underlying value untouched, so CSV save and execution are unaffected); let the editing control show the real value while a cell is in edit mode (the grid already commits on cell leave, Form1.cs:4310-4313). Optionally add a small eye-toggle in the column header context menu to reveal values deliberately. Keep the custom-paint path in mind: the grid uses CellPainting for checkboxes/headers (Form1.cs:4087-4205) but plain text cells render normally, so CellFormatting suffices.",
+  "user_benefit": "Standard behavior for every credential-handling tool (mRemoteNG, SecureCRT, KeePass): secrets are not readable by shoulder-surfers or in screenshots/recordings of a multi-host run session.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "1599-1606", "note": "Only the toolbar password textbox gets UseSystemPasswordChar — nothing masks the grid column"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "134-141", "note": "'password' is a first-class special column, so the app knows exactly which column to mask"}
+  ],
+  "mockup_idea": "Before/after of the host grid with a 'password*' column: before shows 'Sup3rS3cret!' in each row; after shows '••••••••' with one row in edit mode showing the real value and a header context menu item 'Reveal passwords' visible.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-018",
+  "title": "Host grid columns cannot be sorted — header click selects the column instead",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "form1-a",
+  "lens": "ux",
+  "existing_state": "Every column added to the host grid is forced to DataGridViewColumnSortMode.NotSortable in Dgv_Variables_ColumnAdded (Form1.cs:4306). Clicking a column header instead selects all cells in that column (Form1.cs:4264-4271). So a 200-row fleet cannot be ordered by hostname, site, port, or any custom variable column — rows live in raw CSV order forever. Professional grid tools (mRemoteNG, Excel, even basic DataGridView defaults) all sort on header click; here the gesture is repurposed with no replacement affordance anywhere.",
+  "recommendation": "Add sorting via a modifier or context menu rather than breaking the existing header-click-selects-column gesture: e.g. header right-click menu gains 'Sort ascending / descending / Restore CSV order', or double-click on header toggles sort. Implement with DataGridView.Sort(column, direction) (grid is unbound — rows are added directly, Form1.cs:2306). Track original CSV order in a hidden index so 'Restore CSV order' is possible and Save CSV writes the original order (or explicitly the sorted order, user's choice). Connection-test visuals already survive row moves because state is keyed on row objects in a ConditionalWeakTable (Form1.cs:215). Verify the checkbox Select column and custom row-number painting (Form1.cs:4061-4085) behave after sort.",
+  "user_benefit": "Sorting by hostname or by a site/role column is how operators audit a fleet ('are all DC1 switches checked?') and spot duplicates. Right now the data is frozen in whatever order the CSV was authored.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "4304-4308", "note": "Dgv_Variables_ColumnAdded forces SortMode = NotSortable on every column"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "4261-4272", "note": "Header click is repurposed to select the whole column — no sort gesture remains"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-019",
+  "title": "Preset filter searches names only — cannot find presets by script content",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "form1-b",
+  "lens": "ux",
+  "existing_state": "The preset search box (InitializePresetSearchFilter, Form1.cs:8967-9037) filters via PresetMatchesFilter (Form1.cs:9080-9085), which is a single name-contains check: `presetName.Contains(filterText, StringComparison.OrdinalIgnoreCase)`. FolderHasMatchingPresets (9087-9100) recurses folders but ultimately calls the same name-only predicate. In an app whose presets are multi-line YAML scripts and command lists, there is no way to answer \"which preset touches `show running-config`?\" or \"where do I use the {{vlan}} variable?\" — the user must open presets one by one.",
+  "recommendation": "Extend PresetMatchesFilter to optionally match PresetInfo.Commands (the preset manager already holds all preset content in memory, so this is an extra string.Contains per preset — trivially fast at preset-list scale, and the 150 ms debounce at Form1.cs:9002 already protects against keystroke churn). Add a small scope toggle next to the filter box (\"Aa | name+content\") or a `c:` prefix convention, and visually distinguish content-only matches in the tree (e.g. dimmer star or suffix) so users understand why a preset whose name does not contain the term appears.",
+  "user_benefit": "Content search is the expected behavior in every script-management tool (VS Code, SecureCRT command manager). For a user with dozens of YAML presets it is the difference between finding the right script in seconds versus opening them one at a time.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "9080-9085", "note": "PresetMatchesFilter is name-contains only"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "9002-9010", "note": "existing 150 ms debounce makes content scan cheap to add"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-020",
+  "title": "Run Output console: Find shows a match count but cannot jump between matches; buffer truncates silently at 5000 lines; no save-to-file",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "flowcanvas-ui",
+  "lens": "ux",
+  "existing_state": "The Run Output console's Find bar (panels/RunOutputView.tsx:93-114) computes a total match count (RunOutputView.tsx:32-39) and <mark>-highlights every occurrence (:164-177), but there is no next/previous control, no current-match tracking, and no scroll-to-match — on a multi-thousand-line run against a device fleet, '47 matches' leaves the user manually scrolling to find them. The buffer keeps only the last 5000 lines (MAX_RUN_OUTPUT_LINES, stores/slices/executionSlice.ts:4) and appendRunOutput drops the oldest lines with no indicator whatsoever (executionSlice.ts:119-127), so on long runs the beginning of the output vanishes without the user knowing it ever existed. The only export is clipboard 'Copy all' (RunOutputView.tsx:87) — no save-to-file for attaching a run log to a ticket. The detached window (?panel=runoutput) shares all three gaps since it renders the same component.",
+  "recommendation": "1) Track currentMatchIndex in RunOutputView, add up/down buttons + Enter/Shift+Enter in the find input, render the current match with a distinct mark style, and scrollIntoView its line div ('3 of 47'). 2) When appendRunOutput truncates, prepend a one-line sentinel (e.g. '— output truncated, showing last 5000 lines —') or keep a truncatedLines counter the view renders as a banner. 3) Add a 'Save…' toolbar button posting a small save-run-output message to the host (FlowCanvasForm shows SaveFileDialog and writes the buffer) — mirroring the existing browse-path request/response pattern.",
+  "user_benefit": "The run console is the primary triage surface after executing against hosts. Jump-to-match turns Find from decorative into functional, the truncation banner prevents silently losing the first half of a long run, and save-to-file closes the loop for sharing/auditing run logs.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\RunOutputView.tsx", "lines": "32-39, 93-114, 164-177", "note": "count-only find, no nav controls, all-matches highlight with no current"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\executionSlice.ts", "lines": "4, 119-127", "note": "silent oldest-line drop at 5000 lines"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\RunOutputView.tsx", "lines": "87", "note": "Copy-all is the only export path"}
+  ],
+  "mockup_idea": "Find bar before/after: current [input · '47 matches'] vs. [input · '3 of 47' · up/down arrows] with the current match in an orange mark while others stay cyan, plus a dim '— output truncated, showing last 5000 lines —' banner pinned at the top of the scrollback.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-021",
+  "title": "Multi-select can only delete — no bulk disable, breakpoint, duplicate, or align operations",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "flowcanvas-ui",
+  "lens": "ux",
+  "existing_state": "The canvas has a complete selection model (shift-click toggle, drag rectangle — App.tsx) but selecting 2+ blocks renders only a '{n} blocks selected' placeholder in the Properties panel (panels/Properties.tsx:1577-1594). The block context menu operates on the single right-clicked nodeId only (BlockContextMenu.tsx:62, removeNodes([nodeId]) at :115-118). The sole multi-node operation is keyboard Delete. There is no bulk disable/enable, bulk breakpoint set/clear, multi-duplicate, or align/distribute — table stakes in comparable node editors. This overlaps the FLOW_CANVAS_ENHANCEMENTS.md roadmap ('Multi-Select Action Bar + Bulk Ops', lines 154-155, rated Impact 4 / Effort M).",
+  "recommendation": "Per the roadmap, render a floating action bar (React Flow's NodeToolbar with nodeId={selectedIds} or a fixed strip above the canvas) when selectedNodeIds.size > 1, offering: Disable/Enable all (loop toggleDisabled), Set/Clear breakpoints (loop toggleBreakpoint), Duplicate (reuse utils/clipboard.ts copy+paste), Delete with count confirmation, and Align left/top (single undo snapshot + layout autosave). Alternatively start smaller: replace the Properties placeholder with these as buttons.",
+  "user_benefit": "Debugging a 60-block preset routinely means 'disable these five blocks' or 'breakpoint this whole branch' — today that is five separate right-click round-trips. Bulk gestures collapse minutes of clicking into one.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\Properties.tsx", "lines": "1577-1594", "note": "multi-select renders a count placeholder only"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\BlockContextMenu.tsx", "lines": "62, 110-120", "note": "context menu is single-node; delete passes [nodeId]"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FLOW_CANVAS_ENHANCEMENTS.md", "lines": "154-155, 286", "note": "roadmap overlap: Multi-Select Action Bar already planned"}
+  ],
+  "mockup_idea": "Canvas with three blocks rubber-band selected and a floating pill bar above them: [Disable 3] [Breakpoints] [Duplicate] [Align] [Delete 3] — versus today's empty right panel saying '3 blocks selected'.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-022",
+  "title": "Copy/paste is a second-class citizen: fixed-offset paste, no cut/duplicate, and container subtrees don't duplicate cleanly",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "flowcanvas-state",
+  "lens": "ux",
+  "existing_state": "Paste always lands at the ORIGINAL node position +30/+30 (FlowCanvas/src/utils/clipboard.ts:48-56) — copy a block, scroll to the other end of a long preset, Ctrl+V, and the paste appears off-screen back where the source was. Only Ctrl+C/Ctrl+V exist (hooks/useKeyboardShortcuts.ts:48-74); there is no Ctrl+X cut or Ctrl+D duplicate-in-place. The deep copy keeps data.props untouched (clipboard.ts:44-57), so a copied container child still carries _isChildOf/_stepPath/_membershipFromConnect pointing at the ORIGINAL container — branch bands, the layout tree, and export-regeneration then treat the pasted copy as a member of the original's branch, so duplicating an If with its children does not produce an independent subtree. The module-level clipboard (clipboard.ts:9) also survives preset switches, so paste can inject nodes whose metadata references ids from a different preset.",
+  "recommendation": "Track the last pointer position (or use ReactFlow screenToFlowPosition of the viewport center) and paste there. In pasteNodes, sanitize props: drop _membershipFromConnect/_branchLabel/_branchColor/_forceGraphExport always; remap _isChildOf through idMap when the parent was copied too, else strip _isChildOf/_stepPath so the paste is a clean orphan ready to wire. Add Ctrl+X (copy + removeNodes) and Ctrl+D (copy+paste near selection in one snapshot). Clear the clipboard in the load-graph handler (stores/messageBridge.ts resetGraphSessionState) to stop cross-preset id leakage.",
+  "user_benefit": "Duplicating a worked-out If/Try pattern — the most common way power users build the next section of a 200-host script — becomes a one-keystroke, lands-where-you-look operation instead of producing a half-linked copy you must hunt down and untangle.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\clipboard.ts", "lines": "9, 38-70", "note": "module-level clipboard; paste at source position +30/+30; data.props (incl. _isChildOf/_stepPath) copied verbatim, never sanitized or remapped"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\hooks\\useKeyboardShortcuts.ts", "lines": "48-74", "note": "only Ctrl+C/Ctrl+V wired; no cut, no duplicate"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\childMembership.ts", "lines": "43-45", "note": "membership is read from data.props — stale copied metadata is honored by bands/layout/export"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-023",
+  "title": "Undo/redo silently desyncs from the host's saved layout, and comment edits aren't undoable",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "flowcanvas-state",
+  "lens": "ux",
+  "existing_state": "undo/redo restore only nodes+edges+exportStatus (FlowCanvas/src/stores/slices/undoSlice.ts:46-98) and never call sendLayoutAutosave — but every forward action does autosave (drag stop, comment ops, etc. via utils/layoutAutosave.ts). So after Ctrl+Z the canvas shows one graph while the host's persisted layout (WindowState positions, Manual-mode tuple merge) still holds the un-undone one; undo a drag, close the window, reopen — the undo is gone. isDirty is also never recomputed on undo (undoSlice.ts has no isDirty handling; it's only set true by edits at graphSlice.ts:416/424/454/505/559 and cleared on load at :637), so undoing back to the exact loaded state still reports unsaved changes. Separately, updateComment performs no pushSnapshot (FlowCanvas/src/stores/slices/commentSlice.ts:45-71) while add/remove comment do — so Ctrl+Z right after editing a comment's text skips the comment and reverts the previous structural change instead, a destructive surprise.",
+  "recommendation": "Call sendLayoutAutosave() (and flush on window close) at the end of undo() and redo() in undoSlice.ts so the host mirror tracks the visible graph. Push one undo snapshot per comment edit session (on focus/blur boundary, mirroring how Properties.tsx pushes one per property edit session) in commentSlice.updateComment. For isDirty, stamp each snapshot with the isDirty value at capture time and restore it on undo/redo.",
+  "user_benefit": "Ctrl+Z becomes trustworthy: what you see after undo is what persists across a close/reopen, and editing a comment can't silently sacrifice your last structural edit to the undo stack.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\undoSlice.ts", "lines": "30-98", "note": "snapshots carry nodes/edges only; undo/redo restore them + clear exportStatus; no sendLayoutAutosave, no isDirty"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\commentSlice.ts", "lines": "45-71", "note": "updateComment autosaves to host but pushes no undo snapshot (add/remove do)"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\graphSlice.ts", "lines": "416-424, 637-638", "note": "isDirty set by every edit, cleared only by load-graph"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-024",
+  "title": "Run and Stop — the app's most frequent actions — have no keyboard path on the main form",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "keyboard-access",
+  "lens": "cross",
+  "existing_state": "Executing on hosts and stopping a run are mouse-only from the main window. ProcessCmdKey handles only Ctrl+S/Ctrl+F/Ctrl+Z/F3 (Form1.cs:14450-14480); the menu shortcut inventory is limited to file ops, find, and validate (Form1.Designer.cs:1503-1607 — Ctrl+O/Ctrl+S/Ctrl+Shift+S/Ctrl+F/Ctrl+Shift+V); there is no Run/Execute menu at all, and 'Run Selected'/'Stop' buttons carry no mnemonic (Designer:1055, 1073). Escape is handled nowhere at form level (only the preset-search box clears on Esc, Form1.cs:9021). Meanwhile the Flow Canvas window DOES bind F5 to run (useKeyboardShortcuts.ts:133), so the same app teaches F5=run in one window and ignores it in the other. Compounding it, the Stop button is a FlatVisualButton whose OnPaint draws no focus rectangle (UI/FlatVisualButton.cs:86-118) — even a user tabbing to Stop gets no visual cue it is focused.",
+  "recommendation": "Add F5 -> btnExecuteSelected.PerformClick() and Shift+F5 or Esc-while-executing -> StopExecution() in Form1.ProcessCmdKey (guard Esc on _executionCoordinator.IsRunning so it doesn't swallow normal Esc usage), matching the Flow Canvas F5 convention. Optionally add a 'Run' top-level menu (Run Selected / Run Checked / Stop / Test Connection) so the shortcuts are discoverable. In FlatVisualButton.OnPaint, draw ControlPaint.DrawFocusRectangle when Focused && ShowFocusCues.",
+  "user_benefit": "Fleet operators iterating command-tweak/run cycles can keep hands on the keyboard, and can abort a multi-host run instantly without mousing to the Stop button.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "14450-14480", "note": "ProcessCmdKey: no F5/Esc/run/stop handling"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.Designer.cs", "lines": "1503-1607", "note": "Full ShortcutKeys inventory — nothing execution-related"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.Designer.cs", "lines": "1055, 1073", "note": "'Run Selected'/'Stop' button text without mnemonics"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\FlatVisualButton.cs", "lines": "86-118", "note": "OnPaint draws background/border/text only — no focus rectangle (used by btnStopAll, Designer:132)"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\hooks\\useKeyboardShortcuts.ts", "lines": "133-146", "note": "Canvas already establishes F5=run convention"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-025",
+  "title": "Themed message dialogs lost MessageBox's Ctrl+C copy — error text can no longer be copied anywhere in the app",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "ui-utilities",
+  "lens": "ux",
+  "existing_state": "DialogTheme.ShowCore builds a plain Form with a Label and buttons (UI/DialogTheme.cs:631-750) and Confirm does the same (:535-586); neither has KeyPreview or any key handling, and Labels are not selectable. The stock MessageBox these replaced supports Ctrl+C natively (copies title + message + buttons to the clipboard). With 136 production call sites across the app now routed through DialogTheme, every error surface — SSH failures, Vault errors, config load problems, job validation messages — is an unselectable, uncopyable label. A user who wants to paste an error into a search, ticket, or chat has to retype it or screenshot it.",
+  "recommendation": "In ShowCore and Confirm set dlg.KeyPreview = true and handle Ctrl+C by writing the MessageBox-style block (title, message, button captions) to the clipboard, mirroring stock behavior. Optionally add a subtle 'Copy' glyph button in the title row for discoverability. One change in DialogTheme covers all 136 call sites.",
+  "user_benefit": "Restores an expected, muscle-memory capability of every Windows message box; directly useful when reporting SSH/Vault errors from fleet runs.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\DialogTheme.cs", "lines": "631-750", "note": "ShowCore: no KeyPreview/KeyDown, message is a Label"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\DialogTheme.cs", "lines": "535-586", "note": "Confirm: same — no key handling"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-026",
+  "title": "Missed runs after sleep/reboot are recorded but dead-end — no startup prompt or catch-up option",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scheduler-e2e",
+  "lens": "cross",
+  "existing_state": "On startup, RecordMissedSchedulerRunsOnStartup (Form1.cs:15258-15283) detects recurring runs missed during downtime (via SchedulingService.DetectMissedRunSummaries, Services/SchedulingService.cs:148-181) and writes one aggregated skipped-summary record into each affected job's history — and that is the entire surfacing. There is no startup banner, no toast, no prompt, and no \"run missed jobs now\" affordance; the orange 'SKIPPED (n)' row is visible only if the user opens the Job List dialog AND selects that specific job's history. Missed runs are never auto-executed (by design), but the user is also never told they were missed. Note this covers shutdown-to-startup gaps only; the detection anchors on LastAppShutdownUtc, so laptop sleep without app restart is handled separately by the evaluation window and collapses multiple missed occurrences into one run (JobExecutionService.cs:1028).",
+  "recommendation": "Make the existing summaries actionable at startup: after RecordMissedSchedulerRunsOnStartup, if any summaries were written, show a dismissible non-modal notification (output-panel line + optional toast) like \"3 scheduled runs were missed while SSH Helper was closed\" with a click-through to the Job List, and add a 'Run missed jobs now' action that fan-outs RunNowAsync for the affected job ids (reusing RunTrackedJobNowAsync, Form1.cs:15311-15326). Optionally a per-job 'catch up on missed runs at startup' checkbox for jobs where one late run is acceptable (the standard cron 'catch-up' / anacron semantic for nightly backups).",
+  "user_benefit": "A machine that was off overnight currently produces silently-missing backups; the operator must know to go digging in per-job history. A one-line prompt with a catch-up action turns downtime into at most one click of recovery.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "15258-15283", "note": "Missed-run detection writes history summaries only; no UI surfacing or action"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SchedulingService.cs", "lines": "148-181", "note": "DetectMissedRunSummaries — enabled recurring jobs only"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "15311-15326", "note": "RunTrackedJobNowAsync already exists as the run-now primitive a catch-up action would reuse"}
+  ],
+  "mockup_idea": "Startup state of the main window with a slim dismissible banner under the menu bar: \"3 scheduled runs were missed while SSH Helper was closed (Nightly FortiGate Backup ×2, Switch Config Audit ×1) — [Run missed jobs now] [Review] [Dismiss]\".",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-027",
+  "title": "Scheduler tuning knobs (max concurrent jobs, history retention defaults) exist only as hand-edited config.json fields; concurrency change needs a restart",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "jobs-scheduling",
+  "lens": "ux",
+  "existing_state": "Four scheduler-wide settings live in AppConfiguration — MaxConcurrentJobs (default 3), DefaultMaxHistoryRuns (50), DefaultHistoryRetentionDays (30), MaxJobOutputCharsPerHost (1 MiB) (Models/AppConfiguration.cs:140-158) — but a project-wide grep shows zero references from SettingsDialog.cs or any other settings UI; the only way to change them is editing %LocalAppData%\\SSH_Helper\\config.json by hand. The per-job overrides do have editor UI (JobEditorDialog.cs:1670-1679, 2126-2128), which makes the missing global counterparts feel like an oversight rather than a decision. Additionally, MaxConcurrentJobs is read once in the JobExecutionService constructor to size the SemaphoreSlim (Services/JobExecutionService.cs:140-142), so even a hand-edit takes effect only after an app restart — with no indication of that anywhere.",
+  "recommendation": "Add a 'Scheduler' group to SettingsDialog with the four numeric fields (NumericUpDown with the same bounds the resolver normalizes to; note next to MaxConcurrentJobs explaining queueing). For live application, either recreate the semaphore on ConfigurationService save when the value changed (drain-then-swap, or simply Release/Wait the delta), or — minimum viable — show 'takes effect after restart' beside the field. SchedulerHistoryPolicyResolver already consumes config at run-time (Services/SchedulerHistoryPolicyResolver.cs:17-19), so the three history fields apply live for free.",
+  "user_benefit": "A power user scheduling many jobs against a 200-device fleet can raise concurrency or tighten history retention from the Settings dialog like every other option in the app, instead of discovering undocumented JSON fields and guessing why edits don't take effect.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs", "lines": "140-158", "note": "Four scheduler knobs defined; grep across all .cs files shows consumers are only services and tests — no settings UI"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "140-142", "note": "MaxConcurrentJobs read once at construction into SemaphoreSlim — restart required"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs", "lines": "1670-1679, 2126-2128", "note": "Per-job history overrides have full editor UI; global defaults have none"}
+  ],
+  "mockup_idea": "Settings dialog screenshot sketch: existing settings tree with a new 'Scheduler' section containing 'Max concurrent jobs [3]', 'Default history: keep [50] runs / [30] days', 'Max output per host [1024] KB', with a grey hint 'Jobs beyond the limit are queued, not skipped'.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-028",
+  "title": "Per-job command timeout override is capped at 300s while the app and presets allow 3600s — long-running script jobs can't be tuned upward",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "dialogs-jobs-history",
+  "lens": "ux",
+  "existing_state": "JobEditorValidator.MaxCommandTimeoutOverrideSeconds is 300 (Utilities/JobEditorValidator.cs:13) and the Advanced-tab NumericUpDown is bound to that maximum (JobEditorDialog.cs:1249-1250), but everywhere else in the app a command timeout may be up to 3600s (InputValidator.IsValidTimeout, Utilities/InputValidator.cs:95-98). Worse, when the user first checks 'Override command timeout', the control is seeded with the inherited app/preset timeout passed through ClampNumericValue (JobEditorDialog.cs:1501-1507) — so a job targeting a preset with a 20-minute timeout silently shows 300, and the override can only ever shorten, never extend, beyond 5 minutes. Long-running YAML script jobs (config backups, firmware staging) are a core use case for the scheduler, and this is exactly where a per-job timeout bump is wanted.",
+  "recommendation": "Raise MaxCommandTimeoutOverrideSeconds to 3600 to match InputValidator.IsValidTimeout (one constant in Utilities/JobEditorValidator.cs:13; the NumericUpDown maximum and the validation message at JobEditorValidator.cs:199 follow automatically). Update the corresponding bound in JobEditorValidationTests if asserted. Optionally, when the seeded inherited value would have been clamped, surface it in the guidance label ('Inherited: preset X timeout (1200 sec)') instead of silently snapping the spinner.",
+  "user_benefit": "Scheduled jobs running long scripts can finally be given the timeout they need per job instead of forcing a global or per-preset change; removes a silent surprise where the editor shows 300 for a 1200-second inherited timeout.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JobEditorValidator.cs", "lines": "12-13, 191-200", "note": "MaxCommandTimeoutOverrideSeconds = 300 and the range validation"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\InputValidator.cs", "lines": "95-98", "note": "App-wide timeout validity allows up to 3600s"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs", "lines": "1249-1250, 1501-1507, 1552-1559", "note": "Spinner bound to the 300 cap; inherited value silently clamped on first check via ClampNumericValue"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-029",
+  "title": "History retention is count-only — 30 full transcripts can mean unbounded disk with no age or size policy",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "persistence-config",
+  "lens": "ux",
+  "existing_state": "Main execution history retention is purely count-based: EnforceRetention trims the index to MaxHistoryEntries and deletes evicted run files (Services/HistoryStorageService.cs:674-683, invoked from SaveRun at :474). MaxHistoryEntries defaults to 30 (Models/AppConfiguration.cs:73) and the Settings dialog exposes only that single number, clamped 1-500 (SettingsDialog.cs:2550, 2667). Each run payload stores the full combined output plus per-host outputs plus ExecutionDetails including interactive-terminal transcripts, so a 200-host run file can be tens of megabytes; 500 of them is multi-GB with no age-based pruning and no visibility into usage. Notably the scheduler's job history DOES have day-based retention (DefaultHistoryRetentionDays, AppConfiguration.cs:152) — main history is the odd one out.",
+  "recommendation": "Add optional age-based retention (\"delete runs older than N days\", mirroring the existing job-history policy) and an optional total-size cap to EnforceRetention; surface both next to the Max History numeric in SettingsDialog along with a live \"History is using 412 MB (37 runs)\" readout computed from the run folder, with a 'Clean up now' button.",
+  "user_benefit": "A daily 200-host operator either keeps history tiny (losing the audit trail) or lets multi-GB run files accumulate invisibly in %LocalAppData%. Age/size policies plus a usage readout match what the app already does for scheduled-job history.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\HistoryStorageService.cs", "lines": "674-683", "note": "EnforceRetention: count cap only"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs", "lines": "73", "note": "MaxHistoryEntries default 30; no age/size knobs for main history"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "2550-2667", "note": "only the count is exposed in settings"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-030",
+  "title": "vault_path cannot resolve password-only secrets — the username key is mandatory even though the code intends it to be optional",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "integrations",
+  "lens": "ux",
+  "existing_state": "VaultCredentialProvider always requests both the username and password keys (Services/Vault/VaultCredentialProvider.cs:47-49) and even has tolerance code for a missing username (result.TryGetValue at :51-52, success requires only a non-empty password at :57). But VaultService.ReadSecretKeysAsync is all-or-nothing: if ANY requested key is absent it throws (Services/Vault/VaultService.cs:132-139), so the tolerance at :51-52 is unreachable — a Vault secret containing only a password field always throws, gets swallowed (:59-63), and triggers the silent fallback. This blocks a very common fleet pattern: one shared admin username kept in the grid's username column (or toolbar), with per-device passwords in Vault. Today such users must duplicate the username into every Vault secret.",
+  "recommendation": "Add an optional-keys capability: either an overload ReadSecretKeysAsync(..., bool requireAll) that returns nulls for missing keys, or have VaultCredentialProvider read the password via ReadSecretAsync and attempt the username separately, ignoring the 'no key' VaultException for username only. Then merge: if Vault returned no username, keep the row/toolbar username instead of overwriting it (Form1.cs:13340 currently replaces host.Username unconditionally on vault success; JobExecutionService.cs:520 same).",
+  "user_benefit": "Fleets that store only per-device passwords in Vault (shared username managed elsewhere) can use vault_path at all — today they hit a silent failure they can't even diagnose. Removes a forced duplication of usernames into every secret.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs", "lines": "132-139", "note": "any missing key throws — all-or-nothing"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultCredentialProvider.cs", "lines": "47-57", "note": "requests both keys; the TryGetValue tolerance and password-only success check are unreachable for missing keys"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "13340-13342", "note": "on vault success the grid username is overwritten unconditionally"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-031",
+  "title": "SMTP notifications cannot use implicit-TLS servers (port 465) — EnableSsl only does STARTTLS",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "integrations",
+  "lens": "ux",
+  "existing_state": "SmtpDispatcher is built on System.Net.Mail.SmtpClient with EnableSsl = profile.UseStartTls (Services/Notifications/SmtpDispatcher.cs:86-90). SmtpClient's EnableSsl implements only STARTTLS upgrade on a plaintext connection; it cannot speak SMTPS/implicit TLS, so any relay that requires port 465 (common for hardened enterprise relays and most consumer providers' legacy submission ports) fails with an opaque handshake/timeout error in NotificationResult. SmtpClient is also formally deprecated by Microsoft with MailKit as the recommended replacement. The Settings UI offers only a 'UseStartTls' checkbox and a port spinner defaulting to 587 (SettingsDialog.cs:1314), with no security-mode choice and nothing warning the user that 465 won't work.",
+  "recommendation": "Replace SmtpDispatcher's transport with MailKit's SmtpClient (single NuGet package, no native deps), mapping a new profile enum SmtpSecurity { None, StartTls, ImplicitTls } onto MailKit's SecureSocketOptions; keep UseStartTls deserialization as a back-compat alias mapping to StartTls. Expose the mode as a dropdown in the Notifications tab next to the port field (auto-suggest 587 for STARTTLS, 465 for implicit). The dispatcher is already virtual and isolated behind NotificationService, so the swap is contained to one file plus the model/UI fields.",
+  "user_benefit": "Email notifications work against the full range of corporate and cloud mail relays, not just STARTTLS-on-587 ones — and the failure mode for the wrong port becomes a clear configuration choice instead of a cryptic timeout.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Notifications\\SmtpDispatcher.cs", "lines": "86-95", "note": "SmtpClient with EnableSsl=UseStartTls — STARTTLS only, no implicit TLS path"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "1314", "note": "port spinner defaults to 587; only a StartTls checkbox, no security-mode selection"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-032",
+  "title": "SSH config support is a silent 6-directive subset: parse errors, ignored directives, and !negation all invisible to the user",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "ui-utilities",
+  "lens": "ux",
+  "existing_state": "The Settings UI offers a single bare checkbox 'Use SSH config file (~/.ssh/config)' (SettingsDialog.cs:447) with zero feedback about what was actually loaded. Underneath, SshConfigParser supports exactly six directives — hostname, port, user, identityfile, hostkeyalgorithms, ciphers (Utilities/SshConfigParser.cs:12-15); every other key (ProxyJump, IdentitiesOnly, Include, Match, KexAlgorithms...) is silently dropped at :79-86. Any I/O or parse exception returns an empty config with no error surfaced (:32-41), and SshConfigService likewise swallows reload failures, returning the stale cache (Services/SshConfigService.cs:66-69). Worse, OpenSSH '!' negation patterns are treated as literal hostnames: MatchesPattern (:190-212) regex-escapes the '!', so 'Host * !prod.example.com' matches prod via the '*' and applies options OpenSSH would explicitly exclude — wrong credentials/keys applied with no hint. A network engineer pointing this at a real, battle-grown ~/.ssh/config gets partial, sometimes wrong behavior and no way to see it.",
+  "recommendation": "Two layers: (1) Make the integration observable — have SshConfigParser collect warnings (unsupported directive X at line N, parse error, negation pattern seen) into SshConfigFile, and surface them next to the Settings checkbox ('Loaded: 14 hosts, 3 unsupported directives — details') plus a one-time status line when a run applies config values. (2) Implement '!' negation correctly in MatchesHost (any negated match excludes the entry) and consider Include support, which is parser-local. ProxyJump/jump-host support is a larger engine feature — flag it as out of scope here but list it in the warning so users know it is ignored.",
+  "user_benefit": "Users with existing OpenSSH configs can trust what the app did and did not apply, instead of debugging mysterious auth failures; fixes a case where the app actively applies config to hosts the user excluded.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\SshConfigParser.cs", "lines": "12-15, 79-86", "note": "6-key whitelist; everything else silently dropped"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\SshConfigParser.cs", "lines": "32-41, 190-212", "note": "catch-all returns empty config; '!' regex-escaped so negation is ignored"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConfigService.cs", "lines": "66-69", "note": "reload failure silently returns stale cache"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "447", "note": "bare checkbox, no load status or warnings"}
+  ],
+  "mockup_idea": "Settings General tab: under the 'Use SSH config file' checkbox, a status line 'config: 14 host blocks loaded - 2 warnings' with a 'View' link opening a themed list: 'line 23: ProxyJump not supported (ignored)', 'line 8: negation pattern !prod now honored'.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-033",
+  "title": "String comparison semantics are inconsistent and uncontrollable across conditions and functions, and sort() has no numeric mode (1, 10, 2)",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scripting-functions",
+  "lens": "ux",
+  "existing_state": "sort() always sorts with StringComparer.OrdinalIgnoreCase (Services/Scripting/JsonUtilities.cs:467-480); a list of extracted port numbers or latencies sorts as [\"1\",\"10\",\"2\"], and there is no numeric mode and no sort_by(list, x => expr) lambda variant. Case handling is inconsistent across the whole expression layer with no override anywhere: condition operators `contains`/`startswith`/`endswith` use OrdinalIgnoreCase (ExpressionEvaluator.cs:130, 139, 148), equality is case-insensitive with a 0.0001 numeric epsilon (AreEqual, ExpressionEvaluator.cs:399-416), and `in`/`not in` call ValueResolver.CollectionContains without passing a mode (112, 121) even though CollectionContains already accepts an `ordinal` mode and ResolveComparisonComparer exists precisely for this (ValueResolver.cs:370-394). Function-side, contains/startswith/endswith/index_of are hardcoded OrdinalIgnoreCase (StringFunctions.cs:48, 58, 68, 294) while legacy replace() is hardcoded case-SENSITIVE Ordinal (JsonUtilities.cs:394) and legacy indexof() for lists is ignore-case (JsonUtilities.cs:550). Only distinct() and push_unique() expose an optional comparer argument (JsonUtilities.cs:512, 524). There is no case-sensitive comparison syntax at all — relevant when matching case-significant device output like interface flags (Up vs UP), tokens, base64 secrets, or mixed-case hostnames, which silently match when they shouldn't.",
+  "recommendation": "Extend sort() with a mode argument ('numeric' parses values as doubles and sorts numerically; 'ordinal'/'ignore_case' reuse ValueResolver.ResolveComparisonComparer) and add sort_by(list, x => expr[, mode]) to CollectionFunctions following the existing SplitCollectionAndLambda pattern. Apply the comparer-argument convention distinct() already established to contains/startswith/endswith/index_of/replace as an optional trailing arg, keeping current defaults for backward compatibility. In the condition grammar, expose case-sensitive operator variants with minimal growth (e.g. an operator suffix like `==s`/`contains_cs` or a trailing `(case)` modifier) routed to StringComparison.Ordinal, and thread the existing `ordinal` mode into the CollectionContains calls at ExpressionEvaluator.cs:112/121. Document the default-insensitive semantics per function/operator in SCRIPTING.md — today they are entirely implicit.",
+  "user_benefit": "Sorting extracted numeric data correctly and matching case-significant device output are everyday needs; today users hit silent wrong ordering and silent wrong matches with no escape hatch except regex contortions, and the default behavior is undiscoverable.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\JsonUtilities.cs", "lines": "467-480", "note": "sort: always OrdinalIgnoreCase string sort; only asc/desc arg"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs", "lines": "41-69, 294", "note": "contains/startswith/endswith/index_of hardcoded ignore-case"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\JsonUtilities.cs", "lines": "385-396, 505-529", "note": "replace is hardcoded case-sensitive Ordinal; distinct/push_unique already show the optional-comparer pattern to generalize"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionEvaluator.cs", "lines": "112, 121, 130, 139, 148, 399-416", "note": "all condition comparisons hardcoded OrdinalIgnoreCase; CollectionContains called without mode"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ValueResolver.cs", "lines": "370-394", "note": "ordinal comparer plumbing already exists but is unreachable from conditions"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 2
+ },
+ {
+  "id": "ENH-034",
+  "title": "extract regex options are hardcoded (IgnoreCase|Multiline) with no way to opt out; named groups silently overwrite variables",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-commands-a",
+  "lens": "ux",
+  "existing_state": "ExtractCommand compiles every user pattern with hardcoded `RegexOptions.Multiline | RegexOptions.IgnoreCase` (Services/Scripting/Commands/ExtractCommand.cs:60). The parser's allowed-key table for extract is only `from, pattern, into, match, required` (Services/Scripting/ScriptParser.cs:114) — there is no flags/options key, so case-sensitive matching of device output (interface flags, base64 tokens, mixed-case hostnames) is impossible unless the user happens to know the undocumented .NET inline-modifier workaround `(?-i)`. There is also no singleline/dotall option for patterns spanning config blocks. Separately, every named capture group is auto-exported as a context variable of the same name (ExposeNamedGroups, ExtractCommand.cs:195-208), silently overwriting any existing script variable that shares the name, with no opt-out.",
+  "recommendation": "Add an optional `flags:` (or individual `case_sensitive: true`, `dotall: true`) key to ExtractOptions, thread it into the RegexOptions construction at ExtractCommand.cs:60, and register the key in the ScriptParser allowed-key table at line 114 plus the extract option parser so editor validation/autocomplete pick it up. While in there, add an optional `export_groups: false` to suppress ExposeNamedGroups for scripts that use named groups purely for pattern readability. Document the inline `(?-i)` escape hatch in the command reference either way.",
+  "user_benefit": "Precise parsing of case-significant device output without regex contortions, and no more mystery variable clobbering when a named group collides with an existing script variable.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExtractCommand.cs", "lines": "60", "note": "hardcoded Multiline | IgnoreCase"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExtractCommand.cs", "lines": "195-208", "note": "named groups unconditionally exported as variables, overwriting existing ones"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs", "lines": "114", "note": "allowed keys: from, pattern, into, match, required — no flags key exists"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-035",
+  "title": "Retry is fixed-linear only — no backoff, no retry-on-pattern, no max elapsed time",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scripting-core",
+  "lens": "ux",
+  "existing_state": "The retry loop (ScriptExecutor.cs:445-494) supports exactly two knobs: `retry: N` extra attempts and `retry_delay` as a fixed integer number of seconds (default 1, applied identically between every attempt at ScriptExecutor.cs:485-489). It retries on ANY failure — there is no way to retry only on transient errors (e.g. \"connection refused\", timeout) while failing fast on auth or syntax errors, no exponential backoff or jitter (with 200 hosts retrying in lockstep against a shared TACACS/RADIUS or jump host, fixed-interval hammering is the worst pattern), and no cap on total elapsed time. Ansible's `retries`/`delay`/`until` and every mature HTTP client (backoff + jitter) set the expectation here.",
+  "recommendation": "Extend the step-root retry options: `retry_backoff: exponential` (factor 2, capped by `retry_max_delay`), optional small jitter, `retry_if: <pattern-or-condition>` evaluated against `_last_error`/last output to gate which failures are retryable (reuse ExpressionEvaluator so `retry_if: _last_error contains \"timed out\"` works), and `retry_until: <condition>` for Ansible-style success polling. Parse them next to the existing retry keys (ScriptParser.cs:988-996), validate non-negative like retry/retry_delay already are, and apply in the ExecuteStepAsync loop.",
+  "user_benefit": "Flaky-WAN device fleets are the core use case; retrying only transient failures with backoff turns overnight job runs from \"rerun the failures by hand in the morning\" into self-healing runs without hammering shared infrastructure.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs", "lines": "445-494", "note": "retry loop: any-failure retry, fixed integer-seconds delay only"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs", "lines": "988-996", "note": "only retry/retry_delay keys exist"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-036",
+  "title": "foreach flattens every item to a string — iterating structured JSON requires re-parsing inside the loop",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scripting-commands-a",
+  "lens": "ux",
+  "existing_state": "Foreach resolves its collection via `ValueResolver.ResolveCollectionExpression` into a `List<string>` (Services/Scripting/Commands/ForeachCommand.cs:89, 193-196), and the loop variable is set to that string each iteration (ForeachCommand.cs:95). The map form likewise stringifies every value through `JsonUtilities.JsonNodeToStringValue` (ForeachCommand.cs:198-205). So iterating a JSON array of objects — the natural shape of an http/vault/parse result — hands the body a serialized object string, and every field access inside the loop must round-trip through json_get(item, 'field') re-parsing the same string. There is no way to write `{{device.name}}` against the loop variable.",
+  "recommendation": "Preserve structure through the loop: have ResolveCollection return `List<object?>` keeping JsonNode/dictionary elements intact when the source is a JSON array (strings stay strings, so existing scripts are unaffected), store the element object via context.SetVariable, and make sure the variable-substitution/expression layer supports property access (`item.field` / `{{item.field}}`) on stored object values — json_get can short-circuit on an already-structured value instead of re-parsing. The labelFor truncation (ForeachCommand.cs:96, 48-51) should stringify per-item for iteration-stepper labels as today.",
+  "user_benefit": "Scripts that iterate API results (interface tables, inventory exports, Vault secret lists) lose a layer of json_get boilerplate per field and a per-access re-parse, making the most common structured-data loop read like every other automation tool (Ansible loop items, PowerShell objects).",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ForeachCommand.cs", "lines": "89-96", "note": "items resolved as List<string>; loop var set to items[i] string"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ForeachCommand.cs", "lines": "193-205", "note": "ResolveCollection -> ResolveCollectionExpression (strings); map values stringified via JsonNodeToStringValue"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-037",
+  "title": "dns command supports only A/AAAA/PTR via the OS resolver — no TXT/MX/CNAME/SRV and no custom server",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scripting-commands-a",
+  "lens": "ux",
+  "existing_state": "DnsCommand whitelists exactly A, AAAA, and PTR (Services/Scripting/Commands/DnsCommand.cs:118-123) and resolves through System.Net.Dns (`GetHostAddressesAsync`/`GetHostEntryAsync`, DnsCommand.cs:143-154), which can only use the machine's configured resolver. The allowed-key table is `host, type, timeout, into, on_error` (Services/Scripting/ScriptParser.cs:131) — no `server:` key. For a network-operations tool this rules out the two most common verification tasks: checking TXT/MX/CNAME/SRV/NS records, and asking a SPECIFIC DNS server (e.g., 'has the record change propagated to each site's resolver?'). Any unsupported type fails the step with 'Dns type ... is not supported' (DnsCommand.cs:45-48).",
+  "recommendation": "Swap the System.Net.Dns backend behind the existing IDnsResolver seam (DnsCommand.cs:137-141) for a real DNS client (the DnsClient NuGet package is the standard choice) and extend IsSupportedType to TXT/MX/CNAME/SRV/NS/SOA. Add an optional `server:` option (IP or host of the resolver to query, defaulting to system resolvers) to DnsOptions and the parser key table at ScriptParser.cs:131. Keep the existing capture shape (`into` list + `into_count`) and render MX/SRV records as 'priority host' strings for backward-compatible list handling.",
+  "user_benefit": "DNS verification scripts (propagation checks across site resolvers, MX/TXT audits before mail or ACME changes) can run inside SSH_Helper presets instead of pushing engineers back out to nslookup/dig in a separate terminal.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\DnsCommand.cs", "lines": "118-123", "note": "type whitelist: A, AAAA, PTR only"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\DnsCommand.cs", "lines": "143-154", "note": "SystemDnsResolver wraps System.Net.Dns — system resolver only, no server selection"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs", "lines": "131", "note": "no server key in the dns option set"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-038",
+  "title": "parallel has no fail-fast and no per-branch result capture",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scripting-commands-b",
+  "lens": "ux",
+  "existing_state": "ParallelCommand starts every child step and always waits for all of them to finish via Task.WhenAll (Services/Scripting/Commands/ParallelCommand.cs:40-66); failures are only examined afterwards, in original order, and the first non-suppressed failure becomes the step result identified only as 'Parallel step N failed' (:80-92). ParallelOptions exposes exactly two knobs — Steps and MaxConcurrent (Services/Scripting/Models/ScriptStep.cs:1530-1541). There is no fail_fast to cancel remaining branches when one fails, and no 'into' aggregation: a script cannot ask 'which branches failed?' — results of all branches other than the first failure are discarded.",
+  "recommendation": "Add two options to ParallelOptions: fail_fast (bool — create a linked CancellationTokenSource and cancel it when a branch returns a non-suppressed failure, so long-running siblings stop instead of burning their full timeouts) and into (capture a list of per-branch records {index, success, message, duration_ms} as a JSON-ish structure the existing table/foreach commands can consume). Both slot cleanly into the existing results collection at :52-55 and the post-WhenAll walk at :80-92. Surface the fields in the Flow Canvas parallel block per Guideline 8.",
+  "user_benefit": "Fan-out health checks (ping/portcheck/webhook across services) become reportable — 'table: ${parallel_results}' instead of one opaque first-failure message — and a dead branch no longer holds the whole step hostage for its full timeout when fail_fast is on.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ParallelCommand.cs", "lines": "40-66, 80-92", "note": "all branches always run to completion; ordered post-hoc check returns only the first failure"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Models\\ScriptStep.cs", "lines": "1530-1541", "note": "ParallelOptions = Steps + MaxConcurrent only"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-039",
+  "title": "Datetime gaps: no date-to-epoch conversion, date_add discards your format, date_diff has no month/year units",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "scripting-functions",
+  "lens": "ux",
+  "existing_state": "epoch() ignores its arguments entirely and always returns the current Unix time (Services/Scripting/Functions/DateTimeFunctions.cs:52-55), so the inverse of epoch_to_date does not exist — you cannot convert a parsed log timestamp to epoch for arithmetic or comparison with device uptime counters. date_add accepts any input format from the ParseFormats list but always emits hardcoded 'yyyy-MM-dd HH:mm:ss' (line 105) with no output-format argument (parse_date and epoch_to_date both already take one, lines 68-73 and 162-168 — date_add is the odd one out). date_diff supports seconds through weeks only; 'months' or 'years' silently falls into the default arm and returns seconds (lines 122-130). Also, now() and now_local() are byte-identical local-time implementations (lines 37-45) — a trap for anyone assuming now() is UTC like most scripting environments.",
+  "recommendation": "In DateTimeFunctions: make epoch(ts?) parse an optional timestamp via the existing TryParseDateTime and return its Unix seconds (no arg keeps current behavior); add an optional 4th output-format arg to date_add matching the parse_date convention; add months/years arms to date_diff using calendar arithmetic; and document explicitly in SCRIPTING.md that now() is local (or add a one-line note in the function's autocomplete description once that exists).",
+  "user_benefit": "Time math against device logs is constant in this domain — 'alert if last config save is older than 7 days' currently requires no clean path because you cannot get an epoch from a parsed date, and date_add silently reformatting timestamps breaks downstream parse_date calls.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\DateTimeFunctions.cs", "lines": "52-55", "note": "Epoch ignores argsString — no date→epoch conversion exists"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\DateTimeFunctions.cs", "lines": "93-105", "note": "date_add output format hardcoded; unknown unit silently returns input"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\DateTimeFunctions.cs", "lines": "122-133", "note": "date_diff: months/years fall to default seconds arm"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\DateTimeFunctions.cs", "lines": "37-45", "note": "now and now_local are identical local-time implementations"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-040",
+  "title": "Diagnostics are a dead end: no error list, gutter markers, error count, or click-to-jump",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "editor",
+  "lens": "ux",
+  "existing_state": "Inline validation produces precise line/column diagnostics, but the only renderings are squiggle indicators (ApplyDiagnosticsVisuals, UI/ScintillaScriptEditorControl.cs:2192-2222) and a hover tooltip if you happen to dwell on the exact line/column (Editor_DwellStart, UI/ScintillaScriptEditorControl.cs:823-831). There is no margin/gutter marker, no error/warning count anywhere (the script footer panel shows only caret line/column via lblLinePosition, Form1.Designer.cs:921), no 'next error' navigation, and IScriptEditor only exposes SetDiagnostics/ClearDiagnostics — diagnostics can't even be read back by the host (UI/IScriptEditor.cs:28-29). The manual Validate Script path shows errors as flat text in a MessageBox (Form1.cs:5807-5811) with no way to click through to the offending line. In a long script the user must visually hunt for tiny squiggles, hover each one, and scroll to lines by hand.",
+  "recommendation": "Three layers, cheapest first: (1) add Scintilla margin markers (red/yellow circles) per diagnostic line in ApplyDiagnosticsVisuals — the marker infrastructure is already used for fold chevrons; (2) surface a live count in the existing scriptFooterPanel next to lblLinePosition ('2 errors, 1 warning'), clicking it or pressing F8 jumps the caret to the next diagnostic (expose GetDiagnostics + GoToDiagnostic on IScriptEditor); (3) optionally make the Validate Script result list clickable instead of a MessageBox. Layers 1-2 alone close most of the gap.",
+  "user_benefit": "Fixing a broken script becomes 'press F8, fix, repeat' instead of squinting for squiggles across hundreds of lines. Combined with the missing go-to-line, this is why script debugging currently pushes users out of the app.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs", "lines": "2192-2222", "note": "ApplyDiagnosticsVisuals renders indicator squiggles only — no markers, no aggregation"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\IScriptEditor.cs", "lines": "28-29", "note": "Interface only allows injecting/clearing diagnostics, no read-back or navigation"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "5807-5811", "note": "Validation errors presented as MessageBox text, no click-to-jump"}
+  ],
+  "mockup_idea": "After-state sketch of the script editor: red dot markers in the left gutter on lines 14 and 87, a footer chip reading '2 errors · 1 warning' beside 'Ln 23, Col 5', and a tooltip-style callout showing F8 having jumped the caret to line 14 with the squiggled token selected.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-041",
+  "title": "Accepting a command completion inserts only 'name: ' — required-option metadata the provider already has is never scaffolded, and commands have no documentation hover",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "editor",
+  "lens": "ux",
+  "existing_state": "ScriptAutocompleteProvider hand-maintains RequiredOptionKeysByCommand for 35 commands — e.g. sftp requires action/local_path/remote_path, extract requires from/pattern/into (Services/Editor/ScriptAutocompleteProvider.cs:180-217) — but this data is only used to badge and sort option keys in a later popup. Accepting a command inserts the bare key plus ': ' (BuildCompletionInsertText, UI/ScintillaScriptEditorControl.cs:1365-1386); the user must then recall and type each required option, triggering autocomplete once per key. Command descriptions are terse 1-3 word strings ('Selection', 'Case match' — ScriptAutocompleteProvider.cs:116-161) drawn right-aligned in the popup and hidden entirely when width is tight, and the dwell tooltip covers only diagnostics and variables — hovering a command name shows nothing (Editor_DwellStart, UI/ScintillaScriptEditorControl.cs:810-844). The hand-maintained maps have also already drifted: the parser knows 14 top-level keys including 'preconnect' (Services/Scripting/ScriptParser.cs:70-86) but TopLevelKeyDescriptions has 13 — preconnect appears in the list with no description (ScriptAutocompleteProvider.cs:163-178).",
+  "recommendation": "(1) Snippet scaffolding: when a StepCommand completion is accepted, expand RequiredOptionKeysByCommand into an indented body ('- sftp:' newline '    action: ' newline '    local_path: ' ...) and place the caret at the first value — the Enter-accept path already chains a Smart Enter (UI/ScintillaScriptEditorControl.cs:911-926), so this replaces that chain for commands with required options; make it a CommandEditorSettings toggle. (2) Add a StepCommand branch to ResolveVariableTooltip/Editor_DwellStart that shows the command description plus its required/optional keys on hover. (3) While there, single-source the metadata: move descriptions and required-key lists next to ScriptParser's KnownStepKeys/KnownTopLevelKeys so a new command registered in the parser cannot silently lack editor metadata (fixes the existing preconnect drift).",
+  "user_benefit": "New users stop guessing YAML shapes ('what does sftp need again?') and power users author steps in one accept instead of four autocomplete round-trips. Single-sourcing also stops the editor quietly falling behind every time a script command is added.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptAutocompleteProvider.cs", "lines": "180-217", "note": "Required options per command already encoded but unused at insert time"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs", "lines": "1365-1386", "note": "Insert text is label + ': ' only"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs", "lines": "810-844", "note": "Dwell tooltip covers diagnostics + variables only; no command help"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptAutocompleteProvider.cs", "lines": "163-178", "note": "TopLevelKeyDescriptions missing 'preconnect' vs ScriptParser.cs:70-86 — proof the hand-maintained maps drift"}
+  ],
+  "mockup_idea": "Before/after: left shows today — popup accepts 'sftp', buffer reads '- sftp: ' with a blinking caret and nothing else; right shows the accepted snippet '- sftp:' with 'action: ', 'local_path: ', 'remote_path: ' pre-indented beneath, caret on the action value, plus a small hover card over 'sftp' reading 'SFTP transfer — required: action, local_path, remote_path'.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-042",
+  "title": "All 71 expression functions are invisible to the script editor's autocomplete",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "samples-docs",
+  "lens": "cross",
+  "existing_state": "The engine registers 71 unique built-in functions across 8 categories (verified by extracting every Register() call in Services/Scripting/Functions/*.cs), and FunctionRegistry already exposes them programmatically via RegisteredNames (FunctionRegistry.cs:90). The Scintilla editor's ScriptAutocompleteProvider never touches any of this: a grep for 'function' in ScriptAutocompleteProvider.cs returns zero hits. Interpolation completion (the `${`/`{{` context, ScriptAutocompleteProvider.cs:44-45, 319, 450-456) offers only the 10 hardcoded BuiltInSymbols (lines 92-104), variables scraped from the script text, and host-grid columns — so typing `${jso` or writing a `set:` expression gets no help for json.get, regex_match, date_add, ip_in_cidr, etc. Users must keep SCRIPTING.md open to recall names and arity. Related but distinct: FLOW_CANVAS_ENHANCEMENTS.md:254-256 ('Engine Codex') proposes a bundled function catalog with signature help for the React canvas's code fields — that roadmap item explicitly notes the metadata (arity/help/examples) is not machine-readable today, and it does not cover the WinForms Scintilla editor at all.",
+  "recommendation": "Phase 1 (cheap): inject FunctionRegistry.RegisteredNames into the interpolation and set-expression completion contexts in ScriptAutocompleteProvider — names-only completion with the category as the Detail string, mirroring how CommandDescriptions feeds command completion (lines 116-161). Phase 2: extend the IFunctionCategory registration API with signature/description metadata (the exact prerequisite the Engine Codex roadmap item needs), then surface calltips in Scintilla and reuse the same generated catalog for the canvas — one metadata investment serving both editors.",
+  "user_benefit": "The expression library is the engine's power feature, and right now it is discoverable only by reading a 6,400-line markdown file; name completion alone would let users find string/JSON/network helpers at the moment they need them.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptAutocompleteProvider.cs", "lines": "92-104, 319, 450-456", "note": "interpolation completion = 10 hardcoded symbols + scraped variables + host columns; zero function references in file"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\FunctionRegistry.cs", "lines": "90", "note": "RegisteredNames already exposes all 71 names — unused by the editor"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FLOW_CANVAS_ENHANCEMENTS.md", "lines": "31, 254-256", "note": "roadmap covers the React-canvas side only and flags the missing metadata; Scintilla editor not in scope there"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-043",
+  "title": "F1–F12 are not forwarded to the host — menu-driven and full-screen apps are unusable in the interactive terminal",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "terminal",
+  "lens": "ux",
+  "existing_state": "The KeyDown function-key map (Forms/InteractiveTerminalForm.cs:303-320) covers Enter/Tab/Backspace/Escape/arrows/Home/End/PageUp/PageDown/Insert/Delete but no F-keys, so F1–F12 fall through to `return` at line 322-323 and never reach the host. Rebex's FunctionKey enum supports F1–F20 (verified in Rebex.Terminal 7.0.9313 XML docs), and the existing KeyInput path already forwards FunctionKey + modifiers (InteractiveTerminalService.cs:1830-1840), so this is purely a missing switch case. Network-device setup wizards, htop/mc/aptitude F-key bars, and any curses app with function-key menus (the alternate-screen apps the transcript filter at InteractiveTerminalService.cs:2272-2357 explicitly supports) cannot be driven from this terminal.",
+  "recommendation": "Add Keys.F1 through Keys.F12 → Rebex.TerminalEmulation.FunctionKey.F1–F12 cases to the switch in InteractiveTerminalForm_KeyDown (form 303-320). Modifiers (Shift/Ctrl/Alt+F-keys) are already collected at lines 326-329 and forwarded, so no service-side change is needed.",
+  "user_benefit": "Full-screen and menu-driven remote tools (htop, mc, device setup wizards) become fully usable instead of dead-ending the moment they ask for an F-key.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs", "lines": "303-323", "note": "Function-key switch has no F1-F12 cases; unmapped keys return without forwarding"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "1830-1840", "note": "KeyInput pipeline already sends FunctionKey + modifiers to the Rebex stream — only the mapping is missing"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-044",
+  "title": "Terminal appearance is fully hardcoded — ignores the app's code font setting, no zoom, fixed scrollback",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "terminal",
+  "lens": "ux",
+  "existing_state": "The terminal always renders Courier New 10pt in #BBBBBB-on-black (Forms/InteractiveTerminalForm.cs:117-119; both theme branches at 154-165 set the identical colors). The app already has FontSettings.CodeFontFamily (default \"Cascadia Code\", Models/AppConfiguration.cs:227) used by the rest of the UI, but the terminal ignores it. There is no font-size control and no Ctrl+wheel/Ctrl+= zoom, even though the viewport already invalidates cell metrics on FontChanged (UI/InteractiveTerminalViewportControl.cs:76-80), so live resizing would just work. Scrollback is hardcoded at 10,000 lines (Services/SshTerminalOptionsFactory.cs:15 DefaultHistoryMaxLength) with no setting; SettingsDialog.cs contains zero terminal/scrollback options (grep: 0 hits). Window position is remembered only in a per-process static (form 50-51, 739-771), unlike every other window which persists to WindowState.",
+  "recommendation": "Use config.FontSettings.CodeFontFamily (+ a new TerminalFontSize) when constructing the viewport font in InteractiveTerminalForm's ctor (line 117), and add Ctrl+MouseWheel zoom in TerminalView_MouseWheel (form 366-377) that rescales the Font (the FontChanged hook recomputes cells and EmitTerminalSizeChanged renegotiates cols/rows automatically). Surface scrollback length as a setting feeding SshTerminalOptionsFactory.CreateScriptingWithHistory's historyMaxLength parameter, and persist terminal window bounds to WindowState alongside the other windows.",
+  "user_benefit": "Daily-driver legibility: users get their preferred monospace font and can zoom during demos or on high-DPI monitors, and long device outputs (show tech-support easily exceeds 10k lines) stop silently scrolling out of reach.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs", "lines": "117-119, 154-165", "note": "Courier New 10pt and fixed colors hardcoded; both theme branches identical"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs", "lines": "227", "note": "CodeFontFamily setting exists app-wide but the terminal never reads it"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshTerminalOptionsFactory.cs", "lines": "15", "note": "DefaultHistoryMaxLength = 10000, not configurable; SettingsDialog has no terminal options"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\InteractiveTerminalViewportControl.cs", "lines": "76-80", "note": "FontChanged already invalidates cell metrics — zoom support is nearly free"}
+  ],
+  "mockup_idea": "Settings dialog 'Terminal' section: Font family dropdown (inherits Code font), Size spinner, Scrollback lines field; beside it a terminal screenshot at Cascadia Code 12pt vs the current Courier New 10pt.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-045",
+  "title": "Script library imports demand machine-specific absolute paths, making presets with imports unshareable",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "models-samples-build",
+  "lens": "ux",
+  "existing_state": "The subroutine-library feature hard-rejects any non-rooted import: ScriptSubroutineRegistryBuilder adds the validation error 'import path must be absolute' for anything failing Path.IsPathRooted (Services/Scripting/ScriptSubroutineRegistryBuilder.cs:82-86), then requires the file to exist at that exact path (94-98). The shipped demo openly works around this — ScriptSamples/generic/library_import_demo.yaml:6-7 imports \"C:\\\\Path\\\\To\\\\SSH_Helper\\\\ScriptSamples\\\\libraries\\\\string_sections.yaml\" with the comment 'Update this absolute path before running the sample.' Consequence: any preset using imports: breaks the moment it moves to another machine, another user, or the portable build on a USB stick — undermining the entire point of reusable libraries, and conflicting with the app's own AppDataPaths single-storage-root convention.",
+  "recommendation": "Introduce a managed libraries directory under the storage root (AppDataPaths, e.g. %LocalAppData%\\SSH_Helper\\libraries\\) and resolve import paths against it: accept either a bare relative path ('string_sections.yaml' → libraries dir) or explicit tokens like {{app}}/... resolved at registry-build time in ScriptSubroutineRegistryBuilder before the IsPathRooted check, keeping ScriptFileAccessValidator in the loop. Add a Settings link/button to open the libraries folder, and update library_import_demo.yaml to use the portable form. Editor validation (the inline 'must be absolute' error) should be updated in the same pass so autocomplete/validation match the new rule.",
+  "user_benefit": "Teams can share presets and a common library folder without hand-editing Windows paths per machine; the portable build's libraries survive drive-letter changes; the library feature becomes usable for its intended reuse purpose.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptSubroutineRegistryBuilder.cs", "lines": "82-98", "note": "Path.IsPathRooted gate → 'import path must be absolute' + File.Exists on the literal path"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples\\generic\\library_import_demo.yaml", "lines": "5-8", "note": "shipped demo requires hand-editing a hardcoded C:\\Path\\To\\... placeholder"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-046",
+  "title": "23 of 43 script commands have zero sample coverage — the newest, most differentiating features are the least demonstrated",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "samples-docs",
+  "lens": "cross",
+  "existing_state": "A per-command grep of every ScriptSamples/**/*.yaml shows repeat, try, break, exists, playsound, updateenvironment, ping, dns, portcheck, sftp, parse, choose, multiselect, confirm, interactive, switch, parallel, localcmd, vault, sethistorylabel and notify each appear in 0 files; assert and browser_callback_capture appear only inside the JSON preset bundle (browser_callback_self_contained_presets.json), not as YAML. That is 23 of the 43 commands (ScriptStep.cs:1400-1446) with no example — including the entire interactive-prompt family, all four network probes, three of the eight container commands, and the headline integrations (vault, notify, localcmd). The well-covered commands are the oldest ones (print 122 uses, set 115, send 92). Yet the samples are the app's de-facto cookbook (ScriptSamples/README.md:160-176 frames generic/ as 'Command Reference') and double as CI regression fixtures since every sample is parsed and strictly validated (CanonicalCommandMapSyntaxTests.cs:218-245) — so the features most likely to sell the tool over plain scripts (error handling, fan-out, operator prompts, Vault-sourced secrets, notifications, network probes) are exactly the ones a user cannot see working anywhere.",
+  "recommendation": "Add ~8 new generic/ samples, each a realistic scenario themed around a command family, written in the canonical map syntax the test suite enforces: (1) interactive prompts (choose/multiselect/confirm/input gating a destructive step), (2) network triage (ping/dns/portcheck + table), (3) resilient runs (try/switch/repeat/break/assert around a risky change), (4) parallel fan-out, (5) sftp backup pull, (6) vault secret read + send, (7) notify on failure (pairs with try), (8) localcmd + parse. Add each to the ScriptSamples README table. Each lands automatically inside the existing canonical-syntax CI net, so every new sample is also a free parser regression test.",
+  "user_benefit": "Examples are how operators actually learn a scripting DSL; right now the differentiating half of the engine (prompts, probes, vault, notify, parallel) has no worked example anywhere, so users stick to send/print and never find the features that justify the tool — and each new sample simultaneously hardens the parser test suite.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples", "lines": "all sample YAML files", "note": "per-command grep: 23 of 43 commands at zero occurrences (verified individually)"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.Tests\\Scripting\\CanonicalCommandMapSyntaxTests.cs", "lines": "218-245", "note": "every sample is parsed + strictly validated in CI, so new samples are free regression tests"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples\\README.md", "lines": "160-176", "note": "generic/ is explicitly positioned as the command reference"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 2
+ },
+ {
+  "id": "ENH-047",
+  "title": "Shipped documentation has drifted from the engine: sethistorylabel is undocumented, the READMEs teach 15 of 43 commands in a CI-banned syntax, and NOT_CONVERTED.md denies a shipped feature",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "samples-docs",
+  "lens": "cross",
+  "existing_state": "Three user-facing docs contradict or lag the engine. (1) SCRIPTING.md — the 6,425-line 'full command reference' linked from Help > Scripting Documentation (Form1.cs:6478-6489) — documents 42 of the 43 parser command keywords; sethistorylabel has zero matches despite being fully shipped: parsed with scalar and object forms (keys value/replace/mode/separator, ScriptParser.cs:147, 1125-1127), mode-validated ('replace, append, prepend, clear', 4958-4964), registered in ScriptExecutor.cs:171, present in the Flow Canvas palette, and described only by a one-line autocomplete tooltip (ScriptAutocompleteProvider.cs:159) — its option grammar is unlearnable without reading C# source. (2) ScriptSamples/README.md lists 15 commands of 43 in its 'Available Commands' table (23-41), its directory tree (134-158) omits libraries/, qa/ and several files, and every example uses the compact inline syntax the repo's own CI forbids in samples (CanonicalCommandMapSyntaxTests.cs:241 validates with enforceCanonicalSyntax:true); the root README claims '39 script step types' and '55 built-in function helpers' (README.md:14-15) versus the actual 43 commands and 71 registered functions. (3) ScriptSamples/fortigate/NOT_CONVERTED.md:3 still claims four legacy FortiGate scripts could not be converted because local command execution and file operations 'are not supported' — localcmd (ScriptParser.cs:65, LocalCmdCommand.cs) and writefile/readfile have long since shipped exactly what its 'Future Consideration' section (47-52) wishlists, so the doc actively tells readers the engine lacks a differentiator it has.",
+  "recommendation": "One documentation-sync pass: add a sethistorylabel section to SCRIPTING.md following the per-command pattern (scalar form, object form with value/replace/mode/separator, the four modes, a fleet-labeling example); rewrite ScriptSamples/README.md with a full 43-command table grouped by family, canonical map-syntax examples, and a regenerated directory tree; fix or remove the hard counts in root README.md:14-15 (better: point at SCRIPTING.md); rewrite NOT_CONVERTED.md to reflect that the engine now supports the blockers — or convert the four FortiGate scripts with localcmd + writefile/extract and delete the file. Then guard against recurrence with a doc-coverage unit test that diffs ScriptParser's keyword array against SCRIPTING.md and the README table — the test project already does repo-file assertions of this kind (CanonicalCommandMapSyntaxTests.cs:247-257).",
+  "user_benefit": "New users currently learn about a third of the command surface, in a syntax style the samples themselves are banned from using, and are actively told the tool cannot do local execution; accurate entry-point docs are the cheapest adoption lever the project has, and the drift test stops the next command from shipping undocumented.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs", "lines": "65, 67, 147, 1125-1127, 4958-4964", "note": "sethistorylabel fully wired with object-form grammar and mode validation; localcmd registered"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SCRIPTING.md", "lines": "whole file", "note": "grep -i sethistorylabel returns nothing; every other of the 43 commands appears"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples\\README.md", "lines": "23-41, 134-158", "note": "15-command table; tree missing libraries/, qa/, 3+ files; compact-syntax examples throughout"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\README.md", "lines": "14-15", "note": "'39 script step types' and '55 built-in function helpers' vs actual 43/71"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples\\fortigate\\NOT_CONVERTED.md", "lines": "3, 47-52", "note": "claims 'not supported' and wishlists exactly what localcmd now does"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.Tests\\Scripting\\CanonicalCommandMapSyntaxTests.cs", "lines": "238-257", "note": "samples validated with enforceCanonicalSyntax:true; existing repo-file assertions to model the doc-coverage drift test on"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 3
+ },
+ {
+  "id": "ENH-048",
+  "title": "In-app help is two GitHub hyperlinks; the 6,425-line scripting reference is not bundled or viewable offline",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "M",
+  "area": "onboarding",
+  "lens": "cross",
+  "existing_state": "Help > Documentation runs Process.Start on https://github.com/nosmircss/SSH_Helper and Help > Scripting Documentation on https://github.com/nosmircss/SSH_Helper/blob/master/SCRIPTING.md, both wrapped in silent catch {} (Form1.cs:6465-6489) — if the repo is private, the machine is offline, or no browser association exists, the menu item does nothing with no feedback. SCRIPTING.md is a 6,425-line reference covering the 49 commands and ~70 functions, but it is not shipped (no csproj item; only rebex.key is copied, SSH_Helper.csproj:54). The only offline assistance is the Scintilla autocomplete's one-line command descriptions (Services/Editor/ScriptAutocompleteProvider.cs:116) and editor validation — good for recall, useless for learning what `extract`, `parallel`, or `json.merge` can do. For a tool plausibly deployed on management jump-boxes without internet access, the entire scripting reference is unreachable exactly where it's needed.",
+  "recommendation": "Bundle SCRIPTING.md (and ScriptSamples/README.md) as embedded resources, convert to HTML at build (or ship pre-rendered), and add Help > Scripting Reference (Offline) that displays it in a WebView2 window — the dependency and the virtual-host hosting pattern already exist in FlowCanvasForm.cs:173-178. Keep the GitHub links as secondary 'latest online' items, and replace the silent catch {} with a status-bar or dialog notice when launch fails.",
+  "user_benefit": "Script authors get the full command/function reference inside the app, on air-gapped or locked-down hosts, without depending on the GitHub repo's visibility — and a broken Help click stops failing silently.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "6465-6489", "note": "both Help actions are Process.Start to GitHub URLs inside empty catch blocks"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.csproj", "lines": "54", "note": "no SCRIPTING.md/ScriptSamples copy or embed; only rebex.key is a copied item"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptAutocompleteProvider.cs", "lines": "116-219", "note": "one-line CommandDescriptions/BuiltInSymbolDescriptions are the only offline documentation surface"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SCRIPTING.md", "lines": "1-6425", "note": "6,425-line full reference exists in-repo only"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-049",
+  "title": "Version is a hand-edited constant in Form1.cs — releases depend on remembering to bump it, and exe file properties show the wrong version",
+  "category": "ENH",
+  "severity": "medium",
+  "effort": "S",
+  "area": "models-samples-build",
+  "lens": "ux",
+  "existing_state": "The application version is `private const string ApplicationVersion = \"0.51.23\"` at Form1.cs:115 (the current git branch is literally named 0.51.23 — confirming a manual per-release edit ritual). It feeds the title bar (Form1.cs:329), the About dialog (6493), and the update checker (374-377), which compares it against GitHub release tag names via UpdateService.IsNewerVersion (Services/UpdateService.cs:35, 171, 727). SSH_Helper.csproj has no <Version> property and CI publishes pass none (build-release.yml:84-87), so the shipped exe's file properties report 1.0.0.0. The version therefore exists in two unlinked places (Form1 const + git tag); forgetting the const bump makes the in-app updater either re-offer the user's current version or fail to offer a real update — and nothing in the pipeline catches the mismatch.",
+  "recommendation": "Single-source from the git tag: in build-release.yml derive `VERSION=${GITHUB_REF_NAME#v}` and publish with `-p:Version=$VERSION -p:InformationalVersion=$VERSION`. In Form1, replace the const with a static property that reads AssemblyInformationalVersionAttribute (falling back to a dev default like '0.0.0-dev' when unstamped). Optionally add a release-job sanity check that the tag parses semver. This also fixes the 1.0.0.0 file-properties issue that makes downloaded builds indistinguishable.",
+  "user_benefit": "Update notifications become trustworthy (no stale-const window where users are told they're current when they're not), and support/triage can read the real version from the exe's file properties instead of asking the user to open the About dialog.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "115, 329, 374-377, 6493", "note": "hardcoded const; consumed by title bar, updater, About dialog"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\UpdateService.cs", "lines": "35, 105-112, 171, 727", "note": "update check compares the const against GitHub tag names"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.csproj", "lines": "1-35", "note": "no <Version> property; only BuildTimestamp metadata is stamped"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml", "lines": "83-87", "note": "publish steps pass no version property"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-050",
+  "title": "table output: hard truncation without ellipsis, unbounded auto-width, no sort/limit",
+  "category": "ENH",
+  "severity": "low",
+  "effort": "M",
+  "area": "scripting-commands-b",
+  "lens": "ux",
+  "existing_state": "TableCommand's AlignText chops any cell at the column width with a bare Substring — no ellipsis or any indicator that data was cut (Services/Scripting/Commands/TableCommand.cs:410-413), so a fixed-width 12 column renders 192.168.100.250 as 192.168.100. with nothing marking the loss. Auto-sized columns go the other way: width = longest cell with no cap (:86-89), so one row whose 'output' field contains a 600-character blob stretches that column for every row, making the whole table unreadable. TableOptions offers only data/columns/into/align/show_header (Services/Scripting/Models/ScriptStep.cs:1546-1572) — no max_width, no wrap, no sort_by, no limit, so a 200-host result table cannot be ordered by latency or trimmed to the top offenders without pre-processing in script code.",
+  "recommendation": "In TableCommand: (1) when truncating, reserve one char for a '…' suffix in AlignText; (2) add max_width on TableColumn and a table-level default that caps auto-sizing at :86-89; (3) add optional wrap: true to break long cells across continuation lines instead of truncating; (4) add sort_by (field name) + desc and limit applied to rows before rendering. All changes are local to TableCommand + TableOptions, plus autocomplete/canvas property surfacing.",
+  "user_benefit": "Fleet-wide report tables (the main reason table exists) stay readable and honest: no invisible data loss, no one bad cell destroying the layout, and 'top 20 slowest hosts by latency' becomes a two-option table instead of a foreach+set sorting contraption.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\TableCommand.cs", "lines": "410-413, 86-89", "note": "Substring truncation with no ellipsis; auto width = unbounded longest cell"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Models\\ScriptStep.cs", "lines": "1546-1598", "note": "TableOptions/TableColumn: no max_width, wrap, sort, or limit fields"}
+  ],
+  "mockup_idea": "Before/after monospace render. Before: a 4-column host table where one host's 'status' cell is a 300-char error dump stretching the column across three screen widths, and a fixed width:12 'ip' column showing '192.168.100.' with no hint of truncation. After: same data with max_width: 40 — status shows 'Connection refused after 3 retries, las…', ip column intact, rows sorted by latency desc with 'limit: 20'.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-051",
+  "title": "Detached read-only capture window drops all terminal colors",
+  "category": "ENH",
+  "severity": "low",
+  "effort": "S",
+  "area": "terminal",
+  "lens": "ux",
+  "existing_state": "When a capture step detaches (timeout/Ctrl+C/max-lines/natural completion) the window stays open showing a history snapshot, but RenderDetachedHistorySnapshot rebuilds it from the plain-text transcript and fills every cell with the default gray-on-black (Forms/InteractiveTerminalForm.cs:607-610: Array.Fill with single fore/back colors) — syntax-colored device output, diff colors, and alarm highlighting that were on screen one frame earlier all flatten to monochrome the instant the step detaches.",
+  "recommendation": "Instead of re-rendering from the text transcript, capture the last live TerminalScreenSnapshot stream: have the service build the detached view from the Rebex screen + history cells (the same per-cell color path BuildScreenSnapshot already implements at InteractiveTerminalService.cs:3333-3469) at detach time, falling back to the monochrome text path only when no snapshot exists (e.g., headless capture promoted to a window).",
+  "user_benefit": "The post-detach review window — the whole point of leaving it open — keeps the color cues (errors in red, status in green) that operators actually scan for.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs", "lines": "601-610", "note": "Detached snapshot fills uniform default fore/back colors for every cell"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "3333-3469", "note": "BuildScreenSnapshot already produces per-cell colored snapshots that could seed the detached view"}
+  ],
+  "mockup_idea": "Side-by-side: live capture window with colored 'show interfaces' output vs. the current detached view of the same content in flat gray; the 'after' shows the detached view retaining colors with the 'Detached (read-only)' title.",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-052",
+  "title": "Vault tab lags its Notifications twin: default profile can't be cleared and Test Connection results are unthemed",
+  "category": "ENH",
+  "severity": "low",
+  "effort": "S",
+  "area": "dialogs-general",
+  "lens": "ux",
+  "existing_state": "The Vault and Notifications tabs are the same profile-manager pattern, but the implementations drifted. Unchecking 'Set as default profile' on a Vault profile is silently ignored — ChkVaultDefault_CheckedChanged early-returns whenever the box is unchecked (SettingsDialog.cs:806-816) — whereas the Notifications twin supports clearing the default (1412-1422). And Vault's Test Connection reports success/failure via raw MessageBox.Show (1069, 1073) instead of the injected _promptService used by every other prompt in the file (e.g. 2445, 2457), so the result popup is unthemed in dark mode and invisible to the test seam the dialog was deliberately built around (ISettingsDialogPromptService ctor dependency, 204).",
+  "recommendation": "Port the Notifications behavior over: copy the clear-on-uncheck branch from ChkNotificationDefault_CheckedChanged (1418-1421) into ChkVaultDefault_CheckedChanged, and swap the two MessageBox.Show calls in BtnVaultTestConnection_Click for _promptService.Show. Both are line-level changes with existing in-file reference implementations.",
+  "user_benefit": "Vault users get the same control Notifications users already have (no phantom default they can't unset), and dark-mode users stop getting a jarring white system popup from the one button they press while debugging Vault connectivity.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "806-816", "note": "Uncheck of Vault default is ignored (early return on !Checked)"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "1412-1422", "note": "Notifications twin supports clearing the default — reference implementation"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "1041-1080", "note": "Test Connection uses raw MessageBox.Show (1069, 1073) bypassing _promptService/DialogTheme"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-053",
+  "title": "vault() and vault_list() functions fail silently — no _last_error, inconsistent with the other two Vault scripting surfaces",
+  "category": "ENH",
+  "severity": "low",
+  "effort": "S",
+  "area": "integrations",
+  "lens": "ux",
+  "existing_state": "The three ways to read Vault from a script disagree on error surfacing. The vault: step fails the step (or sets _last_error with on_error: continue); inline {{vault:path#key}} sets _last_error and resolves to empty string on every failure path (Services/Scripting/ScriptContext.cs:711, 722, 742, 753); but the vault(path, key) and vault_list(prefix) functions catch VaultException and return null while setting nothing (Services/Scripting/Functions/VaultFunctions.cs:38-41 and :65-68), and also return null for config problems like a missing profile (:31-32, :58-59). A script using functions in expressions cannot distinguish 'secret has no such key' from 'Vault is sealed/unreachable' from 'no profile configured' — all are an undifferentiated null.",
+  "recommendation": "In both catch blocks (and the no-profile early returns), set context's _last_error with the VaultException message, matching ResolveVaultExpression's contract — a two-line change per site in VaultFunctions.cs. Document the convention (null + _last_error) in the function reference so script authors can branch on it: if(vault(...) == null) { print(_last_error) }.",
+  "user_benefit": "Script authors get one consistent error contract across all three Vault surfaces, making vault-dependent scripts debuggable instead of failing with bare nulls.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\VaultFunctions.cs", "lines": "31-41, 58-68", "note": "null returns with no _last_error on any failure"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs", "lines": "707-756", "note": "inline {{vault:}} sets _last_error on every failure path — the contract the functions should match"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ },
+ {
+  "id": "ENH-054",
+  "title": "Missing Rebex license is silently ignored at startup; pooled SSH and terminals fail later with an opaque error",
+  "category": "ENH",
+  "severity": "low",
+  "effort": "S",
+  "area": "cross-startup",
+  "lens": "ux",
+  "existing_state": "Program.Main resolves the Rebex key from assembly metadata → rebex.key file → REBEX_LICENSE_KEY env var, and if all three are absent it simply skips setting Rebex.Licensing.Key and continues (Program.cs:17-40, the `if (!string.IsNullOrEmpty(rebexKey))` at :37-40 has no else). Nothing in Services/ checks licensing either (only test-seam comments mention it). The user finds out only when they enable connection pooling or open an interactive terminal and Rebex throws its licensing exception mid-workflow — long after the cause (a build/environment issue) is visible.",
+  "recommendation": "After the three-tier resolution in Program.cs, if rebexKey is empty, record a static flag (e.g. RebexLicenseState.Missing). In Form1, surface it once: a status-bar warning or a tooltip/disable on the pooling checkbox and Interactive Terminal menu item — 'Rebex license key not found (set REBEX_LICENSE_KEY or place rebex.key next to the exe); pooled sessions and terminals are unavailable.' Plain SSH.NET execution keeps working untouched.",
+  "user_benefit": "Anyone building from source without the env var (a contributor, or the owner on a new machine) learns at launch why terminals/pooling will not work, instead of decoding a Rebex exception during a live session against production devices.",
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Program.cs", "lines": "17-40", "note": "Three-tier key resolution with silent continue when no key is found"}
+  ],
+  "mockup_idea": "",
+  "merged_from": 1
+ }
+]

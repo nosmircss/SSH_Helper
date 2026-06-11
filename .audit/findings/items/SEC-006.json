@@ -1,0 +1,21 @@
+{
+ "id": "SEC-006",
+ "title": "localcmd confirm: never runs arbitrary local processes with no prompt and no global override",
+ "category": "SEC",
+ "severity": "high",
+ "effort": "S",
+ "area": "security-posture",
+ "lens": "cross",
+ "existing_state": "LocalCmdCommand.HandleConfirmation (Services/Scripting/Commands/LocalCmdCommand.cs:104-110) reads the per-step confirm policy and, when it equals 'never', returns LocalCmdConfirmResult.Run immediately — no dialog, no logging, no gate. The decision is entirely controlled by the YAML/preset author; there is no app-level setting that forces confirmation regardless of the per-step value. Because presets and YAML scripts are shareable artifacts in this app (the Flow Canvas is a preset-builder and presets are imported/exported), an operator who runs a colleague's or downloaded preset containing `localcmd: { confirm: never, command: ... }` executes arbitrary commands on their own workstation (powershell/cmd/custom shell, foreground or background) silently. The command string is also variable-substituted, so untrusted CSV/host values interpolated into it become a local injection vector.",
+ "recommendation": "Add a Settings (Credentials/Security) option such as 'Always require confirmation for localcmd' that, when enabled, forces the confirmation dialog even when a step specifies confirm: never (HandleConfirmation should consult this flag before honoring 'never'). Default it on. Optionally surface a one-time warning the first time a preset containing confirm:never is loaded.",
+ "user_benefit": "Protects operators from silently running attacker-authored local commands embedded in a shared/imported preset — turning 'I ran a teammate's preset' into a code-execution event. A global override gives security-conscious shops a hard guarantee that nothing runs locally without a human seeing it.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\LocalCmdCommand.cs",
+   "lines": "104-110",
+   "note": "Confirm policy 'never' returns Run with no dialog and no global override; no config knob exists to force confirmation"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

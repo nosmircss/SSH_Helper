@@ -1,0 +1,31 @@
+{
+ "id": "ENH-030",
+ "title": "vault_path cannot resolve password-only secrets — the username key is mandatory even though the code intends it to be optional",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "integrations",
+ "lens": "ux",
+ "existing_state": "VaultCredentialProvider always requests both the username and password keys (Services/Vault/VaultCredentialProvider.cs:47-49) and even has tolerance code for a missing username (result.TryGetValue at :51-52, success requires only a non-empty password at :57). But VaultService.ReadSecretKeysAsync is all-or-nothing: if ANY requested key is absent it throws (Services/Vault/VaultService.cs:132-139), so the tolerance at :51-52 is unreachable — a Vault secret containing only a password field always throws, gets swallowed (:59-63), and triggers the silent fallback. This blocks a very common fleet pattern: one shared admin username kept in the grid's username column (or toolbar), with per-device passwords in Vault. Today such users must duplicate the username into every Vault secret.",
+ "recommendation": "Add an optional-keys capability: either an overload ReadSecretKeysAsync(..., bool requireAll) that returns nulls for missing keys, or have VaultCredentialProvider read the password via ReadSecretAsync and attempt the username separately, ignoring the 'no key' VaultException for username only. Then merge: if Vault returned no username, keep the row/toolbar username instead of overwriting it (Form1.cs:13340 currently replaces host.Username unconditionally on vault success; JobExecutionService.cs:520 same).",
+ "user_benefit": "Fleets that store only per-device passwords in Vault (shared username managed elsewhere) can use vault_path at all — today they hit a silent failure they can't even diagnose. Removes a forced duplication of usernames into every secret.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+   "lines": "132-139",
+   "note": "any missing key throws — all-or-nothing"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultCredentialProvider.cs",
+   "lines": "47-57",
+   "note": "requests both keys; the TryGetValue tolerance and password-only success check are unreachable for missing keys"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13340-13342",
+   "note": "on vault success the grid username is overwritten unconditionally"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

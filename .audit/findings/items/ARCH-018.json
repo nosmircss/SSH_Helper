@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-018",
+ "title": "Vault credential-slot names are a three-file implicit contract; the authType parameter is decorative and disagrees with reality",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "integrations",
+ "lens": "perf",
+ "existing_state": "VaultService passes \"token\"/\"approle\"/\"ldap\"/\"userpass\" as the second argument to its credential providers (Services/Vault/VaultService.cs:317, 329, 370, 408, 884), but every production provider discards that argument: Form1's lambdas bind it to _ and hardcode the different literals \"token\"/\"approle_secret\"/\"ldap_password\"/\"userpass_password\" (Form1.cs:1396-1415), and SettingsDialog independently hardcodes the same four strings when persisting secrets (SettingsDialog.cs:1013-1016) and ignores the parameter again in its Test Connection providers (SettingsDialog.cs:1062-1066). The system works only because two UI files agree by copy-paste convention; any future caller that trusts the parameter VaultService actually sends (e.g. \"approle\") reads or writes a credential slot that nothing else uses. Compounding it, Token auth and the OIDC persisted-token fast path share the same \":token\" slot (read at VaultService.cs:317 and :884, written by the tokenSaver at Form1.cs:1416-1420), so toggling a profile between Token and OIDC auth silently overwrites the user's static token with short-lived OIDC tokens.",
+ "recommendation": "Promote the four authType literals to constants on CredentialTargets (already the declared single source of truth for target names in Services/Credentials/CredentialTargets.cs), make VaultService pass those constants, and change the Form1/SettingsDialog provider lambdas to use the parameter instead of ignoring it — deleting the duplicate literals. Give OIDC its own slot constant (e.g. \"oidc_token\") with a one-time fallback read of the legacy \"token\" slot so existing logins survive.",
+ "user_benefit": "Eliminates a latent wrong-credential-slot trap that will bite the next feature touching Vault auth (the compiler will enforce the contract instead of copy-paste), and stops OIDC logins from clobbering a user's stored static Vault token.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Vault/VaultService.cs",
+   "lines": "317, 329, 370, 408, 884",
+   "note": "passes \"token\"/\"approle\"/\"ldap\"/\"userpass\" — never honored by any real provider"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "1396-1420",
+   "note": "lambdas ignore the parameter and hardcode approle_secret/ldap_password/userpass_password; tokenSaver writes the shared :token slot"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "1013-1027, 1062-1066",
+   "note": "second independent copy of the same literals on the save path and test-connection path"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

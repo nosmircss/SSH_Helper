@@ -1,0 +1,21 @@
+{
+ "id": "BUG-042",
+ "title": "switch silently treats an invalid 'matches' regex as no-match",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-b",
+ "lens": "correctness",
+ "existing_state": "A switch case written as `value: \"matches <pattern>\"` compiles the pattern at runtime; if the regex is invalid (typo like an unclosed paren, or a variable substituted into the pattern producing bad syntax), the bare `catch { matches = false; }` at Services/Scripting/Commands/SwitchCommand.cs:47-50 swallows the ArgumentException and the case simply never matches — no warning, no error, nothing in the output. Execution falls through to the default branch (or no-op at :83-84), so the script takes the wrong path on every host with zero diagnostics. There is also no parse-time validation of `matches` patterns in ScriptParser, so the mistake survives editing, canvas round-trips, and scheduled runs indefinitely.",
+ "recommendation": "In the catch block, emit a Warning (\"switch case N: invalid regex '<pattern>': <message>\") via context.EmitOutput so the misroute is visible, and add a validation-time check in ScriptParser.ValidateSteps that attempts Regex construction for case values starting with 'matches ' and reports a script error before the run starts.",
+ "user_benefit": "A typo in one regex no longer silently reroutes every host down the default branch — the author finds out at validation time instead of discovering wrong actions were taken fleet-wide.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SwitchCommand.cs",
+   "lines": "38-51",
+   "note": "regex branch: catch { matches = false; } with no emit — invalid pattern is indistinguishable from a legitimate non-match"
+  }
+ ]
+}

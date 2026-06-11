@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-038",
+ "title": "Flow Canvas preferences require 4-5 hand-wired touchpoints each; WindowState has become a 25-field pref dump with a zombie legacy field",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "models-samples-build",
+ "lens": "perf",
+ "existing_state": "Adding one canvas display pref currently means: a React store field + a `layout-save` send, a hand-parsed nullable extraction in FlowCanvasForm.SavePanelSizes (UI/FlowCanvasForm.cs:447-494 — already a 15-variable if-chain with a 14-condition early-return guard at 468-472), a new `FlowCanvasXxx` property on WindowState (Models/AppConfiguration.cs:499-546 — ~25 canvas fields and counting, in a class named for window geometry), and a mirrored restore send (e.g. pref-restore at FlowCanvasForm.cs:441-444). The pattern has already produced churn: `FlowCanvasAutoReflow` (AppConfiguration.cs:535-540) is a documented zombie kept only for migration, and reduced-motion/iteration-cap travel a parallel second channel (`pref-save`, SaveReducedMotionPref at 496-508) because the first one grew awkward. A forgotten restore or a typo'd JObject key fails silently — the pref just doesn't stick, with no compile-time signal.",
+ "recommendation": "Collapse the per-field plumbing: store canvas display prefs as one opaque versioned JSON object (e.g. `WindowState.FlowCanvasPrefs` as a JObject/string, or a dedicated `FlowCanvasPrefs` DTO serialized whole). React sends the full prefs object on change; C# persists it without field-by-field parsing and echoes it back verbatim on load. Field knowledge then lives in exactly one place (the React settings slice), the SavePanelSizes if-chain and pref-restore mirror disappear, and new prefs become a React-only change. Keep reading the existing 25 fields for one release to migrate.",
+ "user_benefit": "New canvas settings stop being a 4-file ritual where any missed step silently loses the user's preference — the failure mode this exact code path has already exhibited (legacy AutoReflow migration, split pref channels).",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/FlowCanvasForm.cs",
+   "lines": "447-508",
+   "note": "SavePanelSizes hand-parsed if-chain + parallel SaveReducedMotionPref channel"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/AppConfiguration.cs",
+   "lines": "499-546",
+   "note": "~25 FlowCanvas* fields on WindowState incl. legacy FlowCanvasAutoReflow zombie (535-540)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/FlowCanvasForm.cs",
+   "lines": "441-444",
+   "note": "pref-restore mirror that must be kept in sync per field"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

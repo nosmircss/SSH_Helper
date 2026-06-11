@@ -1,0 +1,46 @@
+{
+ "id": "FEAT-010",
+ "title": "31-script sample library never reaches users: not shipped in releases, no in-app browser; default presets are two unlabeled FortiGate one-liners",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "M",
+ "area": "onboarding",
+ "lens": "cross",
+ "existing_state": "ScriptSamples/ holds 31+ curated YAML scripts across bash/, cisco/, checkpoint/, fortigate/, generic/, libraries/, qa/ plus a 215-line tutorial README — and every sample is CI-validated (parsed and strictly validated by CanonicalCommandMapSyntaxTests.cs:218-243), so they are guaranteed-working documentation. But release artifacts contain only the two exes, checksums, README.md and SCRIPTING.md (.github/workflows/build-release.yml:126-135) — samples are neither zipped nor embedded — and nothing references them from the application: the string 'ScriptSamples' appears only in test code, SSH_Helper.csproj has no Content/None item for the folder (only rebex.key is copied, :54), and ScriptSamples/README.md:202-206 literally instructs 'Copy the script content into a preset' — impossible for anyone running an installed build. Meanwhile a first-run user's entire preset tree is CreateDefaultConfiguration's two hardcoded presets (Services/ConfigurationService.cs:427-440): 'Custom' = 'get system status' and 'Get external-address-resource list' — both FortiGate CLI, unlabeled as samples and meaningless against Linux/Cisco targets. So the app's deepest feature (the 40+-command YAML engine) presents itself on day one as two vendor-specific one-liners. Note: FLOW_CANVAS_ENHANCEMENTS.md:220-222 proposes only a canvas-side 'First Light' empty state with an 'Open a sample' action — it does not cover preset-library-wide sample access or shipping samples at all.",
+ "recommendation": "Embed ScriptSamples/**/*.yaml as assembly resources (copy the IncludeFlowCanvasDistEmbeddedResources pattern, SSH_Helper.csproj:100-110) and add a 'New preset from sample...' gallery dialog reachable from the preset-tree context menu (next to the existing ctxImportPreset, Form1.Designer.cs:678) and Help/File menus: left tree grouped by vendor folder, read-only syntax-highlighted preview with the sample's header-comment description and required CSV columns, and a 'Create preset in folder: [dropdown]' button that drops the YAML into a new preset via the existing preset-save path. Rename or replace the two FortiGate defaults to make their vendor explicit (e.g. folder 'Samples (FortiGate)') or seed defaults from the generic/ samples. As a zero-code stopgap, add a ScriptSamples.zip step to the release job. The same embedded catalog can later back the Flow Canvas 'Open a sample' roadmap item.",
+ "user_benefit": "New users get working, runnable demonstrations of the scripting engine (loops, extract, webhook, JSON reporting) in two clicks instead of never discovering that YAML scripting exists; the 31 regression-tested scripts the project already maintains finally reach the people they were written for.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml",
+   "lines": "126-136",
+   "note": "release files list = exes + checksums + README.md + SCRIPTING.md only; no samples"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.Tests\\Scripting\\CanonicalCommandMapSyntaxTests.cs",
+   "lines": "218-243",
+   "note": "every sample is parsed + strictly validated in tests — samples are already guaranteed-working docs"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.csproj",
+   "lines": "54, 100-110",
+   "note": "only rebex.key has a copy-to-output item; existing embedded-resource pattern (FlowCanvas dist) to reuse for embedding samples"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\ConfigurationService.cs",
+   "lines": "427-440",
+   "note": "default config = exactly two hardcoded FortiGate presets, recreated on first run and after corruption fallback"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples\\README.md",
+   "lines": "202-206",
+   "note": "'Using Scripts: 1. Copy the script content into a preset' — repo-only workflow, dead end for installed builds"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.Designer.cs",
+   "lines": "678",
+   "note": "ctxImportPreset ('&Import Preset') exists — natural neighbor for a 'New from Sample...' entry"
+  }
+ ],
+ "mockup_idea": "A 'New Preset from Sample' dialog: left tree with the sample folders (Bash, Cisco, CheckPoint, FortiGate, Generic, Libraries), center syntax-highlighted YAML preview, right metadata card (description, commands demonstrated, required CSV columns e.g. 'block, interface'), footer 'Create preset in folder: [dropdown]' + Create button. Pair with a BEFORE shot of today's empty preset editor with a blinking cursor.",
+ "merged_from": 3
+}

@@ -1,0 +1,36 @@
+{
+ "id": "BUG-068",
+ "title": "Terminal normalizer leaks OSC title-sequence payloads (']0;user@host: ~') into captured command output and can break prompt stripping",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "ui-utilities",
+ "lens": "correctness",
+ "existing_state": "TerminalOutputProcessor.ProcessEscapeSequence handles only ESC s/u and CSI (ESC [) (Utilities/TerminalOutputProcessor.cs:351-393). For OSC sequences (ESC ] 0 ; title BEL — emitted by the default Ubuntu/Debian bash PS1 and many other shells on every prompt render), neither branch matches: the ESC is consumed at Normalize:98-99, then ']0;user@host: ~' falls into the printable default case (:102-108) and is rendered as literal text, while the BEL terminator is silently dropped (:109-110; Sanitize at :16-18 also strips it but keeps the payload). Every consumer of normalized output gets the garbage — SshShellSession command output (Services/SshShellSession.cs:309,413,498,976) and the interactive terminal transcript (Services/Terminal/InteractiveTerminalService.cs:2719 and siblings). Knock-on effect: the leaked payload prefixes the prompt line, so StripTrailingPrompt's exact-match/regex check (TerminalOutputProcessor.cs:284-286) fails — PromptDetector.BuildPromptRegex anchors the prompt at line start with only \\s* slack before the anchor (Utilities/PromptDetector.cs:61) — leaving a ']0;user@host: ~user@host:~$' tail line inside per-command output saved to history. Charset designators (ESC ( B) leak the same way.",
+ "recommendation": "In ProcessEscapeSequence, add an OSC branch: on ESC ']', consume until BEL (0x07) or ST (ESC \\) and emit nothing; also consume two-character sequences ESC ( X / ESC ) X (charset designation) and ESC = / ESC > (keypad modes). Add Normalize unit tests using the stock Ubuntu PS1 byte sequence (\\x1b]0;user@host: ~\\x07user@host:~$).",
+ "user_benefit": "Clean command output and history for the most common class of Linux targets — no ']0;...' artifacts in saved run results, and prompt stripping keeps working on hosts whose shells set the terminal title.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\TerminalOutputProcessor.cs",
+   "lines": "351-393",
+   "note": "Only ESC s/u and CSI handled; ESC ] returns startIndex, payload prints as text"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\TerminalOutputProcessor.cs",
+   "lines": "98-110",
+   "note": "BEL terminator silently swallowed by the 'ignore other control characters' default; payload chars are printable and kept"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\PromptDetector.cs",
+   "lines": "56-63",
+   "note": "Prompt regex anchored at line start with only \\s* slack — an OSC prefix defeats the match"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs",
+   "lines": "309,413,976",
+   "note": "Normalize output feeds command results and real-time UI output"
+  }
+ ]
+}

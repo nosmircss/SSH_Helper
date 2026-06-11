@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-001",
+ "title": "Crash-safe write discipline is split: config.json, hosts CSV, and jobs.json bypass the atomic writer, and the .bak that Save maintains is never consulted on corrupt load",
+ "category": "ARCH",
+ "severity": "critical",
+ "effort": "M",
+ "area": "persistence-config",
+ "lens": "perf",
+ "existing_state": "The repo has one blessed crash-safe persistence path — JsonFileWriter.WriteJsonAtomic (temp file + File.Replace, Utilities/JsonFileWriter.cs:21) — and HistoryStorageService routes everything through it (HistoryStorageService.cs:739-740, used at 468/475). But the three other user-data files use bare truncate-and-write: config.json via File.WriteAllText (ConfigurationService.cs:144), the hosts CSV via a direct StreamWriter (CsvManager.cs:78, no backup at all), and jobs.json via File.WriteAllText (JobStorageService.cs:243). config.json is the single highest-value file in the app (entire preset library, all environments' host tables, compressed app state). The downstream machinery proves the cost of this split: Save pre-copies a .bak (ConfigurationService.cs:116-120) and Load has a whole corrupt-file recovery path (ConfigurationService.cs:91-102) — yet that recovery backs up the corrupt file and falls back to FACTORY DEFAULTS without ever attempting the known-good config.json.bak sitting next to it. So today a crash or power loss mid-save corrupts the live config, and on next start the user is silently reset to defaults even though their data survived in the .bak.",
+ "recommendation": "Route all three writers through JsonFileWriter.WriteJsonAtomic (CsvManager needs a small text-file twin of it, or generalize the utility to take raw content). In ConfigurationService.Load's catch block, before falling back to defaults, attempt to parse config.json.bak and restore from it (still setting ConfigLoadError to tell the user what happened). This collapses two persistence disciplines into one and wires up the recovery asset that is already being paid for on every save.",
+ "user_benefit": "A crash during save can currently wipe the user's entire preset library, environments, and host inventory back to factory defaults despite an intact backup existing on disk. One consistent write path plus .bak restore makes that whole failure class disappear.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+   "lines": "91-102, 116-120, 144",
+   "note": "Non-atomic WriteAllText; .bak written every save but never read in the corrupt-load fallback"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/CsvManager.cs",
+   "lines": "76-103",
+   "note": "SaveToFile writes the host inventory with a bare StreamWriter, no temp file, no backup"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobStorageService.cs",
+   "lines": "230-243",
+   "note": "jobs.json also written via File.WriteAllText despite the .bak copy pattern"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/HistoryStorageService.cs",
+   "lines": "739-740",
+   "note": "History correctly delegates to JsonFileWriter.WriteJsonAtomic — the discipline exists, it just isn't shared"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

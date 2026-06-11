@@ -1,0 +1,31 @@
+{
+ "id": "UX-007",
+ "title": "localcmd confirmation prompts storm multi-host runs and loops; approval cannot be scoped to the run",
+ "category": "UX",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-commands-a",
+ "lens": "ux",
+ "existing_state": "Unless `confirm: never`, every localcmd execution checks approval keyed to the exact RESOLVED command text plus a single approved host slot (Services/Scripting/Commands/LocalCmdCommand.cs:112-125). Two consequences: (1) a command containing {{item}} or {{Host_IP}} resolves differently each iteration, so a foreach re-prompts every single pass even after clicking 'Run Same Command' (the dialog's own scope label admits this: UI/LocalCmdConfirmationDialog.cs:73); (2) multi-host runs construct a fresh ScriptContext per host (Services/SshExecutionService.cs:1542, 1676, 1736), so approval state can never carry across hosts — a 200-host preset with one localcmd step produces 200 modal prompts that each pause the run. The only escape is `confirm: never` in the YAML, which permanently removes the guardrail. The dialog's three buttons are Run / Run Same Command / Cancel (LocalCmdConfirmationDialog.cs:80-120); there is no 'approve for this run' option.",
+ "recommendation": "Add a run-scoped approval keyed to step identity rather than resolved text: a fourth dialog option 'Run for all hosts (this step, this run)' that records the StepPath or un-substituted command template in a run-level approval store owned by SshExecutionService and injected into each per-host ScriptContext via ConfigureScriptExecutionContext (the same place the confirmation provider is wired, SshExecutionService.cs:305-343). Keep the existing exact-text option for the cautious path. Show the resolved command preview in the dialog as today so the operator still sees what the template expands to on the current host.",
+ "user_benefit": "A fleet operator can approve a vetted local command once and let the 200-host run proceed unattended, instead of either babysitting 200 dialogs or stripping the confirmation safety net out of the script with confirm: never.",
+ "evidence": [
+  {
+   "file": "Services/Scripting/Commands/LocalCmdCommand.cs",
+   "lines": "104-146",
+   "note": "approval keyed to exact resolved command + single LocalCmdApprovedHost slot"
+  },
+  {
+   "file": "Services/SshExecutionService.cs",
+   "lines": "1542, 1676, 1736",
+   "note": "fresh ScriptContext per host — approval state never crosses hosts"
+  },
+  {
+   "file": "UI/LocalCmdConfirmationDialog.cs",
+   "lines": "73, 80-120",
+   "note": "scope label documents the narrow approval; only Run / Run Same Command / Cancel buttons exist"
+  }
+ ],
+ "mockup_idea": "The Local Command Confirmation dialog with a new scope row: radio/buttons 'Run once' / 'Run for all hosts this run' / 'Cancel', plus a subtitle showing 'Template: ping {{Host_IP}} — resolves to: ping 10.0.3.17 on this host', making the template-vs-resolved distinction visible.",
+ "merged_from": 1
+}

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ARCH-028 — Detached terminal color loss</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;margin:12px;font:12px "Cascadia Code",Consolas,monospace}
+  .hd{font-size:11px;color:#8294a8;margin:0 0 8px}
+  .hd b{color:#c9d4e3}
+  .row{display:flex;gap:10px}
+  .col{flex:1;min-width:0}
+  .cap{font-size:9px;letter-spacing:.08em;text-transform:uppercase;margin:0 0 4px}
+  .cap.bad{color:#ff5c5c}.cap.good{color:#2bd97c}
+  .win{border:1px solid #1c2330;border-radius:6px;overflow:hidden;background:#000}
+  .tb{display:flex;align-items:center;gap:6px;background:#131a26;border-bottom:1px solid #1c2330;padding:4px 7px;font-size:9.5px;color:#8294a8;white-space:nowrap;overflow:hidden}
+  .tb .dot{width:7px;height:7px;border-radius:50%;background:#2a3447;flex:none}
+  .tb .ro{color:#ffb454}
+  .scr{padding:6px 8px;font-size:10px;line-height:1.45;white-space:pre;overflow:hidden}
+  .scr div{height:14.5px}
+  .g{color:#2bd97c}.c{color:#4cc9f0}.a{color:#ffb454}.r{color:#ff5c5c}.w{color:#e8eef7}.m{color:#566478}
+  .flat .scr span{color:#bbb !important}
+  .note{font-size:9.5px;color:#8294a8;line-height:1.45;margin:5px 1px 0}
+  .note code{color:#4cc9f0}
+  .foot{margin-top:9px;border-top:1px solid #1c2330;padding-top:6px;font-size:9.5px;color:#8294a8;line-height:1.5}
+  .foot b{color:#2bd97c;font-weight:600}
+</style>
+</head>
+<body>
+<p class="hd"><b>ARCH-028</b> — the same capture window, the instant it detaches (timeout / Ctrl+C / max-lines)</p>
+<div class="row">
+  <div class="col">
+    <p class="cap bad">Before — detach today (text round-trip)</p>
+    <div class="win flat">
+      <div class="tb"><span class="dot"></span>edge-fw-01 (10.20.4.17) — <span class="ro">Detached (read-only)</span></div>
+      <div class="scr">
+<div><span class="g">admin@edge-fw-01</span><span class="w">:</span><span class="c">~</span><span class="w">$ ls --color /var/log</span></div>
+<div><span class="w">auth.log   </span><span class="c">firewall/</span><span class="w">  </span><span class="c">nginx/</span><span class="w">  kern.log</span></div>
+<div><span class="w">syslog  wtmp  cron.log  </span><span class="r">backup.tar.gz</span></div>
+<div><span class="g">admin@edge-fw-01</span><span class="w">:</span><span class="c">~</span><span class="w">$ tail -f syslog</span></div>
+<div><span class="w">09:14:22 sshd[4182]: </span><span class="g">Accepted publickey</span></div>
+<div><span class="w">  for admin from 10.20.4.17</span></div>
+<div><span class="w">09:14:25 kernel: </span><span class="a">WARN eth1 link flap</span></div>
+<div><span class="w">09:14:31 fwd[211]: </span><span class="r">DROP 203.0.113.45</span></div>
+<div><span class="w">  &gt; 10.20.4.10 :22</span></div>
+<div><span class="m">-- capture timeout (30s) -- detached --</span></div>
+      </div>
+    </div>
+    <p class="note">Detach flattens the buffer via <code>BuildClipboardText</code> → <code>string[]</code>; <code>RenderDetachedHistorySnapshot</code> hard-fills 187,187,187-on-black (<code>InteractiveTerminalForm.cs:607-610</code>). Colors gone the moment it snaps read-only.</p>
+  </div>
+  <div class="col">
+    <p class="cap good">After — detach as snapshot (colors kept)</p>
+    <div class="win">
+      <div class="tb"><span class="dot"></span>edge-fw-01 (10.20.4.17) — <span class="ro">Detached (read-only)</span></div>
+      <div class="scr">
+<div><span class="g">admin@edge-fw-01</span><span class="w">:</span><span class="c">~</span><span class="w">$ ls --color /var/log</span></div>
+<div><span class="w">auth.log   </span><span class="c">firewall/</span><span class="w">  </span><span class="c">nginx/</span><span class="w">  kern.log</span></div>
+<div><span class="w">syslog  wtmp  cron.log  </span><span class="r">backup.tar.gz</span></div>
+<div><span class="g">admin@edge-fw-01</span><span class="w">:</span><span class="c">~</span><span class="w">$ tail -f syslog</span></div>
+<div><span class="w">09:14:22 sshd[4182]: </span><span class="g">Accepted publickey</span></div>
+<div><span class="w">  for admin from 10.20.4.17</span></div>
+<div><span class="w">09:14:25 kernel: </span><span class="a">WARN eth1 link flap</span></div>
+<div><span class="w">09:14:31 fwd[211]: </span><span class="r">DROP 203.0.113.45</span></div>
+<div><span class="w">  &gt; 10.20.4.10 :22</span></div>
+<div><span class="m">-- capture timeout (30s) -- detached --</span></div>
+      </div>
+    </div>
+    <p class="note">Detach captures one full-buffer <code>TerminalScreenSnapshot</code> (chars + fore/back colors, history + screen); the detached window renders <i>and</i> selects from that single structure.</p>
+  </div>
+</div>
+<p class="foot"><b>Why it matters beyond the pixels:</b> selection-to-text currently exists 3× (live buffer / viewport fallback / detached <code>string[]</code>) and snapshot building 2× — each with its own clamp/pad/TrimEnd rules, plus a copy-pasted <code>CombineHash</code>. One snapshot structure deletes the parallel builder and <code>BuildDetachedSelectionText</code>; the color fix falls out as a side effect.</p>
+</body>
+</html>

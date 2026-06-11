@@ -1,0 +1,31 @@
+{
+ "id": "UX-006",
+ "title": "Vault credential failures are silent — runs fall through to the wrong credentials with no user-visible warning",
+ "category": "UX",
+ "severity": "high",
+ "effort": "M",
+ "area": "integrations",
+ "lens": "ux",
+ "existing_state": "VaultCredentialProvider.TryGetPassword swallows every exception (typo'd path, missing key, sealed Vault, expired auth, network down) into Debug.WriteLine and returns false (Services/Vault/VaultCredentialProvider.cs:59-63). Both consumers then silently fall back: Form1.GetHostConnections drops to the grid's username/password columns and then to any Credential-Manager-stored or toolbar password (Form1.cs:13332-13356), and the scheduler's BuildHostConnections does the same per-row fallback (Services/JobExecutionService.cs:512-532) while job-level Vault mode returns empty credentials with only a Debug.WriteLine (JobExecutionService.cs:639-640). Result: a one-character typo in a vault_path cell means SSH proceeds against 200 network devices using a stale or default identity. Nothing appears in the output panel, history, or status bar to indicate Vault was attempted and failed.",
+ "recommendation": "Thread the failure reason out of the provider (an out string error or a result object) and surface it: (1) emit a warning line per host into the output panel/run log ('vault_path \"secret/neta/sw-12\" failed: permission denied — falling back to grid credentials'); (2) add a pre-run validation pass that resolves all distinct vault_paths once and shows a summary dialog if any fail, with an option to abort; (3) for jobs, record the warning into JobRunResult/host output so job history shows why auth used the wrong identity. Optionally add a config toggle 'treat vault_path failure as host failure' for environments with TACACS/AD lockout policies.",
+ "user_benefit": "Prevents the worst multi-host failure mode: spraying wrong credentials at a fleet (which can trip account-lockout policies on network gear) and then debugging mystery auth failures with zero evidence that Vault was even consulted.",
+ "evidence": [
+  {
+   "file": "Services/Vault/VaultCredentialProvider.cs",
+   "lines": "59-63",
+   "note": "catch-all to Debug.WriteLine, returns false"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "13332-13356",
+   "note": "failed vault lookup falls through to grid/stored/toolbar credentials"
+  },
+  {
+   "file": "Services/JobExecutionService.cs",
+   "lines": "512-532, 639-640",
+   "note": "scheduler mirrors the silent fallback; Vault mode returns empty creds with debug-only warning"
+  }
+ ],
+ "mockup_idea": "Before/after of the run output panel: before — bare 'Authentication failed' lines per host; after — an amber pre-run banner 'Vault: 3 of 200 vault_path lookups failed (secret/neta/sw-12: permission denied, ...) — Continue with fallback credentials / Abort run'.",
+ "merged_from": 1
+}

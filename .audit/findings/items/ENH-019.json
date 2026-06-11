@@ -1,0 +1,26 @@
+{
+ "id": "ENH-019",
+ "title": "Preset filter searches names only — cannot find presets by script content",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "form1-b",
+ "lens": "ux",
+ "existing_state": "The preset search box (InitializePresetSearchFilter, Form1.cs:8967-9037) filters via PresetMatchesFilter (Form1.cs:9080-9085), which is a single name-contains check: `presetName.Contains(filterText, StringComparison.OrdinalIgnoreCase)`. FolderHasMatchingPresets (9087-9100) recurses folders but ultimately calls the same name-only predicate. In an app whose presets are multi-line YAML scripts and command lists, there is no way to answer \"which preset touches `show running-config`?\" or \"where do I use the {{vlan}} variable?\" — the user must open presets one by one.",
+ "recommendation": "Extend PresetMatchesFilter to optionally match PresetInfo.Commands (the preset manager already holds all preset content in memory, so this is an extra string.Contains per preset — trivially fast at preset-list scale, and the 150 ms debounce at Form1.cs:9002 already protects against keystroke churn). Add a small scope toggle next to the filter box (\"Aa | name+content\") or a `c:` prefix convention, and visually distinguish content-only matches in the tree (e.g. dimmer star or suffix) so users understand why a preset whose name does not contain the term appears.",
+ "user_benefit": "Content search is the expected behavior in every script-management tool (VS Code, SecureCRT command manager). For a user with dozens of YAML presets it is the difference between finding the right script in seconds versus opening them one at a time.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "9080-9085",
+   "note": "PresetMatchesFilter is name-contains only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "9002-9010",
+   "note": "existing 150 ms debounce makes content scan cheap to add"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

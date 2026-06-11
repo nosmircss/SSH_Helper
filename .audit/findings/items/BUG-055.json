@@ -1,0 +1,31 @@
+{
+ "id": "BUG-055",
+ "title": "FlushBuffer / DrainResidualBuffer loop forever on a continuously-streaming device (no iteration cap, no cancellation)",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "ssh-execution",
+ "lens": "reliability",
+ "existing_state": "`FlushBuffer` (`SshShellSession.cs:317-339`) and `DrainResidualBuffer` (`:1393-1415`) both loop `while (true) { _stream.ReadData(); }` and rely *solely* on a read-timeout exception to terminate — FlushBuffer with a 200ms window, DrainResidualBuffer with a 25ms window — with no maximum iteration count and no `CancellationToken` check inside the loop. If the remote device emits output continuously faster than that window (e.g. a session where `top`/`tail -f`/a chatty MOTD or background logging keeps writing to the TTY), `ReadData()` keeps returning data and never throws a timeout, so the loop never exits. Both are on common paths: `FlushBuffer` runs after init on the non-pooled simple-command path (`SshExecutionService.cs:2270`), and `DrainResidualBuffer` runs before *every* command send. Because the loop ignores the cancellation token, the user's Stop button cannot break it, and the whole run hangs.",
+ "recommendation": "Bound both loops: add a max-iterations / max-wall-clock cap (e.g. drain for at most a few hundred ms total or N reads) and check `cancellationToken`/the session's CT inside the loop, breaking out when exceeded. Thread the execution CancellationToken into `DrainResidualBuffer` and `FlushBuffer` so Stop can interrupt them.",
+ "user_benefit": "Prevents the app from hanging indefinitely (un-cancellable) when a host streams output, instead of silently locking up the run.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs",
+   "lines": "323-334",
+   "note": "FlushBuffer while(true) ReadData with only a timeout exit, no cap/CT"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs",
+   "lines": "1399-1410",
+   "note": "DrainResidualBuffer same unbounded pattern, runs before every send"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "2270",
+   "note": "FlushBuffer called on the common non-pooled command path"
+  }
+ ]
+}

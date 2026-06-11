@@ -1,0 +1,46 @@
+{
+ "id": "PERF-025",
+ "title": "Editor restyles the entire document (plus fold levels and indicators) on every keystroke",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "editor",
+ "lens": "perf",
+ "existing_state": "Every text change queues RefreshEditorVisuals (UI/ScintillaScriptEditorControl.cs:595-611, coalesced once per message-loop tick at 613-639 — effectively once per keystroke during typing). That refresh does O(document) work on the UI thread: ApplySyntaxHighlighting (1700-1739) calls ConfigureBaseStyles which runs StyleClearAll and wipes the per-color style cache every time (1775, 1810-1811, so all custom styles are re-allocated per keystroke), pulls the full document via _editor.Text (1717), resets styling for the whole buffer (StartStyling(0)/SetStyling(TextLength), 1713-1714), and passes Enumerable.Range(0, Lines.Count) to the highlighter (1717) — even though YamlSshSyntaxHighlighter.BuildHighlights already accepts changed-line indices (Services/Editor/YamlSshSyntaxHighlighter.cs:62-78); each line then runs ~8 regexes (80-154) and every span is applied with its own StartStyling/SetStyling interop call (1721-1738). The same tick also re-clears and refills both squiggle indicator ranges across the whole document (ApplyDiagnosticsVisuals, 2192-2222), recomputes fold levels for ALL lines with a per-line native Lines[index].Text pull when folding is on (UpdateFoldLevels, 2001-2053, esp. 2017), and marshals the full text out twice more for validation gating (RequestValidationOrClear, 2247 and 2251). The only perf budget test runs on a 500-line script with a 50ms p95 keystroke allowance (SSH_Helper.Tests/UI/ScintillaScriptEditorPerformanceTests.cs:41-58); cost scales roughly linearly with document size, so multi-thousand-line presets get visibly laggy typing.",
+ "recommendation": "Make the keystroke path incremental: (1) move ConfigureBaseStyles/StyleClearAll out of the per-refresh path — run it only on theme/font/settings changes, keeping the color-to-style cache alive; (2) track the modified line range (Scintilla Insert/Delete notifications or diff the changed region in Editor_TextChanged) and feed only those lines to BuildHighlights — the incremental API already exists and is unused; restyle just that range instead of SetStyling(TextLength); (3) restrict UpdateFoldLevels to the changed lines plus the lines whose header status can flip (previous content line); (4) pull _editor.Text once per refresh tick and share the snapshot between highlighting and RequestValidationOrClear. Keep the existing full-document path for load/theme-switch. Extend the perf test with a 5,000-line variant to lock the win in.",
+ "user_benefit": "Typing stays instant in large YAML presets instead of degrading linearly with script size; today every keystroke pays for restyling the whole document.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+   "lines": "1700-1739",
+   "note": "ApplySyntaxHighlighting: full _editor.Text pull, SetStyling over whole buffer, all lines passed to highlighter, per-span interop loop"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+   "lines": "1768-1812",
+   "note": "ConfigureBaseStyles: StyleClearAll (1775) + style cache wiped (1810-1811) on every refresh tick"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+   "lines": "2001-2053",
+   "note": "UpdateFoldLevels: all lines, per-line native Lines[index].Text at 2017"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+   "lines": "2238-2257",
+   "note": "RequestValidationOrClear marshals full _editor.Text twice more per tick"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/YamlSshSyntaxHighlighter.cs",
+   "lines": "62-78",
+   "note": "BuildHighlights already accepts changedLineIndices — incremental API exists, never used incrementally"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SSH_Helper.Tests/UI/ScintillaScriptEditorPerformanceTests.cs",
+   "lines": "41-58",
+   "note": "perf budget only covers a 500-line script (p95 keystroke <= 50ms)"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

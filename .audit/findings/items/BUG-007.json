@@ -1,0 +1,31 @@
+{
+ "id": "BUG-007",
+ "title": "Overdue one-time jobs auto-execute immediately at app launch, violating the 'missed runs are never auto-executed' policy",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "jobs-scheduling",
+ "lens": "correctness",
+ "existing_state": "IsJobDue treats a one-time job as due whenever OneTimeScheduleUtc <= now with no staleness bound (Services/JobExecutionService.cs:1030-1031), and the evaluation timer's first tick fires immediately at startup (Start() dueTime Zero, JobExecutionService.cs:177-181). Recurring jobs are protected from downtime catch-up by _lastEvaluationUtc being initialized to construction time (JobExecutionService.cs:93), and startup missed-run detection deliberately records-without-running — but it filters to ScheduleType.Recurring only (Services/SchedulingService.cs:120, 159), matching the documented policy 'never auto-executed' (Models/SkippedRunEntry.cs:5). Net effect: an enabled one-time job whose moment passed while the app was closed (scheduled 2 PM, app closed at 1 PM, reopened days later) executes against its whole host fleet seconds after launch — no prompt, no skipped-run record — no matter how stale the schedule is. On success it is then marked 'One-time schedule completed' (JobExecutionService.cs:877-881) as if it ran on time. Cancelled one-time jobs also stay enabled with their time in the past, so they re-fire on the next 30 s tick.",
+ "recommendation": "Bound one-time due-ness to the scheduler session: in IsJobDue, treat OneTimeScheduleUtc earlier than service start (the _lastEvaluationUtc baseline at construction, or LastAppShutdownUtc plus a small grace window) as missed rather than due — auto-disable with DisabledReason 'Missed one-time schedule (app was closed)' and write a skipped-run history entry, mirroring the recurring behavior. Extend DetectMissedRunSummaries (or a sibling) to cover OneTime so startup detection records it, and pair it with a startup prompt so the user can consciously fire it late via Run Now. Also decide the cancelled-one-time re-fire semantics explicitly (today cancellation leaves it armed to re-fire on the next tick).",
+ "user_benefit": "A maintenance script scheduled for last Tuesday's change window can currently blast the fleet the moment you open the app on Friday. Aligning one-time jobs with the existing recurring-job policy removes the most dangerous surprise in the scheduler.",
+ "mockup_idea": "",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "93, 177-181, 1023-1037",
+   "note": "Immediate first tick; OneTime due-check has no staleness bound; recurring protected by _lastEvaluationUtc init"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SchedulingService.cs",
+   "lines": "120, 154-163",
+   "note": "Missed-run detection filters to Recurring only — one-time misses are invisible to it and unrecorded"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\SkippedRunEntry.cs",
+   "lines": "3-7",
+   "note": "Documented policy: missed runs are 'never auto-executed'"
+  }
+ ]
+}

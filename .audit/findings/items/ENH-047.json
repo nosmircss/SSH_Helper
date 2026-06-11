@@ -1,0 +1,46 @@
+{
+ "id": "ENH-047",
+ "title": "Shipped documentation has drifted from the engine: sethistorylabel is undocumented, the READMEs teach 15 of 43 commands in a CI-banned syntax, and NOT_CONVERTED.md denies a shipped feature",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "samples-docs",
+ "lens": "cross",
+ "existing_state": "Three user-facing docs contradict or lag the engine. (1) SCRIPTING.md — the 6,425-line 'full command reference' linked from Help > Scripting Documentation (Form1.cs:6478-6489) — documents 42 of the 43 parser command keywords; sethistorylabel has zero matches despite being fully shipped: parsed with scalar and object forms (keys value/replace/mode/separator, ScriptParser.cs:147, 1125-1127), mode-validated ('replace, append, prepend, clear', 4958-4964), registered in ScriptExecutor.cs:171, present in the Flow Canvas palette, and described only by a one-line autocomplete tooltip (ScriptAutocompleteProvider.cs:159) — its option grammar is unlearnable without reading C# source. (2) ScriptSamples/README.md lists 15 commands of 43 in its 'Available Commands' table (23-41), its directory tree (134-158) omits libraries/, qa/ and several files, and every example uses the compact inline syntax the repo's own CI forbids in samples (CanonicalCommandMapSyntaxTests.cs:241 validates with enforceCanonicalSyntax:true); the root README claims '39 script step types' and '55 built-in function helpers' (README.md:14-15) versus the actual 43 commands and 71 registered functions. (3) ScriptSamples/fortigate/NOT_CONVERTED.md:3 still claims four legacy FortiGate scripts could not be converted because local command execution and file operations 'are not supported' — localcmd (ScriptParser.cs:65, LocalCmdCommand.cs) and writefile/readfile have long since shipped exactly what its 'Future Consideration' section (47-52) wishlists, so the doc actively tells readers the engine lacks a differentiator it has.",
+ "recommendation": "One documentation-sync pass: add a sethistorylabel section to SCRIPTING.md following the per-command pattern (scalar form, object form with value/replace/mode/separator, the four modes, a fleet-labeling example); rewrite ScriptSamples/README.md with a full 43-command table grouped by family, canonical map-syntax examples, and a regenerated directory tree; fix or remove the hard counts in root README.md:14-15 (better: point at SCRIPTING.md); rewrite NOT_CONVERTED.md to reflect that the engine now supports the blockers — or convert the four FortiGate scripts with localcmd + writefile/extract and delete the file. Then guard against recurrence with a doc-coverage unit test that diffs ScriptParser's keyword array against SCRIPTING.md and the README table — the test project already does repo-file assertions of this kind (CanonicalCommandMapSyntaxTests.cs:247-257).",
+ "user_benefit": "New users currently learn about a third of the command surface, in a syntax style the samples themselves are banned from using, and are actively told the tool cannot do local execution; accurate entry-point docs are the cheapest adoption lever the project has, and the drift test stops the next command from shipping undocumented.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs",
+   "lines": "65, 67, 147, 1125-1127, 4958-4964",
+   "note": "sethistorylabel fully wired with object-form grammar and mode validation; localcmd registered"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SCRIPTING.md",
+   "lines": "whole file",
+   "note": "grep -i sethistorylabel returns nothing; every other of the 43 commands appears"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples\\README.md",
+   "lines": "23-41, 134-158",
+   "note": "15-command table; tree missing libraries/, qa/, 3+ files; compact-syntax examples throughout"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\README.md",
+   "lines": "14-15",
+   "note": "'39 script step types' and '55 built-in function helpers' vs actual 43/71"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ScriptSamples\\fortigate\\NOT_CONVERTED.md",
+   "lines": "3, 47-52",
+   "note": "claims 'not supported' and wishlists exactly what localcmd now does"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.Tests\\Scripting\\CanonicalCommandMapSyntaxTests.cs",
+   "lines": "238-257",
+   "note": "samples validated with enforceCanonicalSyntax:true; existing repo-file assertions to model the doc-coverage drift test on"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 3
+}

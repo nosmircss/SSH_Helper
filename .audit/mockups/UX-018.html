@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX-018 — Maintenance group for instant actions</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{color:#ff5c5c;font-weight:600}.cap i{color:#2bd97c;font-style:normal;font-weight:600}
+  .dlg{background:#10141c;border:1px solid #1c2330;border-radius:6px;overflow:hidden}
+  .tabs{display:flex;gap:2px;background:#0d1118;border-bottom:1px solid #1c2330;padding:4px 6px 0}
+  .tab{padding:3px 9px;font-size:10px;color:#8294a8;border:1px solid transparent;border-bottom:0;border-radius:4px 4px 0 0}
+  .tab.on{background:#10141c;border-color:#1c2330;color:#c9d4e3}
+  .body{padding:8px 10px 6px}
+  h4{margin:7px 0 4px;font-size:11px;color:#c9d4e3;font-weight:600}
+  h4:first-child{margin-top:0}
+  .row{display:flex;align-items:center;gap:6px;margin:2px 0 2px 8px;color:#aebdce}
+  .num{width:34px;text-align:right;background:#0b0e13;border:1px solid #2a3344;border-radius:3px;padding:1px 4px;color:#c9d4e3}
+  .chk{width:11px;height:11px;border:1px solid #4cc9f0;border-radius:2px;display:inline-block;
+       background:linear-gradient(135deg,#4cc9f0 0%,#4cc9f0 100%);box-shadow:inset 0 0 0 2px #10141c}
+  .btn{display:inline-block;background:#1a2231;border:1px solid #2a3344;border-radius:3px;
+       padding:3px 9px;color:#c9d4e3;margin:4px 0 2px 8px}
+  .note{font-size:10px;color:#8294a8;margin:0 0 3px 16px}
+  .flag{font-size:9px;color:#ff5c5c;border:1px solid #ff5c5c55;border-radius:3px;padding:0 5px;margin-left:6px}
+  .tag{font-size:9px;color:#ffb454;border:1px solid #ffb45455;border-radius:3px;padding:0 5px;margin-left:6px}
+  .maint{border:1px solid #ffb45433;border-radius:5px;background:#ffb45408;padding:5px 8px 6px;margin:8px 0 2px}
+  .maint .btn{margin-left:0}
+  .foot{display:flex;justify-content:flex-end;gap:6px;border-top:1px solid #1c2330;padding:7px 10px;background:#0d1118}
+  .save{background:#173324;border:1px solid #2bd97c66;color:#2bd97c;border-radius:3px;padding:3px 12px}
+  .cancel{background:#1a2231;border:1px solid #2a3344;border-radius:3px;padding:3px 12px}
+  .verdict{font-size:10px;margin:5px 0 0;line-height:1.45}
+  .bad{color:#ff5c5c}.good{color:#2bd97c}.amb{color:#ffb454}
+  .vault{font-size:10px;color:#8294a8;border-top:1px dashed #1c2330;margin-top:7px;padding-top:5px;line-height:1.5}
+  .vault code{color:#4cc9f0}
+</style>
+</head>
+<body>
+<div class="cols">
+
+  <section>
+    <p class="cap">Before — <b>instant actions disguised as staged settings</b></p>
+    <div class="dlg">
+      <div class="tabs"><span class="tab on">General</span><span class="tab">Fonts</span><span class="tab">Editor</span><span class="tab">Vault</span><span class="tab">Updates</span></div>
+      <div class="body">
+        <h4>Default Values</h4>
+        <div class="row">Default command timeout (seconds): <span class="num">10</span></div>
+        <div class="row">Connection timeout (seconds): <span class="num">30</span></div>
+        <span class="btn">Reset All Preset Timeouts to Default</span><span class="flag">ran already — Cancel won't undo</span>
+        <h4>Connection Pooling</h4>
+        <div class="row"><span class="chk"></span> Reuse SSH connections across executions</div>
+        <h4>Browser Callback</h4>
+        <span class="btn">Clear Embedded Browser Data...</span><span class="flag">ran already — Cancel won't undo</span>
+        <p class="note">Resets cookies, cache, local storage, IndexedDB...</p>
+        <div class="vault">Vault tab, same trap: <b style="color:#ff5c5c">Remove</b> on profile <code>prod-fortigate</code> deletes its
+        <code>token</code> / <code>approle_secret</code> / <code>ldap_password</code> / <code>userpass_password</code>
+        from Credential Manager instantly — press Cancel and the secrets are gone anyway.</div>
+      </div>
+      <div class="foot"><span class="save">Save</span><span class="cancel">Cancel</span></div>
+    </div>
+    <p class="verdict"><span class="bad">✗</span> ~80 controls stage until Save; these three commit on click. Nothing in the UI says so.</p>
+  </section>
+
+  <section>
+    <p class="cap">After — <i>maintenance group + deferred credential delete</i></p>
+    <div class="dlg">
+      <div class="tabs"><span class="tab on">General</span><span class="tab">Fonts</span><span class="tab">Editor</span><span class="tab">Vault</span><span class="tab">Updates</span></div>
+      <div class="body">
+        <h4>Default Values</h4>
+        <div class="row">Default command timeout (seconds): <span class="num">10</span></div>
+        <div class="row">Connection timeout (seconds): <span class="num">30</span></div>
+        <h4>Connection Pooling</h4>
+        <div class="row"><span class="chk"></span> Reuse SSH connections across executions</div>
+        <div class="maint">
+          <h4 style="margin:0 0 2px">Maintenance <span class="tag">applies immediately</span></h4>
+          <p class="note" style="margin-left:0">These actions run when confirmed — Save/Cancel does not govern them.</p>
+          <span class="btn">Reset All Preset Timeouts to Default</span><br>
+          <span class="btn">Clear Embedded Browser Data...</span>
+        </div>
+        <div class="vault">Vault tab: Remove on <code>prod-fortigate</code> now just <span class="amb">queues</span> the
+        4 credential deletions — processed in <code>BtnSave_Click</code> after validation.
+        Cancel restores the profile <i style="color:#2bd97c">and</i> keeps its secrets.</div>
+      </div>
+      <div class="foot"><span class="save">Save</span><span class="cancel">Cancel</span></div>
+    </div>
+    <p class="verdict"><span class="good">✓</span> One honest rule: Cancel reverts everything except the clearly-marked Maintenance box.</p>
+  </section>
+
+</div>
+</body>
+</html>

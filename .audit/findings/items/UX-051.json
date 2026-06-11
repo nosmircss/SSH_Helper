@@ -1,0 +1,31 @@
+{
+ "id": "UX-051",
+ "title": "Comment color is modeled, rendered, and exported — but there is no way to change it",
+ "category": "UX",
+ "severity": "low",
+ "effort": "S",
+ "area": "flowcanvas-ui",
+ "lens": "ux",
+ "existing_state": "CommentNodeData declares color (FlowCanvas/src/nodes/CommentNode.tsx:15), the node renders it as the card background (CommentNode.tsx:37, 96), and export ships it to C# with the DEFAULT_COMMENT_COLOR fallback (utils/exportGraph.ts:127). Yet the comment Properties pane offers only Text and Kind (panels/CommentProperties.tsx:11-37) — no color control anywhere, so every sticky/comment is permanently the default yellow unless the value arrived from import.",
+ "recommendation": "Add a small swatch row to CommentProperties.tsx (6-8 preset colors drawn from the token palette plus the default), calling the existing updateComment(nodeId, { color }) — the same store path Text/Kind already use. A native color input works too but presets keep stickies on-palette.",
+ "user_benefit": "Color-coding stickies (red = TODO/danger, green = verified, blue = info) is the whole point of stickies when annotating a large preset; right now the data model supports it but users can't reach it.",
+ "evidence": [
+  {
+   "file": "FlowCanvas/src/panels/CommentProperties.tsx",
+   "lines": "11-37",
+   "note": "editor exposes text + kind only"
+  },
+  {
+   "file": "FlowCanvas/src/nodes/CommentNode.tsx",
+   "lines": "15, 37, 96",
+   "note": "color is modeled and rendered as the card background"
+  },
+  {
+   "file": "FlowCanvas/src/utils/exportGraph.ts",
+   "lines": "127",
+   "note": "color exported with DEFAULT_COMMENT_COLOR fallback"
+  }
+ ],
+ "mockup_idea": "Comment properties pane with a 'Color' row of 7 round swatches under the Kind dropdown, and a canvas snippet of three stickies in yellow/red/green annotating different branches.",
+ "merged_from": 1
+}

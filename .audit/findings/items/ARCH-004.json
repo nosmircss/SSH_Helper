@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-004",
+ "title": "Two expression engines disagree on truthiness, comparison, and equality — same expression, different answer in if: vs set:",
+ "category": "ARCH",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "perf",
+ "existing_state": "Conditions (if/elif/while/when/assert) run through ExpressionEvaluator; set: right-hand sides and ternaries run through ExpressionParser — and their semantics have already diverged in three ways. (1) Truthiness of \"0\": ExpressionParser.IsTruthy treats the string \"0\" as false (Services/Scripting/ExpressionParser.cs:163-173), while the evaluator's bare-value fallback uses ValueResolver.IsTruthyValue (ExpressionEvaluator.cs:205-207), where \"0\" is truthy (ValueResolver.cs:347-359; the structured-emptiness helper at 497-509 only applies to '{'/'[' strings). So `if x` is TRUE but `set: y = x ? \"a\" : \"b\"` picks \"b\" for the same x=\"0\". (2) `>`/`<`: the evaluator coerces non-numeric operands to 0 (ExpressionEvaluator.cs:368-376), the parser falls back to case-insensitive STRING comparison (ExpressionParser.cs:152-161). (3) `==`: the evaluator compares numerics with a 0.0001 epsilon (ExpressionEvaluator.cs:399-416), the parser uses exact double CompareTo (ExpressionParser.cs:140-150). Which engine answers is decided by a syntax sniff — ExpressionEvaluator.ResolveValue re-routes into ExpressionParser only when the text \"looks computable\" (contains '(', '?', ' + ', etc., ExpressionEvaluator.cs:320-360) and swallows all parse exceptions — so adding parentheses or a '+' to a condition silently changes its comparison semantics.",
+ "recommendation": "Make ValueResolver the single source of truth for scalar semantics (it already is for emptiness/collections per its design): extract shared CompareValues/CompareNumeric/AreEqual/IsTruthy primitives into ValueResolver and have BOTH ExpressionEvaluator and ExpressionParser delegate to them, picking one documented rule per operator (suggested: parser's numeric-then-string ordering for >/<, one equality rule, one truthiness table). This kills the three divergences without a rewrite. A later phase can fold condition parsing into the ExpressionParser grammar (add and/or/not/in/matches) so there is one engine, but the primitive extraction alone removes the user-facing inconsistency.",
+ "user_benefit": "Eliminates the worst class of silent wrong-result bugs in fleet scripts: a condition that works in `if:` behaving differently inside a ternary or after a cosmetic edit, branching wrongly across hundreds of hosts with no error shown.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ExpressionParser.cs",
+   "lines": "140-173",
+   "note": "Parser: exact equality, string-fallback >/< (152-161), \"0\" falsy (169-171)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ExpressionEvaluator.cs",
+   "lines": "368-376, 399-416, 205-207",
+   "note": "Evaluator: coerce-to-0 numerics, epsilon equality, ValueResolver truthiness"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ValueResolver.cs",
+   "lines": "347-359, 497-509",
+   "note": "IsTruthyValue: \"0\" is truthy (structured-emptiness only for JSON arrays/objects)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ExpressionEvaluator.cs",
+   "lines": "320-360",
+   "note": "LooksLikeComputableExpression syntax-sniff routes between engines, swallowing parse errors"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

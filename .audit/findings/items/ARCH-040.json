@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-040",
+ "title": "Script prompt dialog chrome is copy-pasted across 6+ dialog classes and has already diverged",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-a",
+ "lens": "perf",
+ "existing_state": "Every script prompt dialog hand-rolls the same construction block: font clamp + scale-up-only `S()` helper (`Math.Clamp(fontSize, 7f, 36f)` then `Math.Max(1f, …)` — ChooseCommand.cs:101-103, ConfirmCommand.cs:68-70, InputCommand.cs:111-113), ambient-font-family lookup from `Application.OpenForms[0]` (ChooseCommand.cs:105-107, ConfirmCommand.cs:81-83, InputCommand.cs:124-126), dark-mode detection plus the DialogTheme.ApplyTo/StyleButton/SetDarkTitleBar/Load→ApplyNativeTheme sequence (ChooseCommand.cs:205-224, ConfirmCommand.cs:116-135, InputCommand.cs:178-195, and grep-verified identical copies in MultiselectCommand.cs:216, ReadFileCommand.cs:695, WriteFileCommand.cs:729). The duplication has already produced divergence: BrowserCallbackCaptureCommand uses a different dark threshold (BrowserCallbackCaptureCommand.cs:691, 698), so on a mid-brightness theme the browser-callback dialog themes opposite to every other script prompt. The known scale-up-only limitation (font_size: 7 accepted but dialog never shrinks) is likewise replicated identically in at least three places — fixing it means finding seven copies. The duplication also rides on these dialogs being full WinForms classes embedded inside command files (ReadFileCommand.cs is 802 lines, WriteFileCommand.cs 854), so each new prompt command copies the ritual again.",
+ "recommendation": "Extract one shared base (`ScriptPromptDialogBase : Form`) or a `ScriptPromptChrome` helper owning: clamped font scaling with the `S()` unit, ambient font family resolution, a single dark-mode predicate (delegating to the central DialogTheme.IsDarkMode once that exists), and the theme-apply + Load sequence. Port ScriptChooseDialog, ScriptConfirmDialog, ScriptInputDialog, the multiselect/readfile/writefile dialogs, and the browser-callback host onto it; when convenient, extract the embedded dialog classes into UI/ so future prompt commands inherit the chrome instead of re-implementing it.",
+ "user_benefit": "Prompt theming and sizing fixes land once instead of seven times, and visible inconsistencies (dialogs disagreeing on dark mode at the same app theme) stop appearing as the prompt family keeps growing.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ChooseCommand.cs",
+   "lines": "101-110, 205-224",
+   "note": "scale helper, ambient font, dark detection, theme-apply block"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ConfirmCommand.cs",
+   "lines": "68-83, 116-135",
+   "note": "identical copied block"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/InputCommand.cs",
+   "lines": "111-126, 178-195",
+   "note": "identical copied block"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/BrowserCallbackCaptureCommand.cs",
+   "lines": "691, 698",
+   "note": "divergent dark threshold — proof the copies drift"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/MultiselectCommand.cs",
+   "lines": "216",
+   "note": "further copy (grep-verified); also ReadFileCommand.cs:695, WriteFileCommand.cs:729 inside 800+-line command files"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

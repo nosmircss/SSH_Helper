@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>UX-035 — Host grid empty state</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .row{display:flex;gap:12px}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px 2px}
+  .cap b{font-weight:600}
+  .cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+  .win{border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden}
+  .tbar{display:flex;gap:6px;align-items:center;padding:5px 8px;border-bottom:1px solid #1c2330;color:#8294a8;font-size:10px}
+  .tbar span{padding:2px 7px;border:1px solid #1c2330;border-radius:3px;background:#11161f}
+  .grid{position:relative;height:208px}
+  table{border-collapse:collapse;width:100%;font-size:11px}
+  th,td{border:1px solid #1c2330;padding:4px 8px;text-align:left;height:18px}
+  th{background:#11161f;color:#8294a8;font-weight:600}
+  td{color:#3a4658}
+  th.sel,td.sel{width:26px;text-align:center}
+  th.rh,td.rh{width:30px;background:#11161f}
+  .sbar{padding:4px 8px;border-top:1px solid #1c2330;color:#8294a8;font-size:10px}
+  .note{margin-top:6px;font-size:10px;color:#8294a8;line-height:1.5;padding-left:2px}
+  /* AFTER: empty-state card */
+  .card{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .card>div{background:#11161f;border:1px solid #1c2330;border-radius:8px;padding:12px 14px;text-align:center;max-width:280px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  .glyph{width:30px;height:30px;line-height:30px;margin:0 auto 6px;border-radius:7px;background:#0b0e13;border:1px solid #1c2330;color:#4cc9f0;font-weight:700}
+  h3{margin:0 0 3px;font-size:12px;color:#c9d4e3;font-weight:600}
+  .sub{font-size:10px;color:#8294a8;margin:0 0 8px}
+  .ex{border-collapse:collapse;margin:0 auto 6px;font-size:9.5px}
+  .ex th,.ex td{border:1px solid #1c2330;padding:2px 7px;height:auto}
+  .ex th{color:#8294a8}.ex td{color:#c9d4e3}
+  .ex .v{color:#4cc9f0}
+  .hint{font-size:9.5px;color:#8294a8;margin:0 0 10px}
+  .hint code{color:#4cc9f0}
+  .btns{display:flex;gap:6px;justify-content:center}
+  .btn{font:10px "Cascadia Code",Consolas,monospace;padding:4px 8px;border-radius:4px;border:1px solid #1c2330;background:#0e1219;color:#c9d4e3;cursor:pointer}
+  .btn.pri{border-color:#4cc9f0;color:#4cc9f0}
+</style></head><body>
+<div class="row">
+
+  <div class="col">
+    <p class="cap"><b class="bad">Before</b> — first launch today</p>
+    <div class="win">
+      <div class="tbar"><span>Run</span><span>Environments</span><span>Scheduler</span><span>Flow Canvas</span></div>
+      <div class="grid">
+        <table>
+          <tr><th class="rh"></th><th class="sel">☑</th><th>Host_IP</th><th style="width:55%"></th></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+        </table>
+      </div>
+      <div class="sbar">Ready</div>
+    </div>
+    <p class="note">Silent dead-end: lone <b>Host_IP</b> header, status bar says “Ready”. The CSV workflow and the <b>{{variable}}</b> mechanic are undiscoverable; the only guidance is an error dialog after a failed Run.</p>
+  </div>
+
+  <div class="col">
+    <p class="cap"><b class="good">After</b> — empty-state overlay (zero host rows)</p>
+    <div class="win">
+      <div class="tbar"><span>Run</span><span>Environments</span><span>Scheduler</span><span>Flow Canvas</span></div>
+      <div class="grid">
+        <table>
+          <tr><th class="rh"></th><th class="sel">☑</th><th>Host_IP</th><th style="width:55%"></th></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+          <tr><td class="rh"></td><td class="sel"></td><td></td><td></td></tr>
+        </table>
+        <div class="card"><div>
+          <div class="glyph">&gt;_</div>
+          <h3>No hosts yet</h3>
+          <p class="sub">Add devices to run commands against.</p>
+          <table class="ex">
+            <tr><th>Host_IP</th><th>username</th><th>site</th></tr>
+            <tr><td>10.20.4.11</td><td>admin</td><td class="v">bldg-A</td></tr>
+            <tr><td>10.20.4.12</td><td>admin</td><td class="v">bldg-B</td></tr>
+          </table>
+          <p class="hint">Extra columns become variables: <code>show run | i {{site}}</code></p>
+          <div class="btns">
+            <button class="btn pri">Import CSV…</button>
+            <button class="btn">Add host</button>
+            <button class="btn">Sample script</button>
+          </div>
+        </div></div>
+      </div>
+      <div class="sbar">Ready — import hosts or add one to get started</div>
+    </div>
+    <p class="note">Same <b>lblFavoritesEmpty</b> pattern, applied to the primary surface. Buttons reuse existing handlers (OpenCsvFile, focus first cell, ScriptSamples/). Card hides the moment a row exists.</p>
+  </div>
+
+</div>
+</body></html>

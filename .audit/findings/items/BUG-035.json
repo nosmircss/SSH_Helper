@@ -1,0 +1,36 @@
+{
+ "id": "BUG-035",
+ "title": "Disabled-block state is persisted and restored by unstable raw node id — the wrong block gets silently skipped after the preset's YAML changes",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "flowcanvas-state",
+ "lens": "correctness",
+ "existing_state": "Layout autosave persists node positions keyed by the stable `stepPath:blockType` tuple, but `disabledBlocks` and `expandedNodes` are flat arrays of raw live node ids (FlowCanvas/src/utils/layoutAutosave.ts:51-61). On the next open, the host re-applies them by raw id: `MergeAuxiliaryLayout` stamps `data.disabled = true` on whichever node currently has that id (Services/FlowCanvasBridge.cs:5444-5456), and React then rebuilds its disabled set from that stamp (stores/messageBridge.ts:169-177). Node ids are reassigned sequentially on every import (`node-{_idCounter++}`, FlowCanvasBridge.cs:331), so any change that shifts step order between the autosave and the next open — editing the preset in the text editor, deleting a step, inserting one above — moves the disabled flag onto a DIFFERENT block, which the executor then skips during runs. The codebase already knows ids are unstable: position merge was migrated to the tuple key for exactly this reason (`TryMergeLayoutByTuple`, FlowCanvasBridge.cs:5403-5441, with 'pre-migration entry: no stable key' comment at :5409), but disabled/expanded were left id-keyed. Compounding it, deleting a node never purges its id from `disabledBlocks`/`breakpoints`/`expandedNodes` (graphSlice.ts:447-456 filters only selectedNodeIds), so a deleted disabled block's stale id is persisted by every autosave (layoutAutosave.ts:60) and lands on whichever block inherits that id after the ids shift.",
+ "recommendation": "Key disabled (and expanded) persistence by the same `stepPath:blockType` tuple as positions: include the tuple in the autosave payload (layoutAutosave.ts) and match on it in MergeAuxiliaryLayout instead of raw id, with the same 'vanished tuple -> drop' safety rule TryMergeLayoutByTuple uses. Separately, purge removed node ids from `disabledBlocks`, `breakpoints`, and `expandedNodes` inside `removeNodes`/`onNodesChange` remove handling in graphSlice.ts.",
+ "user_benefit": "A block the user never disabled can currently be skipped in a multi-host run — silently producing an incomplete deployment/audit — just because they edited the script after disabling a different block.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\layoutAutosave.ts",
+   "lines": "51-61",
+   "note": "positions carry the stable tuple; disabledBlocks/expandedNodes are raw ids"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "5444-5463",
+   "note": "MergeAuxiliaryLayout stamps disabled/expanded by raw id"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "331, 5403-5441",
+   "note": "ids reassigned per import; position merge deliberately tuple-keyed because ids are unstable"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\graphSlice.ts",
+   "lines": "447-456",
+   "note": "removeNodes never purges the debug Sets — stale ids keep getting autosaved"
+  }
+ ]
+}

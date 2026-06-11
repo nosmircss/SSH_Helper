@@ -1,0 +1,46 @@
+{
+ "id": "UX-025",
+ "title": "Find is fragmented: Ctrl+F always targets the output pane, the find bar is permanently dark, the run-output viewer reimplements search, and the script editor has no find at all",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "consistency",
+ "lens": "cross",
+ "existing_state": "Form1.ProcessCmdKey intercepts Ctrl+F app-wide and always opens the output find anchored to txtOutput (Form1.cs:14462-14464, 14482-14492); the find logic is hardwired to txtOutput (seeds from txtOutput.SelectedText at 14484, match/cursor logic at 14516, 14549), and F3/Shift+F3 are likewise always captured for output-pane navigation (14472-14477). The Scintilla script editor has no find/replace capability of any kind (no search code in UI/ScintillaScriptEditorControl.cs beyond an indentation helper) — so a user editing a multi-hundred-line YAML preset who presses Ctrl+F gets focus yanked to a dialog searching the wrong pane, and has no way to locate a variable or step name in the script. The find bar itself (FindDialog) hardcodes a VS Code dark palette as static colors and never touches DialogTheme (FindDialog.cs:9-19, 38-50) — in light mode it renders as a floating dark rectangle over a white app. RunOutputViewerDialog implements the same find-in-output concept from scratch with a divergent interaction: a toggled docked panel, Enter/Shift+Enter only, no incremental search, no match counter, no case toggle (RunOutputViewerDialog.cs:69-135, 302-315). FindDialog also ships three constructed-but-hidden controls marked 'not implemented' (whole word, regex, find-in-selection — FindDialog.cs:115-131, 147-153).",
+ "recommendation": "1) Make FindDialog take a darkMode flag and map its static colors onto DialogTheme tokens. 2) Extract it into a reusable find-bar control and replace RunOutputViewerDialog's bespoke search panel with it so both output surfaces behave identically. 3) Route Ctrl+F/F3 by focus in ProcessCmdKey: when the script editor is focused, drive Scintilla's SearchInTarget/indicator API with the same bar (incremental highlight-all + Enter/Shift+Enter next/prev + Esc dismiss) instead of jumping to output. Delete or finish the hidden whole-word/regex toggles while in there.",
+ "user_benefit": "One search muscle-memory everywhere: Ctrl+F finds in whatever you're looking at — including the YAML you're editing, which is currently unsearchable — looks correct in light mode, and the run-output viewer gains the match counter and case toggle the main window already has.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "14462-14464, 14472-14497",
+   "note": "Ctrl+F/F3 unconditionally routed to output-pane find regardless of focused control"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "14484, 14516, 14549",
+   "note": "Find logic is hardwired to txtOutput"
+  },
+  {
+   "file": "FindDialog.cs",
+   "lines": "9-19, 38-50",
+   "note": "Hardcoded dark palette; no DialogTheme usage in file (verified by grep)"
+  },
+  {
+   "file": "RunOutputViewerDialog.cs",
+   "lines": "69-135, 302-315",
+   "note": "Second, divergent search implementation: toggle panel, Enter-only navigation, no counter/case toggle"
+  },
+  {
+   "file": "FindDialog.cs",
+   "lines": "115-131, 147-153",
+   "note": "Whole-word/regex/find-in-selection controls built then hidden 'not implemented'"
+  },
+  {
+   "file": "UI/ScintillaScriptEditorControl.cs",
+   "lines": "2044, 2094",
+   "note": "Only 'Find' matches are an indentation helper — the editor has no user-facing find"
+  }
+ ],
+ "mockup_idea": "Three panels: (1) current light-mode app with the dark find bar floating on white, (2) current RunOutputViewerDialog search panel vs main find bar side-by-side, (3) the unified themed bar shown over both output and the script editor with match-count badge and highlighted matches in the YAML.",
+ "merged_from": 2
+}

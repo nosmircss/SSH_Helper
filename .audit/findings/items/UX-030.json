@@ -1,0 +1,31 @@
+{
+ "id": "UX-030",
+ "title": "Job Import preview: no Select All/None, broken-target jobs are checked by default, and conflicts are rename-only",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-general",
+ "lens": "ux",
+ "existing_state": "ImportPreviewDialog adds every row with the Import checkbox forced to true — including rows flagged 'Target folder/preset not found - will be disabled' (ImportPreviewDialog.cs:244-249 adds true unconditionally; MissingTarget status at 231-237). So importing a bundle whose targets don't exist on this machine silently brings in known-broken disabled jobs with one OK click. There is no select-all/none affordance — a 30-job import that you only want 3 jobs from requires 27 individual checkbox clicks (grid columns at 72-113; the 'Import' column header is plain text with no check-all). Name conflicts are presented as a fait accompli: 'Renamed (original: X)' (226-230) with the Name column read-only (81-87) — no way to overwrite the existing job or pick a different name from the preview.",
+ "recommendation": "Three small upgrades to the same grid: (1) add Select All / Select None LinkLabels (or a tri-state header checkbox via HeaderCell replacement) above the grid, wired to the existing UpdateSummaryLabel; (2) default-uncheck rows where entry.MissingTarget is true and tint the whole row so broken imports are opt-in; (3) make the Name cell editable for conflicted rows, writing back to entry.ResolvedName with a duplicate-name check, and optionally a per-row Rename / Overwrite / Skip choice in the Status column.",
+ "user_benefit": "Importing job bundles between machines (the whole point of export/import) stops being a click-fest, and users no longer accidentally accept disabled, broken jobs or forced renames they never saw.",
+ "evidence": [
+  {
+   "file": "ImportPreviewDialog.cs",
+   "lines": "244-249",
+   "note": "Every row added checked=true, including MissingTarget rows"
+  },
+  {
+   "file": "ImportPreviewDialog.cs",
+   "lines": "226-237",
+   "note": "Conflict shows 'Renamed (original: X)' only; missing-target shows 'will be disabled'"
+  },
+  {
+   "file": "ImportPreviewDialog.cs",
+   "lines": "72-117",
+   "note": "No check-all header; Name column ReadOnly — resolved name not editable"
+  }
+ ],
+ "mockup_idea": "Single annotated screenshot of the import grid: 'Select all / none' links above it, a red-tinted unchecked row for a missing-target job with tooltip 'Target not found — check to import anyway (job will be disabled)', and a conflicted row showing an editable Name cell plus a Rename/Overwrite/Skip dropdown in the Status column.",
+ "merged_from": 1
+}

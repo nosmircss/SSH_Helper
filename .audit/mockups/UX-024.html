@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>UX-024 — Function autocomplete in the script editor</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+  .muted{color:#8294a8}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{color:#ff5c5c;font-weight:600}.cap.after b{color:#2bd97c}
+  .row{display:flex;gap:12px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .ed{background:#0e1218;border:1px solid #1c2330;border-radius:6px;overflow:hidden}
+  .tb{background:#11161f;border-bottom:1px solid #1c2330;padding:5px 9px;font-size:10.5px;color:#8294a8}
+  .tb b{color:#c9d4e3;font-weight:600}
+  .code{padding:8px 0 10px;line-height:1.65;font-size:11.5px}
+  .ln{display:flex;white-space:pre}
+  .ln .n{width:26px;text-align:right;padding-right:9px;color:#3a4658;user-select:none;flex:none}
+  .k{color:#4cc9f0}.s{color:#2bd97c}.f{color:#ffb454}.c{color:#5a6b80}
+  .caret{display:inline-block;width:7px;background:#4cc9f0;color:#0b0e13;animation:bl 1.1s steps(1) infinite}
+  @keyframes bl{50%{opacity:.15}}
+  .anch{position:relative}
+  .pop{position:absolute;left:64px;top:20px;z-index:2;background:#11161f;border:1px solid #2a3a52;border-radius:5px;
+       box-shadow:0 8px 22px rgba(0,0,0,.55);font-size:11px;padding:3px;white-space:normal;line-height:1.35}
+  .it{display:block;padding:3px 7px;border-radius:3px}
+  .it .sig{color:#c9d4e3;white-space:nowrap}.it .sig em{color:#ffb454;font-style:normal}
+  .it .d{display:block;color:#8294a8;font-size:10px;margin:1px 0 0 13px}
+  .it.sel{background:#1a2433;outline:1px solid #4cc9f0}
+  .it.sel .sig em{color:#4cc9f0}
+  .tip{position:absolute;left:64px;top:-22px;background:#11161f;border:1px solid #2a3a52;border-radius:4px;
+       padding:3px 8px;font-size:11px;white-space:nowrap;box-shadow:0 6px 16px rgba(0,0,0,.5);line-height:1.4}
+  .tip .act{color:#4cc9f0;font-weight:600}.tip .rest{color:#8294a8}
+  .note{font-size:10.5px;color:#8294a8;margin-top:6px;line-height:1.5}
+  .note .bad{color:#ff5c5c}.note .ok{color:#2bd97c}
+  .foot{margin-top:12px;font-size:10.5px;color:#8294a8;border-top:1px solid #1c2330;padding-top:8px;line-height:1.55}
+  .foot b{color:#c9d4e3}
+</style></head><body>
+
+<div class="row">
+  <div class="col">
+    <p class="cap"><b>Before</b> — typing an expression gets nothing</p>
+    <div class="ed">
+      <div class="tb">Preset Editor — <b>fortigate-backup</b> · 10.20.4.1 (fw-edge-01)</div>
+      <div class="code">
+        <div class="ln"><span class="n">4</span><span>- <span class="k">send</span>: get system interface physical</span></div>
+        <div class="ln"><span class="n">5</span><span>- <span class="k">set</span>: mgmt_ip = reg<span class="caret">&nbsp;</span></span></div>
+        <div class="ln"><span class="n">6</span><span>- <span class="k">if</span>: <span class="s">"{{mgmt_ip}} != ''"</span></span></div>
+        <div class="ln"><span class="n">7</span><span>    <span class="k">then</span>:</span></div>
+        <div class="ln"><span class="n">8</span><span>      - <span class="k">log</span>: <span class="s">"mgmt = {{mgmt_ip}}"</span></span></div>
+      </div>
+    </div>
+    <p class="note"><span class="bad">No suggestions.</span> Is it <i>regex_match</i>? <i>regexmatch</i>? What are the args? User alt-tabs to SCRIPTING.md — for every one of ~112 functions.</p>
+  </div>
+
+  <div class="col">
+    <p class="cap after"><b>After</b> — completions + signature calltip</p>
+    <div class="ed">
+      <div class="tb">Preset Editor — <b>fortigate-backup</b> · 10.20.4.1 (fw-edge-01)</div>
+      <div class="code">
+        <div class="ln"><span class="n">4</span><span>- <span class="k">send</span>: get system interface physical</span></div>
+        <div class="ln anch"><span class="n">5</span><span>- <span class="k">set</span>: mgmt_ip = <span class="f">reg</span><span class="caret">&nbsp;</span></span>
+          <div class="pop"><div class="it sel"><span class="sig"><em>reg</em>ex_match(text, pattern[, group])</span><span class="d">first regex match (or capture group)</span></div><div class="it"><span class="sig"><em>reg</em>ex_match_all(text, pattern)</span><span class="d">all matches as a list</span></div><div class="it"><span class="sig"><em>reg</em>ex_replace(text, pattern, repl)</span><span class="d">replace every match</span></div></div>
+        </div>
+        <div class="ln"><span class="n">6</span><span>- <span class="k">if</span>: <span class="s">"{{mgmt_ip}} != ''"</span></span></div>
+        <div class="ln"><span class="n">7</span><span>    <span class="k">then</span>:</span></div>
+        <div class="ln"><span class="n">8</span><span>      - <span class="k">log</span>: <span class="s">"mgmt = {{mgmt_ip}}"</span></span></div>
+        <div class="ln"><span class="n">9</span><span>&nbsp;</span></div>
+        <div class="ln"><span class="n">10</span><span>&nbsp;</span></div>
+        <div class="ln"><span class="n">11</span><span>&nbsp;</span></div>
+        <div class="ln c" style="padding-left:26px">&nbsp; …then after typing <b>(</b> :</div>
+        <div class="ln anch" style="margin-top:26px"><span class="n">12</span><span>- <span class="k">set</span>: mgmt_ip = <span class="f">regex_match</span>(<span class="caret">&nbsp;</span>
+          <div class="tip"><span class="act">text</span><span class="rest">, pattern[, group]) — first match</span></div></span></div>
+      </div>
+    </div>
+    <p class="note"><span class="ok">Popup triggers in expression position</span> (after <i>set: x = </i>, inside <i>if:/while:/assert:</i>); calltip shows the signature with the active arg highlighted.</p>
+  </div>
+</div>
+
+<div class="foot">
+  Powered by one <b>unified function table</b> (name · signature · one-liner · category) covering the 71 registry functions
+  + 20 legacy JsonUtilities names + the json.* family — the same table later feeds the Flow Canvas expression fields and the UX-010 name lint.
+</div>
+
+</body></html>

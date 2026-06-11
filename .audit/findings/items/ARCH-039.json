@@ -1,0 +1,56 @@
+{
+ "id": "ARCH-039",
+ "title": "Theming has no single source of truth: duplicate palettes with colliding names, four accent blues, and a dark-mode pixel-brightness heuristic copy-pasted in 10 places",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "L",
+ "area": "consistency",
+ "lens": "cross",
+ "existing_state": "Theme colors are defined at least four times. DialogTheme owns the canonical palette (UI/DialogTheme.cs:10-32); Form1 owns a private near-duplicate (Form1.cs:2829-2855) where the SAME constant name means different colors — Form1.DarkSurface1 = (30,30,30) vs DialogTheme.DarkSurface1 = (37,37,38), Form1.DarkSurface2 = (37,37,38) vs DialogTheme.DarkSurface2 = (45,45,46) — and Form1's dark mode has a 4-level surface scale DialogTheme lacks; FindDialog has a third hardcoded palette (FindDialog.cs:9-19); PresetTabHeaderStrip defaults a fourth accent (UI/PresetTabHeaderStrip.cs:35) and is skinned from the Form1 palette (Form1.cs:3388-3394, 3532-3538), not DialogTheme. 'Accent blue' alone exists as (0,120,212) (DialogTheme.LightAccent/DarkAccent, :17,28), (13,110,253) (Form1.LightAccent via GridLightSelection, Form1.cs:2837), (0,122,204) (Form1.DarkSelectionBorder + strip default, :2851), and (0,120,215) (Settings' default custom accent, SettingsDialog.cs:178) — and the user-configurable FontSettings.CustomAccentColor is applied ONLY to btnExecuteSelected (Form1.cs:3316-3328) while DialogTheme.StyleButton paints every primary dialog button with the fixed constant (DialogTheme.cs:197-211). Form1 applies its palette through two parallel ~140-line methods, ApplyLightTheme (3336-3478) and ApplyDarkTheme (3480-3621), that each hand-assign colors to ~50 named controls — so every new control must be wired into both or it ships wrong in one theme; drift has already shipped (the favorites drag-over highlight is hardcoded Color.LightBlue, Form1.cs:5396 — a light-blue blob in dark mode). Because there is no app-level 'current theme' accessor, dialogs guess dark mode from pixel brightness: DialogTheme.ResolveDarkMode reads BackColor.GetBrightness() of the owner or Application.OpenForms[0] (UI/DialogTheme.cs:766-781), and the exact `< 0.2f` heuristic is independently copy-pasted in 8 more dialogs — the six script prompts (ConfirmCommand.cs:118, ChooseCommand.cs:207, InputCommand.cs:180, MultiselectCommand.cs:216, ReadFileCommand.cs:695, WriteFileCommand.cs:729), LocalCmdConfirmationDialog.cs:126, and InteractiveTerminalForm.cs:135 — while BrowserCallbackCaptureCommand diverged to `< 0.5f` (:691, 698), so on a mid-brightness theme the browser-callback prompt themes dark while every other prompt stays light. Several of these theme only when dark and skip the user's dialog font (LocalCmdConfirmationDialog.cs:127-134; NoUpdateDialog/UpdateErrorDialog, UpdateDialog.cs:754-761, constructed without SetDialogFont at Form1.cs:14989/15016 while UpdateDialog itself gets it at 15009). DialogTheme.ApplyTo is also one-way: the dark GroupBox owner-draw Paint lambda is added and never removed (DialogTheme.cs:92-120), so re-applying stacks handlers and can never revert to light — unlike StyleTabControl's correct -=/+= (368-370, 403-404). Two raw MessageBox.Show calls survive in the Vault Test Connection handler (SettingsDialog.cs:1069, 1073) despite the file's themed _promptService (used at 2445, 2766).",
+ "recommendation": "Introduce a single static theme source — DialogTheme.IsDarkMode (plus CurrentFont and one Accent token reading FontSettings.CustomAccentColor when set) — set once by Form1 when config loads and on theme change. Delete ResolveDarkMode's brightness guess and all 9 copy-pasted heuristics (each dialog just calls DialogTheme.ApplyTo(this, DialogTheme.IsDarkMode), which also gives those dialogs light-mode theming and the dialog font for free). Merge the palettes: promote Form1's richer tokens (4-level surface scale, selection border) into DialogTheme as named semantic tokens, rename the colliding DarkSurfaceN constants so one name means one color, and delete the Form1/FindDialog constants. Collapse ApplyLightTheme/ApplyDarkTheme into one ApplyTheme(ThemePalette p) pass driven by a palette struct so each control is themed in exactly one line; replace the Color.LightBlue drag highlight at 5396 with the shared selection token. Make ApplyTo's GroupBox styling re-appliable (named handler, -= then +=), have StyleButton and Form1 both read the single accent token, and route the two MessageBox.Show stragglers through _promptService.",
+ "user_benefit": "Stops the steady drip of one-theme-only visual bugs this structure already produces — mismatched accent blues between the main window/dialogs/tab strip, a light-blue drag highlight in dark mode, unthemed light-mode prompts, dialogs disagreeing about dark mode in the same run — and makes any future palette change or third theme a one-place edit instead of a hunt through two 140-line methods and ten heuristic sites.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "2829-2855",
+   "note": "Private palette; DarkSurface1/2 names collide with DialogTheme's at shifted values; LightAccent = (13,110,253) vs DialogTheme's (0,120,212)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/DialogTheme.cs",
+   "lines": "10-32, 197-211, 766-781",
+   "note": "Canonical palette; StyleButton uses fixed accent ignoring user accent; ResolveDarkMode brightness heuristic over OpenForms"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "3336-3478, 3480-3621, 5396, 3316-3328",
+   "note": "Twin ~140-line ApplyLightTheme/ApplyDarkTheme; shipped drift (Color.LightBlue drag highlight); custom accent applied only to btnExecuteSelected"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/InputCommand.cs",
+   "lines": "178-195",
+   "note": "One of 8 copy-pasted 0.2f heuristics, light mode left unthemed (pattern repeats in ConfirmCommand.cs:118, ChooseCommand.cs:207, MultiselectCommand.cs:216, ReadFileCommand.cs:695, WriteFileCommand.cs:729, LocalCmdConfirmationDialog.cs:126, InteractiveTerminalForm.cs:135)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/BrowserCallbackCaptureCommand.cs",
+   "lines": "691, 698",
+   "note": "divergent 0.5f dark threshold — the drift the duplication invites has already happened"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/DialogTheme.cs",
+   "lines": "92-120, 368-370, 403-404",
+   "note": "Add-only GroupBox Paint lambda (no unsubscribe, dark-only) vs StyleTabControl's correct -=/+= pattern"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "178, 1069, 1073",
+   "note": "fourth accent default; raw MessageBox.Show for Vault test results despite themed _promptService elsewhere in the same file"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UpdateDialog.cs",
+   "lines": "754-761",
+   "note": "NoUpdateDialog themes only when darkMode; never receives SetDialogFont (Form1.cs:14989, 15016 vs 15009)"
+  }
+ ],
+ "mockup_idea": "A swatch strip showing the four current accent blues side by side as they appear simultaneously in the app (execute button, dialog primary button, preset tab underline, grid selection) versus one unified accent — plus a dark-mode screenshot of the Favorites tree during a drag: the current LightBlue highlight blob vs the themed selection token.",
+ "merged_from": 4
+}

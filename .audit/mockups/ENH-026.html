@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+.cap b{color:#c9d4e3;font-weight:600}
+.win{border:1px solid #1c2330;border-radius:6px;background:#0d1118;overflow:hidden;margin-bottom:14px}
+.title{display:flex;align-items:center;gap:8px;padding:5px 10px;background:#10151e;border-bottom:1px solid #1c2330;color:#8294a8;font-size:11px}
+.dots span{display:inline-block;width:8px;height:8px;border-radius:50%;background:#1c2330;margin-left:4px}
+.menu{padding:4px 10px;border-bottom:1px solid #1c2330;color:#8294a8;font-size:11px}
+.menu i{font-style:normal;margin-right:14px}
+.grid{padding:8px 10px 10px}
+.row{display:flex;gap:0;font-size:11px;line-height:1.8}
+.row span{flex:0 0 110px}
+.row .n{flex:0 0 150px}
+.row .s{flex:1;color:#8294a8}
+.hdr{color:#8294a8;border-bottom:1px solid #1c2330}
+.ok{color:#2bd97c}
+.note{font-size:10px;color:#8294a8;margin:6px 0 0;padding-left:2px}
+.note b{color:#ffb454;font-weight:600}
+.banner{display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(255,180,84,.08);border-bottom:1px solid rgba(255,180,84,.35);font-size:11px}
+.banner .ic{color:#ffb454;flex:none}
+.banner .msg b{color:#ffb454;font-weight:600}
+.banner .msg i{font-style:normal;color:#8294a8}
+.btn{flex:none;border:1px solid #2a3650;border-radius:4px;padding:2px 8px;font-size:10px;color:#c9d4e3;background:#141a26;white-space:nowrap;cursor:default}
+.btn.pri{border-color:rgba(76,201,240,.55);color:#4cc9f0}
+.btn.x{border:none;background:none;color:#8294a8;padding:2px 4px}
+.inset{margin:8px 10px 10px;border:1px solid #1c2330;border-radius:5px;background:#0b0f16}
+.inset .ititle{padding:3px 8px;font-size:10px;color:#8294a8;border-bottom:1px solid #1c2330}
+.inset .row{padding:0 8px}
+.skip{color:#ffb454}
+.arrow{color:#ff5c5c;font-size:10px;margin:4px 10px 10px;padding-left:2px}
+</style></head><body>
+
+<p class="cap"><b>Before</b> — startup after the machine was off overnight: window looks normal, missed runs are invisible</p>
+<div class="win">
+  <div class="title">SSH Helper <span style="flex:1"></span><span class="dots"><span></span><span></span><span></span></span></div>
+  <div class="menu"><i>File</i><i>Edit</i><i>Presets</i><i>Jobs</i><i>Environments</i><i>Tools</i><i>Help</i></div>
+  <div class="grid">
+    <div class="row hdr"><span>Host_IP</span><span class="n">device</span><span class="s">status</span></div>
+    <div class="row"><span>10.20.4.1</span><span class="n">fw-core-01</span><span class="s ok">idle</span></div>
+    <div class="row"><span>10.20.4.12</span><span class="n">sw-access-03</span><span class="s ok">idle</span></div>
+  </div>
+  <div class="inset">
+    <div class="ititle">Job List &gt; Nightly FortiGate Backup &gt; History &nbsp;(only place the miss shows up)</div>
+    <div class="row"><span>06-10 02:00</span><span class="n skip">SKIPPED (2)</span><span class="s">missed while app was closed</span></div>
+    <div class="row"><span>06-08 02:00</span><span class="n ok">SUCCESS</span><span class="s">2 hosts, 14.2s</span></div>
+  </div>
+  <div class="arrow">&#9650; user must open Job List, pick the job, and read its history to learn the backup never ran</div>
+</div>
+
+<p class="cap"><b>After</b> — slim dismissible banner under the menu bar, wired to the existing run-now primitive</p>
+<div class="win">
+  <div class="title">SSH Helper <span style="flex:1"></span><span class="dots"><span></span><span></span><span></span></span></div>
+  <div class="menu"><i>File</i><i>Edit</i><i>Presets</i><i>Jobs</i><i>Environments</i><i>Tools</i><i>Help</i></div>
+  <div class="banner">
+    <span class="ic">&#9888;</span>
+    <span class="msg" style="flex:1"><b>3 scheduled runs missed</b> while SSH Helper was closed <i>(Nightly FortiGate Backup &times;2, Switch Config Audit &times;1)</i></span>
+    <span class="btn pri">Run missed jobs now</span>
+    <span class="btn">Review</span>
+    <span class="btn x">&#10005;</span>
+  </div>
+  <div class="grid">
+    <div class="row hdr"><span>Host_IP</span><span class="n">device</span><span class="s">status</span></div>
+    <div class="row"><span>10.20.4.1</span><span class="n">fw-core-01</span><span class="s ok">idle</span></div>
+    <div class="row"><span>10.20.4.12</span><span class="n">sw-access-03</span><span class="s ok">idle</span></div>
+  </div>
+  <div class="note">"Run missed jobs now" fans out <b>RunTrackedJobNowAsync</b> per affected job id &middot; "Review" opens Job List &middot; optional per-job "catch up at startup" checkbox automates this (anacron semantic)</div>
+</div>
+
+</body></html>

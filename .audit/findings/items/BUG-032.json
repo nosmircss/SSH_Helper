@@ -1,0 +1,31 @@
+{
+ "id": "BUG-032",
+ "title": "JsonFileWriter's fallback path can destroy both the old and the new file when File.Replace fails",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "ui-utilities",
+ "lens": "data-integrity",
+ "existing_state": "When File.Replace throws (classic Windows trigger: antivirus/indexer briefly locks the just-written .tmp or the target), WriteJsonAtomic falls back to File.Delete(path) at Utilities/JsonFileWriter.cs:69 followed by File.Move(tempPath, path) at :72. Two failure modes: (1) a crash between Delete and Move leaves no file at all; (2) if Delete succeeds but Move throws (the same transient lock on the .tmp that made Replace fail), the finally block at :74-87 deletes the temp file — the original is already gone and the new content is actively destroyed. For history run payloads written with createBackup: false (Services/HistoryStorageService.cs:468, Services/JobHistoryService.cs:227) there is no .bak to recover from. The bare catch blocks at :43 and :63 also discard the reason Replace failed, so the destructive fallback engages on any exception including UnauthorizedAccessException.",
+ "recommendation": "Restructure the fallback so the live file is never deleted: move the original to {path}.bak (atomic rename on same volume) instead of File.Delete, then move the temp into place; on failure, move the .bak back and rethrow or report. In the finally block, only delete the temp file if the swap succeeded — when it failed, leave the .tmp on disk as the surviving copy of the data. Narrow the catch around File.Replace to IOException/UnauthorizedAccessException and log the exception so repeat failures are diagnosable.",
+ "user_benefit": "Eliminates a silent data-destruction path in the primitive that guards execution history and job history — an AV scan racing a save should never be able to delete a history file outright.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JsonFileWriter.cs",
+   "lines": "30-88",
+   "note": "Replace-fail fallback: Delete(path) :69, Move(temp) :72, finally deletes temp :74-87 even when Move failed; bare catch :43,:63"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\HistoryStorageService.cs",
+   "lines": "468",
+   "note": "Per-run history payloads written with createBackup: false — total loss if the fallback misfires"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobHistoryService.cs",
+   "lines": "227,280",
+   "note": "Job history payloads also createBackup: false"
+  }
+ ]
+}

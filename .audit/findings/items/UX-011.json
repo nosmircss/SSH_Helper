@@ -1,0 +1,41 @@
+{
+ "id": "UX-011",
+ "title": "Disable Block is fully built end-to-end but has no UI entry point — users cannot skip a step without deleting it",
+ "category": "UX",
+ "severity": "high",
+ "effort": "S",
+ "area": "flowcanvas-ui",
+ "lens": "ux",
+ "existing_state": "The entire disable-block pipeline exists and works: debugSlice.toggleDisabled (FlowCanvas/src/stores/slices/debugSlice.ts:58-76) flips the Set, updates the node visual, sends the 'disable-block' message to C#, and autosaves layout; BaseBlock renders the disabled look (dimmed surface at nodes/BaseBlock.tsx:200, 'DISABLED' badge at :324); the Run payload carries disabledBlocks to the executor (utils/exportGraph.ts:143-145); and disabled state is restored on preset load (stores/messageBridge.ts:177). But a grep for toggleDisabled finds zero call sites outside the slice definition — the block context menu (panels/BlockContextMenu.tsx:72-121) offers only Breakpoint/Comment/Sticky/Expand/Collapse/Delete, and no keyboard shortcut or toolbar button invokes it. Disabled blocks can only appear via host-side restore; a user can never create one. The FLOW_CANVAS_ENHANCEMENTS.md roadmap (line 121) mentions a hover NodeToolbar with disable among other actions, but the slice is finished today and exposing it is a one-line menu item.",
+ "recommendation": "Add a 'Disable Block' / 'Enable Block' item to BlockContextMenu.tsx (label toggled via the existing isDisabled(nodeId) selector, hidden for the Start node), calling toggleDisabled(nodeId). Optionally bind Ctrl+/ (the universal comment-out gesture) in hooks/useKeyboardShortcuts.ts for the selected block(s). No store, bridge, or C# work is needed — everything downstream already handles it.",
+ "user_benefit": "Temporarily skipping a step (e.g. 'don't run the reboot block while I test the config push') is a daily iteration move for anyone scripting against live network gear. Today the only options are deleting the block or editing YAML in the main editor; this unlocks an already-working feature with a menu item.",
+ "evidence": [
+  {
+   "file": "FlowCanvas/src/stores/slices/debugSlice.ts",
+   "lines": "58-76",
+   "note": "toggleDisabled fully implemented: Set update, execState visual, disable-block host message, layout autosave"
+  },
+  {
+   "file": "FlowCanvas/src/panels/BlockContextMenu.tsx",
+   "lines": "72-121",
+   "note": "context menu items — no Disable entry"
+  },
+  {
+   "file": "FlowCanvas/src/utils/exportGraph.ts",
+   "lines": "143-145",
+   "note": "run payload already attaches disabledBlocks"
+  },
+  {
+   "file": "FlowCanvas/src/stores/messageBridge.ts",
+   "lines": "177",
+   "note": "restoreDisabledBlocks on load-graph — disabled state is restore-only today"
+  },
+  {
+   "file": "FlowCanvas/src/nodes/BaseBlock.tsx",
+   "lines": "151, 200, 324",
+   "note": "disabled visual treatment already renders"
+  }
+ ],
+ "mockup_idea": "Before/after of the block right-click menu: current six items vs. the same menu with 'Disable Block' added above Delete, plus a canvas snippet showing the resulting dimmed block with the DISABLED badge mid-flow while the wire routes past it.",
+ "merged_from": 1
+}

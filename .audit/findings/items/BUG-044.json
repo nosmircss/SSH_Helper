@@ -1,0 +1,31 @@
+{
+ "id": "BUG-044",
+ "title": "regex_replace() silently returns the unmodified source on an invalid pattern — sanitization/redaction steps can no-op with zero signal",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-functions",
+ "lens": "security",
+ "existing_state": "RegexReplace catches both RegexMatchTimeoutException and ArgumentException (invalid pattern) and returns the original source string unchanged (Services/Scripting/Functions/StringFunctions.cs:165-176). A script using regex_replace to strip secrets, ANSI codes, or sensitive fields from device output before logging/notifying — the docs themselves recommend a regex_replace incantation for ANSI stripping — gets the raw, unsanitized text back if the pattern has a typo or a variable-built pattern is malformed, with no error, no warning, nothing in output. regex_match has the related problem that an invalid pattern and a legitimate no-match are both \"\" (StringFunctions.cs:194-208), so a script cannot tell 'pattern broken' from 'value absent'.",
+ "recommendation": "Distinguish the two failure modes in StringFunctions: an ArgumentException (user wrote a bad pattern — deterministic, will fail on every host) should fail the step or at minimum set _last_error and emit a warning; a RegexMatchTimeoutException can keep the soft fallback but should still warn. Apply the same treatment to regex_match/regex_match_all/regex_groups, which currently swallow ArgumentException into empty results (StringFunctions.cs:224-225, 248-249).",
+ "user_benefit": "When a redaction or extraction pattern is broken, the owner finds out immediately instead of discovering unsanitized output in logs/notifications, or extraction silently yielding empty values across an entire fleet run.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs",
+   "lines": "165-176",
+   "note": "catch (ArgumentException) { return source; } — invalid pattern returns input unchanged"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs",
+   "lines": "194-208",
+   "note": "regex_match: invalid pattern and no-match both return \"\""
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs",
+   "lines": "224-225, 248-249",
+   "note": "regex_match_all/regex_groups swallow ArgumentException into empty lists"
+  }
+ ]
+}

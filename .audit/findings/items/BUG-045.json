@@ -1,0 +1,31 @@
+{
+ "id": "BUG-045",
+ "title": "iif() bare catch turns a broken condition into 'always take the then-branch'",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-functions",
+ "lens": "correctness",
+ "existing_state": "Iif evaluates its condition with ExpressionEvaluator inside a bare `catch` (Services/Scripting/Functions/MathFunctions.cs:184-193): when evaluation throws — e.g. `iif(lenght(x) > 0, \"up\", \"down\")` where the unknown function makes ExpressionParser throw FormatException (ExpressionParser.cs:436) — the fallback re-resolves the ENTIRE condition string as a plain value via JsonUtilities.ResolveJsonValue (MathFunctions.cs:191). That resolution falls through to the literal string \"lenght(x) > 0\" (per the fall-through at JsonUtilities.cs:312-333), which is non-empty and therefore truthy, so the then-branch is taken unconditionally. Any typo or evaluator error inside an iif condition thus silently pins the result to the true-value on every host, every run.",
+ "recommendation": "Narrow the fallback in MathFunctions.Iif: only fall back to truthiness when the condition contains no comparison/logical operators (the legitimate 'simple value' case the comment describes); let FormatException from the evaluator propagate so the step fails with 'Unknown function: lenght'. This also becomes moot for the typo case if the unknown-function fall-through (BUG-010) is fixed.",
+ "user_benefit": "iif is the branching primitive people embed in set:/send: lines; today a typo flips it into a constant. Propagating the parse error makes the failure visible at the exact step instead of producing confidently wrong branch decisions fleet-wide.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\MathFunctions.cs",
+   "lines": "176-197",
+   "note": "bare catch at 188-193 re-resolves the condition as a value; literal string is truthy"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionParser.cs",
+   "lines": "436",
+   "note": "the FormatException that gets swallowed"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\JsonUtilities.cs",
+   "lines": "312-333",
+   "note": "fallback path resolves the condition text to itself as a string"
+  }
+ ]
+}

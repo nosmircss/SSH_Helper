@@ -1,0 +1,31 @@
+{
+ "id": "BUG-003",
+ "title": "writefile JSON append silently destroys the existing file when the merge fails",
+ "category": "BUG",
+ "severity": "critical",
+ "effort": "S",
+ "area": "scripting-commands-b",
+ "lens": "data-integrity",
+ "existing_state": "In `writefile` with `format: json, mode: append`, FormatAsJson reads the existing file and tries to merge (Services/Scripting/Commands/WriteFileCommand.cs:217-233). If the existing content fails to parse as JSON (MergeJsonContent returns null on JsonException at :283-286), if the new value is not an object while the file holds an object (:276-277 returns null), or if the read itself throws (:229-232), execution falls through to `return SerializeToJson(newValue, ...)` at :235 — and ExecuteAsync then does `File.WriteAllText(filePath, content)` at :101, replacing the ENTIRE file with only the newest record. The only diagnostics are Debug-level messages (:231, :276, :285) and the step returns Ok. All writes are also plain non-atomic File.WriteAllText/AppendAllText (:101, :113, :118, :127, :131), so a crash/power loss mid-write leaves a torn JSON file — which then triggers exactly this destroy-on-next-append path on the following run. A multi-host preset accumulating per-host results into one JSON file can lose the whole accumulation from one bad write.",
+ "recommendation": "In append mode, treat a failed merge as a step failure instead of falling through to overwrite: have MergeJsonContent failures return an error result (honoring on_error) and never rewrite the file, or at minimum rename the unparseable file to *.bak before replacing it and emit at Warning/Error level. Separately, switch the write paths to the project's own atomic convention (temp file + File.Replace, like Utilities/JsonFileWriter.WriteJsonAtomic) so a torn write can't corrupt the file in the first place.",
+ "user_benefit": "Stops a script that is supposed to be appending results from wiping out everything it previously collected — the exact opposite of what the user asked for — with no visible error.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WriteFileCommand.cs",
+   "lines": "217-235",
+   "note": "append-mode merge; any failure (parse error, non-object merge, read error) returns/sets null and falls through to SerializeToJson(newValue) — only the new value survives"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WriteFileCommand.cs",
+   "lines": "98-103",
+   "note": "JSON 'append' writes via File.WriteAllText — the merged-or-fallback content fully replaces the file, non-atomically"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WriteFileCommand.cs",
+   "lines": "276-289",
+   "note": "merge failures emit only ScriptOutputType.Debug and return null (the destroy trigger); step still returns Ok"
+  }
+ ]
+}

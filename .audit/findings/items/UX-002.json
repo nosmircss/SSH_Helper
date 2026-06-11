@@ -1,0 +1,41 @@
+{
+ "id": "UX-002",
+ "title": "Multi-host run dialog is a cramped fixed 420x580 gate with no filter or bulk-select — and it forgets every option (parallelism resets to 1) on each run",
+ "category": "UX",
+ "severity": "high",
+ "effort": "M",
+ "area": "ssh-execution",
+ "lens": "ux",
+ "existing_state": "FolderExecutionDialog opens for EVERY preset run on more than one host (Form1.cs:12283-12301 via ExecutionDialogPolicy.ShouldPromptForPresetExecutionOptions = hostCount > 1) as well as for folder runs (Form1.cs:12850-12853). The form is hard-fixed at 420x580 with FormBorderStyle.FixedDialog and MaximizeBox=false (FolderExecutionDialog.cs:52-55); both the preset list and the host list live in 375x94 panels (~5 visible rows, FolderExecutionDialog.cs:69-71, 99-101). There is no Select All/None/Invert affordance and no filter box anywhere in the file — for the core persona (200 network devices daily) excluding 10 devices means scrolling and clicking through a 94-pixel-tall box every single run. Worse, the dialog is constructed fresh each time with hardcoded defaults: Parallel hosts = '1' (FolderExecutionDialog.cs:182), Stop on first error unchecked (:149-154), Sequential preset mode checked (:139) — nothing is persisted (AppConfiguration has no FolderExecution fields). The engine batches by ParallelHostCount (SshExecutionService.cs:636-691), so one forgotten keystroke means the 200-host run silently executes one host at a time. The 'Run 1 Presets' caption at :353 also never pluralizes.",
+ "recommendation": "Rebuild FolderExecutionDialog with a resizable dock-based layout (Sizable + MinimumSize, host list fills remaining space, geometry persisted). Add a filter TextBox above the host list plus All/None/Invert links and the live 'n of m' counter; since FolderExecutionOptions.SelectedHostIndices is index-based against the snapshot (FolderExecutionDialog.cs:343, consumed Form1.cs:12297-12300), filtering must hide rows visually while preserving original indices. Persist last-used options (ParallelHostCount, StopOnFirstError, RunPresetsInParallel, SuppressPresetNames) in AppConfiguration/WindowState — or keyed per preset/folder — and prefill at both construction sites. Optionally add a 'Remember these options / don't ask again' checkbox bypassable with Shift+Run. Fix the 'Run 1 Presets' pluralization while in there.",
+ "user_benefit": "This is the single most frequently seen dialog for anyone running against a fleet. Resizable + filter + bulk-select + remembered options turns a daily multi-minute scroll-retype-and-click chore into one click, and eliminates the silent accidentally-sequential run when the user forgets to re-enter the parallel count.",
+ "evidence": [
+  {
+   "file": "FolderExecutionDialog.cs",
+   "lines": "52-55, 69-71, 99-101, 343, 353",
+   "note": "Fixed 420x580 FixedDialog; 375x94 list panels (~5 rows); index-based host selection; 'Run {n} Presets' caption"
+  },
+  {
+   "file": "FolderExecutionDialog.cs",
+   "lines": "139, 149-154, 180-186",
+   "note": "Hardcoded defaults: Sequential checked, StopOnError unchecked, Parallel hosts text '1' — never persisted"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "12283-12301, 12850-12853",
+   "note": "Dialog shown fresh for every >1-host preset run and every folder run; options read once, never saved"
+  },
+  {
+   "file": "Utilities/ExecutionDialogPolicy.cs",
+   "lines": "5-8",
+   "note": "ShouldPromptForPresetExecutionOptions(hostCount) => hostCount > 1"
+  },
+  {
+   "file": "Services/SshExecutionService.cs",
+   "lines": "636-691",
+   "note": "ParallelHostCount drives host batching; 1 = strictly sequential"
+  }
+ ],
+ "mockup_idea": "Before/after pair: BEFORE shows the current 420x580 fixed dialog with a 5-row host box scrolled to host 4 of 200 and Parallel hosts reset to '1'. AFTER shows a resizable ~560x720 dialog where the host list fills the body, with a filter box ('192.168.10' typed, list narrowed), 'All | None | Invert' links, 'Target hosts (187 of 200)' counter, Parallel hosts prefilled with '20', and a footer checkbox 'Remember these options (hold Shift on Run to show this dialog again)'.",
+ "merged_from": 2
+}

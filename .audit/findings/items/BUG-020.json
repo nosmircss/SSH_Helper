@@ -1,0 +1,31 @@
+{
+ "id": "BUG-020",
+ "title": "SettingsDialog: Windows Credential Manager secrets are deleted/overwritten before Save — Cancel leaves config pointing at profiles whose secrets are gone",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "dialogs-general",
+ "lens": "security",
+ "existing_state": "Config changes are staged until BtnSave_Click's single _configService.Update (SettingsDialog.cs:2657-2663), but credential-store mutations are not. (1) Remove deletes secrets instantly: BtnVaultRemove_Click deletes all four vault auth credentials for the profile (851-858) and BtnNotificationRemove_Click deletes the webhook URL and SMTP password (1450-1455) — before any Save. (2) Rename of a notification profile migrate-deletes the old credential target during PersistNotificationProfileByIndex (1557-1564 -> MigrateNotificationCredential 1584-1593, which DeletePassword's the old target at 1591), and that persist fires on a mere list selection change (1396-1401). (3) Any secret typed or cleared in a textbox is written to / deleted from Credential Manager on selection change or Test Connection (PersistVaultProfileByIndex 1011-1017, SaveVaultCredential 1020-1027 deletes on empty). Concrete trigger: open Settings -> Vault tab -> select a profile -> Remove -> Cancel. The saved config still contains the profile (Save never ran), but its token/AppRole secret/LDAP password are permanently deleted — the next vault fetch fails auth with no obvious cause. Same for a renamed notification profile: rename A, click profile B, Cancel -> config still references 'A' but its webhook/SMTP password now lives only under the new name.",
+ "recommendation": "Stage credential operations the same way config is staged: keep secret edits in memory (the textboxes already hold them), record pending deletes/migrations in a list, and flush all SavePassword/DeletePassword/migrate calls inside BtnSave_Click after ValidateVaultProfiles passes. Test Connection can keep reading from textboxes (it already does via the provider lambdas at 1062-1065), so nothing needs to be written for it to work.",
+ "user_benefit": "A cancelled Settings dialog no longer silently destroys vault tokens and notification secrets, which today breaks vault-backed SSH runs and notification dispatch with no error pointing at the cause.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "851-858, 1450-1455",
+   "note": "Remove buttons DeletePassword immediately, pre-Save"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "1396-1401, 1557-1593",
+   "note": "Notification rename migrate-deletes the old credential target on selection change"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "1011-1027, 2657-2663",
+   "note": "Secret writes/deletes happen in PersistVaultProfileByIndex; config itself is only committed in BtnSave_Click"
+  }
+ ]
+}

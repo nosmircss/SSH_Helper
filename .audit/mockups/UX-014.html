@@ -1,0 +1,64 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap b{font-weight:600}
+.before .cap b{color:#ff5c5c}.after .cap b{color:#2bd97c}
+section{margin-bottom:18px}
+.win{border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden}
+.tbar{display:flex;justify-content:space-between;padding:5px 10px;background:#121826;border-bottom:1px solid #1c2330;color:#c9d4e3;font-size:11px}
+.tbar span{color:#8294a8}
+table{border-collapse:collapse;width:100%;font-size:11px}
+th{color:#8294a8;font-weight:600;text-align:left;border-bottom:1px solid #1c2330;padding:4px 10px}
+td{padding:4px 10px;border-bottom:1px solid #161d2a}
+tr:last-child td{border-bottom:0}
+.mut{color:#8294a8}.red{color:#ff5c5c}.grn{color:#2bd97c}.cyn{color:#4cc9f0}.amb{color:#ffb454}
+.note{font-size:11px;color:#8294a8;margin-top:6px;line-height:1.5}
+.note .red{font-weight:600}
+.status{display:flex;gap:8px;align-items:center;border:1px solid #1c2330;border-left:3px solid #2bd97c;border-radius:4px;background:#0e1420;padding:6px 10px;font-size:11px;margin-bottom:10px}
+.status a{color:#4cc9f0;text-decoration:underline;cursor:pointer}
+.del{color:#ff5c5c;border:1px solid #3a1d22;border-radius:3px;padding:0 6px;background:#181014;cursor:pointer;font-size:11px}
+.foot{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 10px;border-top:1px solid #1c2330;background:#0c1018}
+.foot .hint{color:#8294a8;font-size:10px;max-width:420px;line-height:1.4}
+.btn{border:1px solid #1c2330;border-radius:3px;padding:3px 9px;font-size:11px;background:#121826;color:#c9d4e3;cursor:pointer;white-space:nowrap}
+.btn.warn{color:#ffb454;border-color:#3a2d18}
+.ghost{color:#586a80;font-style:italic}
+.strike{text-decoration:line-through;color:#586a80}
+</style></head><body>
+
+<section class="before">
+<p class="cap"><b>Before</b> — environment load silently strips grid passwords</p>
+<div class="win">
+ <div class="tbar">SSH_Helper — prod-fleet.csv <span>environment: Production</span></div>
+ <table>
+  <tr><th>Host_IP</th><th>username</th><th>password</th><th>device_name</th></tr>
+  <tr><td>10.20.4.11</td><td>admin</td><td><span class="strike">Sw1tch!Pass9</span> <span class="red">→ (blank)</span></td><td>core-sw-01</td></tr>
+  <tr><td>10.20.4.12</td><td>admin</td><td><span class="strike">Sw1tch!Pass9</span> <span class="red">→ (blank)</span></td><td>core-sw-02</td></tr>
+  <tr><td>192.168.50.1</td><td>fortiadmin</td><td><span class="strike">Edge#2024fw</span> <span class="red">→ (blank)</span></td><td>fw-edge-01</td></tr>
+ </table>
+</div>
+<p class="note">Passwords are moved to Windows Credential Manager with <span class="red">no notification</span>, ignoring the <span class="mut">UseCredentialManager</span> setting. Saving writes the CSV back with an empty column — a teammate's copy stops working. After a password rotation, stale entries keep auto-injecting with no way to clear them from the app.</p>
+</section>
+
+<section class="after">
+<p class="cap"><b>After</b> — visible migration + a Stored Credentials manager</p>
+<div class="status"><span class="grn">&#10003;</span> Moved 3 passwords to Windows Credential Manager; password cells cleared. <a>Manage stored credentials…</a></div>
+<div class="win">
+ <div class="tbar">Stored Credentials <span>Settings &gt; Credentials</span></div>
+ <table>
+  <tr><th>Host</th><th>Username</th><th>Stored on</th><th></th></tr>
+  <tr><td>10.20.4.11</td><td>admin</td><td class="mut">2026-06-10 09:14</td><td><button class="del">Delete</button></td></tr>
+  <tr><td>10.20.4.12</td><td>admin</td><td class="mut">2026-06-10 09:14</td><td><button class="del">Delete</button></td></tr>
+  <tr><td>192.168.50.1</td><td>fortiadmin</td><td class="mut">2026-06-10 09:14</td><td><button class="del">Delete</button></td></tr>
+  <tr><td>172.16.8.30</td><td>netops</td><td class="mut">2026-04-02 16:51 <span class="amb">(stale?)</span></td><td><button class="del">Delete</button></td></tr>
+  <tr><td class="cyn">(default password)</td><td class="mut">all hosts</td><td class="mut">2026-03-11 10:02</td><td><button class="del">Delete</button></td></tr>
+ </table>
+ <div class="foot">
+  <span class="hint">Saved automatically when you type a password in the grid — disable in Settings &gt; Credentials (“Remember per-host passwords”).</span>
+  <span><button class="btn warn">Clear all host passwords</button> <button class="btn">Close</button></span>
+ </div>
+</div>
+<p class="note">Migration becomes <span class="grn">visible</span>, auto-save becomes <span class="grn">opt-in</span>, and rotation cleanup is one click instead of hunting through the Windows credential applet.</p>
+</section>
+
+</body></html>

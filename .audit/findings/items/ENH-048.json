@@ -1,0 +1,36 @@
+{
+ "id": "ENH-048",
+ "title": "In-app help is two GitHub hyperlinks; the 6,425-line scripting reference is not bundled or viewable offline",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "onboarding",
+ "lens": "cross",
+ "existing_state": "Help > Documentation runs Process.Start on https://github.com/nosmircss/SSH_Helper and Help > Scripting Documentation on https://github.com/nosmircss/SSH_Helper/blob/master/SCRIPTING.md, both wrapped in silent catch {} (Form1.cs:6465-6489) — if the repo is private, the machine is offline, or no browser association exists, the menu item does nothing with no feedback. SCRIPTING.md is a 6,425-line reference covering the 49 commands and ~70 functions, but it is not shipped (no csproj item; only rebex.key is copied, SSH_Helper.csproj:54). The only offline assistance is the Scintilla autocomplete's one-line command descriptions (Services/Editor/ScriptAutocompleteProvider.cs:116) and editor validation — good for recall, useless for learning what `extract`, `parallel`, or `json.merge` can do. For a tool plausibly deployed on management jump-boxes without internet access, the entire scripting reference is unreachable exactly where it's needed.",
+ "recommendation": "Bundle SCRIPTING.md (and ScriptSamples/README.md) as embedded resources, convert to HTML at build (or ship pre-rendered), and add Help > Scripting Reference (Offline) that displays it in a WebView2 window — the dependency and the virtual-host hosting pattern already exist in FlowCanvasForm.cs:173-178. Keep the GitHub links as secondary 'latest online' items, and replace the silent catch {} with a status-bar or dialog notice when launch fails.",
+ "user_benefit": "Script authors get the full command/function reference inside the app, on air-gapped or locked-down hosts, without depending on the GitHub repo's visibility — and a broken Help click stops failing silently.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "6465-6489",
+   "note": "both Help actions are Process.Start to GitHub URLs inside empty catch blocks"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.csproj",
+   "lines": "54",
+   "note": "no SCRIPTING.md/ScriptSamples copy or embed; only rebex.key is a copied item"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptAutocompleteProvider.cs",
+   "lines": "116-219",
+   "note": "one-line CommandDescriptions/BuiltInSymbolDescriptions are the only offline documentation surface"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SCRIPTING.md",
+   "lines": "1-6425",
+   "note": "6,425-line full reference exists in-repo only"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

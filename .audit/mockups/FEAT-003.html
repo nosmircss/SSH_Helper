@@ -1,0 +1,72 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 5px 2px}
+.cap b{color:#4cc9f0;font-weight:normal}
+.panel{border:1px solid #1c2330;border-radius:6px;background:#0e131b;overflow:hidden;margin-bottom:14px}
+table{border-collapse:collapse;width:100%}
+th{background:#131927;color:#8294a8;font-weight:normal;text-align:left;padding:3px 8px;border-bottom:1px solid #1c2330;font-size:11px}
+td{padding:3px 8px;border-bottom:1px solid #161d29;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+.cb{display:inline-block;width:11px;height:11px;border:1px solid #3a475a;border-radius:2px;vertical-align:-1px}
+.cb.on{background:#2bd97c;border-color:#2bd97c;position:relative}
+.cb.on:after{content:"";position:absolute;left:3px;top:0px;width:3px;height:7px;border:solid #0b0e13;border-width:0 2px 2px 0;transform:rotate(40deg)}
+.dim{color:#8294a8}
+.more td{color:#5a6b80;font-style:italic;background:#0c1018}
+.scrollwrap{display:flex}
+.scrollwrap table{flex:1}
+.track{width:9px;background:#0c1018;border-left:1px solid #1c2330;position:relative}
+.thumb{position:absolute;left:2px;right:2px;top:8px;height:14px;background:#2a3548;border-radius:3px}
+.toolbar{display:flex;gap:6px;align-items:center;padding:6px 8px;border-bottom:1px solid #1c2330;background:#10161f}
+.btn{border:1px solid #2a3548;border-radius:4px;padding:2px 9px;color:#c9d4e3;background:#141b27;font-size:11px}
+.btn.go{border-color:#2bd97c;color:#2bd97c}
+.input{flex:1;display:flex;align-items:center;gap:6px;border:1px solid #4cc9f0;border-radius:4px;padding:2px 8px;background:#0b0e13}
+.input .ph{color:#c9d4e3}
+.caret{display:inline-block;width:1px;height:12px;background:#4cc9f0;vertical-align:-2px}
+.drop{border:1px solid #2a3548;border-radius:4px;padding:2px 8px;background:#141b27;color:#8294a8;font-size:11px}
+.badge{color:#4cc9f0;font-size:11px;white-space:nowrap}
+.note{font-size:10px;color:#8294a8;margin:6px 2px 0}
+.note i{color:#ffb454;font-style:normal}
+.site-hit{color:#2bd97c}
+</style></head><body>
+
+<p class="cap">Before — finding one host in 212 rows means scrolling &amp; ticking boxes one by one</p>
+<div class="panel">
+ <div class="toolbar dim" style="font-size:11px">Select All &nbsp;·&nbsp; Deselect All &nbsp;·&nbsp; Invert <span style="margin-left:auto">(only bulk tools available)</span></div>
+ <div class="scrollwrap">
+ <table>
+  <tr><th></th><th>Host_IP</th><th>hostname</th><th>site</th><th>username</th></tr>
+  <tr><td><span class="cb on"></span></td><td>10.20.1.1</td><td>br1-rtr-01</td><td class="dim">BR-AUS</td><td class="dim">admin</td></tr>
+  <tr><td><span class="cb"></span></td><td>10.20.1.2</td><td>br1-sw-01</td><td class="dim">BR-AUS</td><td class="dim">admin</td></tr>
+  <tr><td><span class="cb"></span></td><td>10.30.4.1</td><td>dc1-fw-01</td><td class="dim">DC1</td><td class="dim">netops</td></tr>
+  <tr><td><span class="cb on"></span></td><td>10.30.4.12</td><td>dc1-rtr-02</td><td class="dim">DC1</td><td class="dim">netops</td></tr>
+  <tr><td><span class="cb"></span></td><td>10.40.2.1</td><td>dc2-rtr-01</td><td class="dim">DC2</td><td class="dim">netops</td></tr>
+  <tr><td><span class="cb"></span></td><td>10.20.7.1</td><td>br7-rtr-01</td><td class="dim">BR-PHX</td><td class="dim">admin</td></tr>
+  <tr class="more"><td></td><td colspan="4">… 206 more rows — where are the other DC2 boxes?</td></tr>
+ </table>
+ <div class="track"><div class="thumb"></div></div>
+ </div>
+</div>
+
+<p class="cap">After — filter bar above the grid (reuses the preset-tree debounce pattern), <b>“Check matching” drives run targets</b></p>
+<div class="panel">
+ <div class="toolbar">
+  <span class="drop">All columns ▾</span>
+  <span class="input"><span class="ph">dc2</span><span class="caret"></span></span>
+  <span class="badge">17 of 212</span>
+  <span class="btn go">Check matching</span>
+  <span class="btn">Clear</span>
+ </div>
+ <table>
+  <tr><th></th><th>Host_IP</th><th>hostname</th><th>site</th><th>username</th></tr>
+  <tr><td><span class="cb on"></span></td><td>10.40.2.1</td><td>dc2-rtr-01</td><td class="site-hit">DC2</td><td class="dim">netops</td></tr>
+  <tr><td><span class="cb on"></span></td><td>10.40.2.2</td><td>dc2-rtr-02</td><td class="site-hit">DC2</td><td class="dim">netops</td></tr>
+  <tr><td><span class="cb on"></span></td><td>10.40.2.10</td><td>dc2-sw-01</td><td class="site-hit">DC2</td><td class="dim">netops</td></tr>
+  <tr><td><span class="cb on"></span></td><td>10.40.2.11</td><td>dc2-sw-02</td><td class="site-hit">DC2</td><td class="dim">netops</td></tr>
+  <tr><td><span class="cb on"></span></td><td>10.40.3.1</td><td>dc2-fw-01</td><td class="site-hit">DC2</td><td class="dim">netops</td></tr>
+  <tr class="more"><td></td><td colspan="4">… 12 more matching rows, all checked — non-matching 195 rows hidden</td></tr>
+ </table>
+</div>
+<p class="note"><i>Care points:</i> hand-rolled scrollbar math must recompute on row-visibility changes; Select All operates on visible rows while filtered.</p>
+
+</body></html>

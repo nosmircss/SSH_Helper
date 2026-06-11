@@ -1,0 +1,67 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap b{color:#ff5c5c;font-weight:600}.cap i{color:#2bd97c;font-style:normal;font-weight:600}
+.row{display:flex;gap:14px}
+.pane{flex:1;background:#11161f;border:1px solid #1c2330;border-radius:8px;padding:12px;min-width:0}
+.lbl{font-size:10px;color:#8294a8;margin:10px 0 3px}.lbl:first-child{margin-top:0}
+.inp{background:#0d1219;border:1px solid #1c2330;border-radius:4px;color:#c9d4e3;padding:6px 8px;font-size:11px;line-height:1.4}
+.note{margin-top:10px;font-size:10px;color:#8294a8;border-left:2px solid #1c2330;padding-left:8px}
+.note em{font-style:normal}
+.sw{display:flex;gap:7px;align-items:center;margin-top:2px}
+.s{width:18px;height:18px;border-radius:50%;border:1px solid #1c2330;cursor:pointer}
+.s.on{box-shadow:0 0 0 2px #0b0e13,0 0 0 4px #4cc9f0}
+.canvas{margin-top:14px;background:#0d1118;border:1px solid #1c2330;border-radius:8px;padding:14px;position:relative;height:118px;overflow:hidden;background-image:radial-gradient(#1c2330 1px,transparent 1px);background-size:18px 18px}
+.blk{position:absolute;background:#131a26;border:1px solid #2a3850;border-radius:6px;padding:5px 9px;font-size:10.5px;box-shadow:0 0 8px rgba(76,201,240,.12)}
+.blk b{color:#4cc9f0;font-weight:600;margin-right:6px}
+.sticky{position:absolute;border-radius:5px;padding:4px 7px;font-size:9.5px;color:#262011;max-width:170px;line-height:1.35;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+.wire{position:absolute;width:1.5px;background:#2a3850}
+</style></head><body>
+
+<div class="row">
+  <div style="flex:1;min-width:0">
+    <p class="cap">Before — <b>text + kind only, color unreachable</b></p>
+    <div class="pane">
+      <div class="lbl">Text</div>
+      <div class="inp">TODO: rotate creds for edge-sw-01<br>(192.168.10.5) before next run</div>
+      <div class="lbl">Kind</div>
+      <div class="inp">sticky (visual only) &#9662;</div>
+      <div class="note"><em style="color:#ffb454">data.color</em> is modeled, rendered &amp; exported — but no control here. Every sticky stays default yellow.</div>
+    </div>
+  </div>
+  <div style="flex:1;min-width:0">
+    <p class="cap">After — <i>swatch row, same updateComment() path</i></p>
+    <div class="pane">
+      <div class="lbl">Text</div>
+      <div class="inp">TODO: rotate creds for edge-sw-01<br>(192.168.10.5) before next run</div>
+      <div class="lbl">Kind</div>
+      <div class="inp">sticky (visual only) &#9662;</div>
+      <div class="lbl">Color</div>
+      <div class="sw">
+        <div class="s on" style="background:#e0c040" title="default"></div>
+        <div class="s" style="background:#ff5c5c"></div>
+        <div class="s" style="background:#ffb454"></div>
+        <div class="s" style="background:#2bd97c"></div>
+        <div class="s" style="background:#4cc9f0"></div>
+        <div class="s" style="background:#b48cf2"></div>
+        <div class="s" style="background:#8294a8"></div>
+      </div>
+      <div class="note">7 presets from the token palette (default <em style="color:#e0c040">#e0c040</em> first) &rarr; <em style="color:#4cc9f0">updateComment(nodeId, {color})</em></div>
+    </div>
+  </div>
+</div>
+
+<p class="cap" style="margin-top:14px">After, on canvas — color-coded stickies annotating a preset</p>
+<div class="canvas">
+  <div class="wire" style="left:84px;top:34px;height:24px"></div>
+  <div class="wire" style="left:84px;top:84px;height:22px"></div>
+  <div class="blk" style="left:40px;top:10px"><b>send</b>get system status</div>
+  <div class="blk" style="left:40px;top:58px"><b>if</b>contains(output, "down")</div>
+  <div class="blk" style="left:40px;top:106px"><b>send</b>execute reboot slot 2</div>
+  <div class="sticky" style="left:240px;top:8px;background:#e0c040cc">TODO: rotate creds for edge-sw-01 (192.168.10.5)</div>
+  <div class="sticky" style="left:240px;top:98px;background:#ff5c5ccc">DANGER: reboot path — only inside maint window</div>
+  <div class="sticky" style="left:455px;top:52px;background:#2bd97ccc">verified 2026-06-08 against lab pair 10.20.4.11/.12</div>
+</div>
+
+</body></html>

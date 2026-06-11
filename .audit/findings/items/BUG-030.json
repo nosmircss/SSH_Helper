@@ -1,0 +1,41 @@
+{
+ "id": "BUG-030",
+ "title": "Interactive window errors vanish into a deliberate no-op and the step still reports success",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "terminal",
+ "lens": "correctness",
+ "existing_state": "When the terminal pump crashes or the connection drops in window mode (shared or separate, no `command:`), the error is invisible and the script step succeeds anyway. The chain: every `[interactive-error] {ex.Message}` is routed through `AppendOutputSafe` (Services/Terminal/InteractiveTerminalService.cs:1940, 2123, 2246, 1037) into `InteractiveTerminalForm.AppendOutput`, which is an intentional no-op (Forms/InteractiveTerminalForm.cs:168-172) — the window just closes with no explanation. The close reason is set to error/disconnected (InteractiveTerminalService.cs:1935-1943, 1687-1704, 1990-1993), but `RunSeparateAsync` returns `InteractiveTerminalRunResult.Ok(transcript, closeReason)` regardless of that reason (InteractiveTerminalService.cs:416), as does `RunSharedAsync` (line 310). `InteractiveCommand` then maps `Success == true` to `CommandResult.Ok()` (Services/Scripting/Commands/InteractiveCommand.cs:29-48), so the script continues as if the session completed normally. Capture mode does check error/disconnected (InteractiveTerminalService.cs:553-561) — window mode is the gap. The only trace is the `close_reason` field buried in the history's Interactive tab. The headless pump even discards the exception object entirely (`catch (Exception)` without binding, InteractiveTerminalService.cs:2090-2093).",
+ "recommendation": "Two small changes: (1) in `RunSeparateAsync`/`RunSharedAsync`, treat close reason `error` as a step failure (and at minimum emit a `ScriptOutputType.Error` line for `disconnected` so it appears in the run output), mirroring the capture-mode checks at 553-561; (2) surface the error text — either implement `AppendOutput` as a one-line status overlay/message box before close, or route the `[interactive-error]` string into `context.EmitOutput(..., Error)` since the form path is dead. Thread the actual exception message into the failure result instead of the generic strings.",
+ "user_benefit": "Today a mid-session SSH failure makes the terminal window silently disappear and the rest of the script keeps running against a fiction of success — later steps then fail confusingly or, worse, the run is recorded green. Users get the real error at the moment it happens and a correctly failed step.",
+ "mockup_idea": "Before: terminal window simply gone, run output shows nothing. After: run output shows 'interactive step failed: <Rebex message> (connection lost)' in red and the step is marked failed.",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs",
+   "lines": "168-172",
+   "note": "AppendOutput is a documented no-op — the only sink for interactive error text"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "1935-1943",
+   "note": "pump exception: close reason Error, message sent to the no-op, window closed"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "310, 416",
+   "note": "RunSharedAsync/RunSeparateAsync return Ok() regardless of error/disconnected close reason"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\InteractiveCommand.cs",
+   "lines": "29-48",
+   "note": "Success==true maps straight to CommandResult.Ok()"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "553-561, 2090-2093",
+   "note": "capture mode correctly fails on disconnected/error — window mode lacks the same check; headless pump discards the exception detail"
+  }
+ ]
+}

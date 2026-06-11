@@ -1,0 +1,36 @@
+{
+ "id": "PERF-017",
+ "title": "Find-in-output rescans the entire 2MB output buffer on every keystroke",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-general",
+ "lens": "perf",
+ "existing_state": "The find bar triggers a full search on every character typed: FindDialog.cs:174-180 wires TextChanged to FindNext(highlightFirst:true), which calls Form1.FindFromDialog (Form1.cs:14499) -> BuildMatchList (Form1.cs:14583-14599). BuildMatchList reads txtOutput.Text twice (null-check at 14587, assignment at 14591); txtOutput is a plain WinForms TextBox (Form1.Designer.cs:158) with MaxLength = 2,000,000 (Form1.Designer.cs:1324), and each .Text getter marshals the whole native buffer via WM_GETTEXT and allocates a fresh up-to-4MB string — so each keystroke costs ~8MB of allocation plus a full IndexOf scan, all on the UI thread. A 1-character first keystroke against a full buffer collects hundreds of thousands of int offsets into _findMatches, then FindIndex scans them linearly (14517). Toggling Match Case re-runs the whole pipeline too (FindDialog.cs:172, 263-269 -> UpdateFindStatus Form1.cs:14534-14556). After large multi-host runs (output throttled in via _uiOutputThrottler, Form1.cs:271/332, up to the 2M cap), typing a search term feels sluggish character by character.",
+ "recommendation": "In BuildMatchList, read txtOutput.Text exactly once per call, and cache that snapshot in a field while the find bar is visible — invalidate it from the single output append path (the throttler flush) instead of re-marshaling per keystroke. Add a short debounce (~100-150ms timer) on the FindDialog TextChanged handler so a 5-character term costs one scan, not five. Optionally cap _findMatches enumeration (e.g. stop at 10k and show '10000+') to bound list growth for 1-2 char terms.",
+ "user_benefit": "Searching big multi-host output stays instant instead of stuttering on every keystroke; this is the exact scenario (large fleet runs producing megabytes of output) the find bar exists for.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "14583-14599",
+   "note": "BuildMatchList: two txtOutput.Text reads + full IndexOf scan per invocation"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FindDialog.cs",
+   "lines": "174-180",
+   "note": "TextChanged -> FindNext on every keystroke, no debounce"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.Designer.cs",
+   "lines": "158, 1324",
+   "note": "txtOutput is a plain TextBox with MaxLength 2,000,000"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FindDialog.cs",
+   "lines": "172, 263-269",
+   "note": "Match Case toggle re-runs the full scan via UpdateFindStatus"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

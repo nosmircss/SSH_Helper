@@ -1,0 +1,31 @@
+{
+ "id": "UX-015",
+ "title": "Switching environments silently commits grid edits and erases the 'unsaved' indicator",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "form1-a",
+ "lens": "ux",
+ "existing_state": "TrySwitchEnvironment unconditionally saves the current grid into the outgoing environment before switching (Form1.cs:1977 → SaveCurrentGridToEnvironment, Form1.cs:2230-2240) — there is no prompt and no way to discard accidental edits (a stray paste, a fat-fingered cell) before they are permanently baked into the environment. Worse, loading the target environment resets _csvDirty = false and recaptures the unsaved-changes baseline FROM THE EDITED GRID (Form1.cs:2334-2335, CaptureLoadedFileSnapshotFromGrid at 2395-2400), so after switching A→B→A the hosts header indicator (IsHostsGridUnsaved, Form1.cs:2375-2393) reports the grid as in-sync with its CSV even though the file on disk no longer matches what's shown. The careful unsaved/sync indicator built by HostsFileIndicatorFormatter (Form1.cs:2370-2373) is defeated by a simple environment round-trip.",
+ "recommendation": "Two small changes: (1) when the grid has unsaved edits relative to its CSV (IsHostsGridUnsaved() == true), have TrySwitchEnvironment offer 'Keep edits / Discard edits / Cancel' before committing to the outgoing environment; (2) persist the dirty baseline with the environment (store the original loaded-file snapshot, or carry _csvDirty + _loadedFileSnapshot through SaveCurrentGridToEnvironment/LoadEnvironmentIntoGrid) so the unsaved indicator survives a round-trip instead of being recaptured from the edited grid at Form1.cs:2334-2335.",
+ "user_benefit": "Environment hopping is a core workflow (per-folder base environments auto-switch on preset load, Form1.cs:2165-2199), and today every hop silently launders unsaved grid edits into 'saved' state. Operators keep the one signal telling them the grid has drifted from the CSV their teammates share.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "1967-1977",
+   "note": "Unconditional SaveCurrentGridToEnvironment on switch, no prompt/discard path"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "2333-2336",
+   "note": "LoadEnvironmentIntoGrid sets _csvDirty = false and recaptures the baseline snapshot from the (possibly edited) grid"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "2375-2393",
+   "note": "IsHostsGridUnsaved short-circuits on !_csvDirty and diffs against the recaptured snapshot — indicator goes green after an env round-trip"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

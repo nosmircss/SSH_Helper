@@ -1,0 +1,41 @@
+{
+ "id": "PERF-001",
+ "title": "Run start blocks the UI thread on per-host Vault and credential resolution — and deadlocks permanently on a cold Vault cache",
+ "category": "PERF",
+ "severity": "critical",
+ "effort": "M",
+ "area": "integrations",
+ "lens": "perf",
+ "existing_state": "All run entry points materialize host connections synchronously on the UI thread before any await: ExecutePresetOnRowsAsync calls GetHostConnections(hostRows).ToList() at Form1.cs:12277, the folder path at Form1.cs:12900, and the parallel connection test reaches it too at Form1.cs:8916 (the SemaphoreSlim(5).WaitAsync at 8910-8913 completes synchronously for the first 5 rows, so the lambda keeps running on the UI thread). Inside the per-row iterator (Form1.cs:13309-13391), every row with a vault_path calls VaultCredentialProvider.TryGetPassword, which blocks via .GetAwaiter().GetResult() on VaultService.ReadSecretKeysAsync (Services/Vault/VaultCredentialProvider.cs:48-49). VaultService.cs contains zero ConfigureAwait(false) (verified by grep — only VaultOidcLoginFlow has them), so on any cache miss the first real await (e.g. HttpClient.SendAsync during auth at VaultService.cs:323) posts its continuation back to the blocked WindowsFormsSynchronizationContext — a permanent sync-over-async deadlock, not just a slow call. The 300s instance cache (VaultService.cs:1065) is shared with background script/job runs (which execute under Task.Run, SshExecutionService.cs:446), masking the bug: a UI run works right after a background run warmed the cache and hangs otherwise. Even with the deadlock fixed, resolution is one sequential HTTPS round-trip per row (a cold 200-host fleet = 200 round-trips with the form frozen and no progress or cancel), an expired OIDC token launches the full browser login flow (VaultService.cs:448-573, up to 180s) inside the blocking call, and there is no single-flight gate around authentication (GetAuthenticatedProfileAsync, VaultService.cs:282-313 has no lock), so parallel callers with an expired token each perform a full login. The same enumeration also performs a Credential Manager CredWrite syscall per row with a grid password as a side effect (StoreHostPassword, Form1.cs:13349-13352) or a CredRead fallback (13353-13356).",
+ "recommendation": "Make host-credential resolution genuinely async: snapshot the grid cell values on the UI thread (cheap), then resolve credentials in an awaited background task before SetExecutionMode(true) — extract an async ResolveHostConnectionsAsync and await it in ExecutePresetOnRowsAsync / ExecuteFolderWithOptionsAsync / the connection-test path (the callers are already async Task; Task.Run around the vault batch is an acceptable first step). Dedupe distinct vault_path values and resolve them concurrently with a small cap (e.g. SemaphoreSlim(4)) behind a cancellable progress UI. Add an async TryGetPasswordAsync to VaultCredentialProvider so the sync-over-async bridge disappears from this path; add ConfigureAwait(false) throughout VaultService as defense-in-depth; add a per-profile single-flight SemaphoreSlim around GetAuthenticatedProfileAsync so concurrent resolution cannot trigger N simultaneous logins or N OIDC browser windows fighting over the callback port. Move the StoreHostPassword CredWrite side effect out of enumeration to the explicit save path, keeping only TryResolveHostPassword reads here.",
+ "user_benefit": "The app stops hard-freezing — and in the cold-cache case permanently hanging — the moment Run is pressed on a grid using the vault_path column; the feature becomes usable from the UI at all, and large fleets resolve credentials in parallel with visible, cancellable progress instead of one blocking HTTPS call per host.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Vault/VaultCredentialProvider.cs",
+   "lines": "48-49",
+   "note": ".GetAwaiter().GetResult() on ReadSecretKeysAsync — sync-over-async HTTP per host row"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "12277, 12900, 8910-8916",
+   "note": "GetHostConnections(...).ToList() executed on the UI thread in all three entry points"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "13332-13357",
+   "note": "per-row vault_path resolution plus CredWrite/CredRead side effects inside the row loop"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Vault/VaultService.cs",
+   "lines": "282-313, 323, 448-573, 1065",
+   "note": "no ConfigureAwait(false) anywhere in the file; no auth single-flight; OIDC browser login up to 180s inside the blocking call; 300s cache TTL masks the deadlock"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "446",
+   "note": "script/job execution runs under Task.Run — background paths merely block, masking the UI deadlock"
+  }
+ ],
+ "mockup_idea": "Small modal/inline progress strip shown after pressing Run: 'Resolving credentials 37/200 (vault: 12 pending)' with a Cancel button, replacing today's frozen window.",
+ "merged_from": 3
+}

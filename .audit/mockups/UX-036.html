@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX-036 — WebView2 missing-runtime guidance</title>
+<style>
+  :root{
+    --bg:#0b0e13; --fg:#c9d4e3; --muted:#8294a8; --line:#1c2330;
+    --cyan:#4cc9f0; --green:#2bd97c; --amber:#ffb454; --red:#ff5c5c;
+  }
+  *{box-sizing:border-box}
+  body{margin:12px;background:var(--bg);color:var(--fg);
+    font:12px "Cascadia Code",Consolas,monospace}
+  .row{display:flex;gap:12px;align-items:stretch}
+  .col{flex:1;min-width:0;display:flex;flex-direction:column}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 6px 2px}
+  .cap b{font-weight:600}
+  .cap .bad{color:var(--red)} .cap .good{color:var(--green)}
+  .win{flex:1;border:1px solid var(--line);border-radius:6px;overflow:hidden;
+    background:#0d1118;display:flex;flex-direction:column;min-height:250px}
+  .tbar{display:flex;align-items:center;gap:8px;padding:5px 8px;
+    background:#10151e;border-bottom:1px solid var(--line);color:var(--muted);
+    font-size:11px;white-space:nowrap;overflow:hidden}
+  .tbar .glyphs{margin-left:auto;letter-spacing:.45em;color:#3a4658}
+  .body{flex:1;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;padding:16px;text-align:center}
+  /* BEFORE */
+  .err{color:var(--red);font-size:12.5px;line-height:1.5;max-width:300px}
+  .note{margin-top:14px;color:var(--muted);font-size:10.5px;max-width:300px;
+    line-height:1.45}
+  .note code{color:#a8b6c8}
+  /* AFTER */
+  .panel{max-width:330px;text-align:left}
+  .head{display:flex;gap:10px;align-items:flex-start}
+  .ico{flex:none;width:30px;height:30px;border-radius:50%;
+    border:1.5px solid var(--amber);color:var(--amber);
+    display:flex;align-items:center;justify-content:center;
+    font-size:16px;margin-top:1px}
+  .h1{font-size:13px;font-weight:600;color:var(--fg);line-height:1.35}
+  .sub{margin-top:8px;color:var(--muted);line-height:1.5;font-size:11.5px}
+  .sub a{color:var(--cyan);text-decoration:none;border-bottom:1px dotted #2a5e74}
+  .btns{display:flex;gap:8px;margin-top:14px}
+  .btn{padding:6px 12px;border-radius:4px;font:600 11.5px "Cascadia Code",Consolas,monospace;
+    cursor:default;white-space:nowrap}
+  .btn.dl{background:rgba(76,201,240,.14);border:1px solid var(--cyan);color:var(--cyan)}
+  .btn.retry{background:transparent;border:1px solid #2a3445;color:var(--fg)}
+  .scope{margin-top:14px;padding-top:10px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:10.5px;line-height:1.5}
+  .scope .ok{color:var(--green)}
+  .foot{margin-top:10px;color:var(--muted);font-size:10.5px;line-height:1.5}
+  .foot code{color:#a8b6c8}
+</style>
+</head>
+<body>
+<div class="row">
+
+  <div class="col">
+    <p class="cap"><b class="bad">Before</b> — raw exception in the status label</p>
+    <div class="win">
+      <div class="tbar">Flow Canvas — backup-fortigates.yaml<span class="glyphs">— ▢ ✕</span></div>
+      <div class="body">
+        <div class="err">Error: Couldn't find a compatible Webview2 Runtime
+          installation to host WebViews.</div>
+        <div class="note">Full stack trace goes to <code>Debug.WriteLine</code> only.
+          No link, no retry — canvas (and the detached Run&nbsp;Output window,
+          which duplicates this catch) just looks broken on machines without
+          the Evergreen runtime.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <p class="cap"><b class="good">After</b> — guidance panel (mirrors the missing-dist text)</p>
+    <div class="win">
+      <div class="tbar">Flow Canvas — backup-fortigates.yaml<span class="glyphs">— ▢ ✕</span></div>
+      <div class="body">
+        <div class="panel">
+          <div class="head">
+            <div class="ico">!</div>
+            <div class="h1">Microsoft WebView2 Runtime is not installed</div>
+          </div>
+          <div class="sub">Flow Canvas and the Run Output window require it.
+            One-time install (~2&nbsp;min):
+            <a href="#">developer.microsoft.com/microsoft-edge/webview2</a></div>
+          <div class="btns">
+            <span class="btn dl">Download WebView2 Runtime</span>
+            <span class="btn retry">Retry</span>
+          </div>
+          <div class="scope">Detected via <span class="ok">GetAvailableBrowserVersionString()</span>
+            probe + special-cased <span class="ok">WebView2RuntimeNotFoundException</span>.
+            Retry re-runs InitializeWebView2Async.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<p class="foot">Shared helper used by both <code>FlowCanvasForm</code> and
+<code>RunOutputWindowForm</code>; all other init failures keep the generic
+<code>Error: {ex.Message}</code> fallback.</p>
+</body>
+</html>

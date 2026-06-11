@@ -1,0 +1,36 @@
+{
+ "id": "BUG-021",
+ "title": "Saving a job whose name matches an existing job destroys everything entered in the editor (and orphans a Credential Manager secret)",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "dialogs-jobs-history",
+ "lens": "ux",
+ "existing_state": "JobEditorDialog never checks name uniqueness: JobEditorValidator.ValidateAll (Utilities/JobEditorValidator.cs:215-241) has no existing-names input, and ValidateName only checks empty/length. After validation passes, ValidateAndSave persists the Stored-mode password to Windows Credential Manager keyed by the (possibly brand-new) job id (JobEditorDialog.cs:2060-2064), then sets DialogResult.OK and closes the dialog (JobEditorDialog.cs:2135-2137). Only afterwards does JobListDialog call _jobStorage.Save (JobListDialog.cs:1041-1053 for New, 1354-1366 for Edit), and JobStorageService.Save throws ArgumentException on a case-insensitive duplicate name (Services/JobStorageService.cs:124-132). Result: type a full job — hosts grid, custom YAML, schedule, credentials — give it a name that collides with any existing job, hit Save, and you get \"Failed to save job: A job with the name 'X' already exists\" with the editor already disposed; every keystroke is gone. For Stored credential mode the secret was already written under the orphan job id and is never cleaned up (the duplicate-job flow got rollback at JobListDialog.cs:1295-1308; New/Edit did not). The Duplicate action has the same hole: duplicating the same job twice produces two \"X (copy)\" names and the second Save throws (JobListDialog.cs:1122-1123).",
+ "recommendation": "Pass the set of existing job names (minus the job being edited) into JobEditorDialog and add a uniqueness check to JobEditorValidator.ValidateAll so the collision is caught before the dialog closes — same pattern JobExportService.PrepareImport already uses for import renames. Alternatively (or additionally), move the _jobStorage.Save call inside the dialog's save handler so any storage exception keeps the editor open with all input intact, and only persist the CredMan secret after storage Save succeeds. For Duplicate, reuse the \"(imported)\" suffix-probing loop to find a free \"(copy N)\" name.",
+ "user_benefit": "A name collision becomes an inline correction instead of silently throwing away minutes of host-grid and YAML editing work, and Credential Manager stops accumulating secrets for jobs that never existed.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs",
+   "lines": "2012-2138",
+   "note": "credential persisted at 2060-2064; dialog closes at 2135-2137 before storage save"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JobEditorValidator.cs",
+   "lines": "20-29, 215-241",
+   "note": "no name-uniqueness validation anywhere in the validator"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobStorageService.cs",
+   "lines": "117-132",
+   "note": "Save throws ArgumentException on case-insensitive duplicate name"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs",
+   "lines": "1041-1053, 1354-1366, 1122-1123",
+   "note": "catch shows error after the editor is disposed; Duplicate builds a colliding '(copy)' name"
+  }
+ ]
+}

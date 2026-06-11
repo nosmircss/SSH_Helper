@@ -1,0 +1,31 @@
+{
+ "id": "BUG-047",
+ "title": "Encoding functions return wrong data instead of failing: hash() silently computes SHA256 for any unknown algorithm; hex_decode() drops the last nibble of odd-length input",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-functions",
+ "lens": "correctness",
+ "existing_state": "CreateHashAlgorithm's switch ends with `_ => SHA256.Create()` (Services/Scripting/Functions/EncodingFunctions.cs:104-115), so `hash(data, \"crc32\")` or `hash(data, \"sha3-256\")` returns a SHA256 digest with no error — and the intended guard `if (hasher == null) return null;` at EncodingFunctions.cs:67 is dead code because the factory can never return null. Separately, HexDecode sizes its buffer with integer division `value.Length / 2` (EncodingFunctions.cs:86-88), so an odd-length hex string like \"abc\" decodes only \"ab\" and silently discards the trailing character instead of rejecting clearly-corrupt input (the existing catch at :91-94 would have returned null had the loop been allowed to hit the bad slice).",
+ "recommendation": "Change the switch default to return null so the existing null-check at line 67 does its job (hash() then returns null for unknown algorithms, consistent with base64_decode's failure behavior). In HexDecode, return null when value.Length is odd before allocating the buffer. Both are one-line fixes in EncodingFunctions.cs.",
+ "user_benefit": "Scripts that verify file checksums or decode device-emitted hex get definitively wrong answers today instead of a detectable failure; a checksum comparison against the wrong algorithm fails confusingly, and truncated hex decodes pass through as plausible-looking data.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\EncodingFunctions.cs",
+   "lines": "104-115",
+   "note": "`_ => SHA256.Create()` — unknown algorithm silently becomes SHA256"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\EncodingFunctions.cs",
+   "lines": "67",
+   "note": "dead null-check that the fix would reactivate"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\EncodingFunctions.cs",
+   "lines": "86-88",
+   "note": "value.Length / 2 truncates the final nibble of odd-length input"
+  }
+ ]
+}

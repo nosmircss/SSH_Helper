@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>FEAT-002 mockup</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{color:#ffb454;font-weight:600}.cap.ok b{color:#2bd97c}
+  .win{border:1px solid #1c2330;border-radius:6px;background:#0e131c;overflow:hidden}
+  .tb{background:#10161f;border-bottom:1px solid #1c2330;padding:4px 8px;font-size:10px;color:#8294a8}
+  .out{padding:8px 10px;min-height:64px}
+  .ln{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.55}
+  .mut{color:#8294a8}.ok{color:#2bd97c}.bad{color:#ff5c5c}
+  .empty{color:#3a4656;font-style:italic;padding:14px 0;text-align:center}
+  .sbar{border-top:1px solid #1c2330;background:#10161f;padding:3px 8px;font-size:10px;color:#8294a8}
+  .sbar .sep{color:#1c2330;padding:0 6px}
+  .note{font-size:10px;color:#8294a8;margin:6px 0 18px}
+  .row{display:flex;gap:12px;align-items:flex-start}
+  .colL{flex:1.45;min-width:0}.colR{flex:1;min-width:0}
+  .toast{margin-top:10px;display:flex;border:1px solid #1c2330;border-left:3px solid #ff5c5c;border-radius:6px;background:#10161f;padding:8px 10px;gap:9px}
+  .toast .ic{width:22px;height:22px;border-radius:4px;background:#0b0e13;border:1px solid #1c2330;color:#4cc9f0;font-size:11px;display:flex;align-items:center;justify-content:center;flex:none}
+  .toast .t1{font-size:11px;color:#c9d4e3}.toast .t1 b{color:#ff5c5c}
+  .toast .t2{font-size:10px;color:#8294a8;margin-top:2px}
+  .toast .app{font-size:9px;color:#8294a8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}
+  .dlg{border:1px solid #1c2330;border-radius:6px;background:#0e131c;overflow:hidden}
+  .dh{background:#10161f;border-bottom:1px solid #1c2330;padding:5px 8px;font-size:10px}
+  .dh .tab{color:#8294a8;margin-right:10px}.dh .tab.on{color:#4cc9f0;border-bottom:1px solid #4cc9f0;padding-bottom:4px}
+  .grp{margin:10px 8px 8px;border:1px solid #1c2330;border-radius:4px;padding:10px 10px 9px;position:relative}
+  .grp legend,.grp .lg{position:absolute;top:-7px;left:8px;background:#0e131c;padding:0 5px;font-size:10px;color:#4cc9f0}
+  .opt{display:flex;align-items:center;gap:7px;margin:6px 0;font-size:11px}
+  .cb{width:12px;height:12px;border:1px solid #8294a8;border-radius:2px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;flex:none}
+  .cb.on{border-color:#2bd97c;color:#2bd97c}
+  .sel{border:1px solid #1c2330;background:#0b0e13;border-radius:3px;padding:2px 6px;font-size:11px;color:#c9d4e3}
+  .sel i{color:#8294a8;font-style:normal;margin-left:8px}
+  .hint{font-size:9px;color:#8294a8}
+  .pv{margin-top:9px;border-top:1px dashed #1c2330;padding-top:7px;font-size:10px;color:#8294a8}
+  .pv code{display:block;color:#ffb454;margin-top:3px;white-space:normal}
+</style></head>
+<body>
+
+<div class="cap">Before — 8:00 am, the 3 am backup <b>failed</b>. nothing anywhere.</div>
+<div class="win">
+  <div class="tb">Output</div>
+  <div class="out"><div class="empty">— output panel empty —</div></div>
+  <div class="sbar">Ready<span class="sep">|</span>Scheduler: 3 active -- Next: Config Drift Check in 17h 48m</div>
+</div>
+<div class="note">Only clue: open Job List &rarr; check the &ldquo;Last Result&rdquo; column by hand. No toast, no email, no output line.</div>
+
+<div class="cap ok">After — outcomes hit the output panel, a toast fires, and policy lives on the job</div>
+<div class="row">
+  <div class="colL">
+    <div class="win">
+      <div class="tb">Output</div>
+      <div class="out">
+        <div class="ln ok">[02:00:03] [Scheduled: Config Drift Check] Completed -- 200/200 hosts succeeded (04:12)</div>
+        <div class="ln mut">[03:00:12] [Scheduled: Nightly Backup] Started</div>
+        <div class="ln bad">[03:12:43] [Scheduled: Nightly Backup] Failed -- 4/200 hosts failed (12:31)</div>
+        <div class="ln bad mut">&nbsp;&nbsp;unreachable: 10.20.4.17 (edge-sw-04), 10.20.4.22, 172.16.9.3, 10.20.7.140</div>
+        <div class="ln mut">[07:45:10] [Run Now: Cert Expiry Scan] Completed -- 38/38 hosts succeeded (01:58)</div>
+      </div>
+      <div class="sbar">Ready<span class="sep">|</span>Scheduler: 3 active -- Next: Config Drift Check in 17h 48m</div>
+    </div>
+    <div class="toast">
+      <div class="ic">&gt;_</div>
+      <div>
+        <div class="app">SSH_Helper</div>
+        <div class="t1">Nightly Backup <b>FAILED</b> &mdash; 4/200 hosts failed (12:31)</div>
+        <div class="t2">10.20.4.17, 10.20.4.22, 172.16.9.3, +1 more &middot; via profile &ldquo;Teams #netops&rdquo;</div>
+      </div>
+    </div>
+  </div>
+  <div class="colR">
+    <div class="dlg">
+      <div class="dh"><span class="tab">General</span><span class="tab">Schedule</span><span class="tab on">Advanced</span><span style="float:right;color:#8294a8">Job Editor &mdash; Nightly Backup</span></div>
+      <div class="grp">
+        <span class="lg">Notifications</span>
+        <div class="opt"><span class="cb on">&#10003;</span> Notify on failure <span class="hint">(global default)</span></div>
+        <div class="opt"><span class="cb"></span> Notify on success</div>
+        <div class="opt">Profile: <span class="sel">Teams #netops <i>&#9662;</i></span></div>
+        <div class="pv">Message preview:
+          <code>[Scheduled: Nightly Backup] Failed -- 4/200 hosts failed (12:31)</code>
+        </div>
+      </div>
+      <div class="note" style="margin:0 8px 8px">Formatter + multi-channel dispatch already exist &mdash; this wires them to JobCompleted.</div>
+    </div>
+  </div>
+</div>
+
+</body></html>

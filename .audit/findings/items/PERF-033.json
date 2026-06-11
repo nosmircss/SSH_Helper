@@ -1,0 +1,41 @@
+{
+ "id": "PERF-033",
+ "title": "Unsaved-preset save prompt renders the entire diff line-by-line into a RichTextBox — UI freeze on large presets",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "ui-utilities",
+ "lens": "perf",
+ "existing_state": "UnsavedPresetDiffDialog (shown whenever a preset with unsaved changes is switched away from or saved — constructed at Form1.cs:6126 and 12099) always builds the FULL diff: PopulateDiff calls InlineDiffBuilder.Build with includeAllLines: true and a line budget equal to the combined line count of both versions (UI/UnsavedPresetDiffDialog.cs:299-305, 527-535). InlineDiffBuilder's includeAllLines path emits every line including all unchanged context (Utilities/InlineDiffBuilder.cs:165-175). RenderLines then performs two AppendText calls plus a Select + SelectionColor pair per line on a visible RichTextBox (UnsavedPresetDiffDialog.cs:320-331), guarded only by SuspendLayout (317) — which does not stop RichTextBox character-format message round-trips or repaints. For a multi-thousand-line YAML preset that is thousands of EM_SETCHARFORMAT operations on the UI thread. Worse, above 2,000,000 LCS cells (~1,400x1,400 lines) InlineDiffBuilder switches to a positional fallback (InlineDiffBuilder.cs:15, 37-39, 62-97) in which one inserted line marks every subsequent line as removed+added — maximizing the number of colored lines precisely when the preset is biggest.",
+ "recommendation": "Two cheap fixes in UI/UnsavedPresetDiffDialog.cs: (1) render in one shot — build the colored document as an RTF string and assign _txtDiff.Rtf once, or at minimum suspend painting with WM_SETREDRAW and coalesce consecutive lines of the same kind into a single Select/SelectionColor call; (2) default PopulateDiff to the collapsed view InlineDiffBuilder already supports (contextLines: 2, modest maxOutputLines) with a 'Show full diff' toggle, so the unbounded includeAllLines path is opt-in rather than the only mode.",
+ "user_benefit": "The save prompt is on a high-frequency interaction path (every preset switch with unsaved edits). For large YAML presets this removes a multi-second beachball exactly at the moment the user is trying to make a quick save/discard decision.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/UnsavedPresetDiffDialog.cs",
+   "lines": "299-305, 527-535",
+   "note": "includeAllLines: true with budget = total line count of both versions"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/UnsavedPresetDiffDialog.cs",
+   "lines": "315-336",
+   "note": "RenderLines: per-line AppendText + Select + SelectionColor; only SuspendLayout"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/InlineDiffBuilder.cs",
+   "lines": "15, 37-39, 62-97",
+   "note": "MaxLcsCells=2M cap; positional fallback turns one insertion into removed+added for every following line"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/InlineDiffBuilder.cs",
+   "lines": "165-175",
+   "note": "includeAllLines path emits all Equal lines too"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "6126, 12099",
+   "note": "dialog construction sites on the preset save/switch path"
+  }
+ ],
+ "mockup_idea": "Before/after of the dialog: 'before' shows a wall of thousands of colored lines (and a frozen cursor); 'after' shows only changed hunks separated by collapse markers with a 'Show full diff' link at the bottom.",
+ "merged_from": 1
+}

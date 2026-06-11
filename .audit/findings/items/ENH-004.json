@@ -1,0 +1,31 @@
+{
+ "id": "ENH-004",
+ "title": "CSV import fails or silently mangles common spreadsheet exports (duplicate headers, renamed columns, truncated rows)",
+ "category": "ENH",
+ "severity": "high",
+ "effort": "M",
+ "area": "persistence-config",
+ "lens": "ux",
+ "existing_state": "CsvManager.LoadFromFile discards the user's first header name entirely and replaces it with Host_IP with no notice (Services/CsvManager.cs:32-35), silently rewrites spaces to underscores in remaining headers (CsvManager.cs:45) — which changes the {{column_name}} variable names scripts reference — and silently truncates any row longer than the header (CsvManager.cs:61-62). Duplicate header names (extremely common in Excel exports) crash the load: dt.Columns.Add(headerName) at CsvManager.cs:46 throws DuplicateNameException, and Form1.OpenCsvFile surfaces the raw framework message \"Failed to load CSV: A column named 'X' already belongs to this DataTable\" (Form1.cs:9239-9242). There is no delimiter detection (semicolon-delimited locale exports parse as one column) and no encoding handling beyond BOM strip, so Windows-1252 Excel exports load with mojibake.",
+ "recommendation": "Make LoadFromFile resilient and the import transparent: (1) dedupe duplicate headers by suffixing (Name, Name_2, ...) instead of throwing; (2) sniff the delimiter from the header line (comma vs semicolon vs tab) and detect encoding via StreamReader with detectEncodingFromByteOrderMarks plus a Windows-1252 fallback heuristic; (3) return an import summary (rows loaded, columns renamed, rows truncated, first-column-renamed-to-Host_IP) and show it once in a non-modal banner or expandable status line in Form1.OpenCsvFile instead of staying silent; (4) warn when the original first header was something like \"name\" or \"site\" that does not look host-like, since every row will then target the wrong \"host\".",
+ "user_benefit": "Operators feed this grid from spreadsheets exported by other teams; today a duplicate column kills the import with a cryptic error, and a wrong-first-column file silently targets 200 wrong hosts. Robust import with a visible summary removes the most common first-five-minutes failure for new users.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\CsvManager.cs",
+   "lines": "32-46",
+   "note": "first header discarded, spaces->underscores, duplicate Columns.Add throws"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\CsvManager.cs",
+   "lines": "61-62",
+   "note": "ragged rows silently truncated to header width"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "9239-9242",
+   "note": "raw exception message shown as the only feedback"
+  }
+ ],
+ "mockup_idea": "Before/after of the CSV open flow: before = error dialog with raw DataTable exception text; after = import preview strip showing '212 hosts, 6 columns — 1 duplicate header renamed (Location → Location_2), first column \"device\" mapped to Host_IP' with Continue/Cancel.",
+ "merged_from": 1
+}

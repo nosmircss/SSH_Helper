@@ -1,0 +1,158 @@
+[
+ {
+  "id": "BUG-009",
+  "title": "A failed inline vault read silently substitutes an empty string, sending blank credentials to hosts",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "scripting-core",
+  "lens": "security",
+  "existing_state": "ResolveVaultExpression catches a failed secret read and returns `string.Empty` after only setting `_last_error` (ScriptContext.cs:751-755); the missing-configuration and missing-`#` paths do the same (ScriptContext.cs:709-713, 720-724, 740-744). Because this happens inside string interpolation (SubstituteVariables, ScriptContext.cs:769/777), there is no channel to fail the step — the surrounding `send`/`print`/`set` proceeds with the secret silently collapsed to empty. So if Vault is unreachable, the token/key is wrong, or auth lapsed, `send: \"login -u admin -p{{vault:db#password}}\"` transmits `login -u admin -p` with no password to every host. On network gear and SSH logins this can trigger lockouts or auth-failure storms across the fleet, and the only signal is `_last_error` which most scripts never check.",
+  "recommendation": "Give inline vault failures a hard-fail path: have ResolveVaultExpression throw a dedicated exception on read/config failure and let the consuming command (send/print/set) convert it into a CommandResult.Fail so the step stops instead of sending an empty secret. At minimum, log the failure through EmitOutput at Error level rather than only writing the silent `_last_error` variable.",
+  "user_benefit": "A transient Vault outage or a bad secret path fails the step loudly instead of quietly logging in with a blank password across every host, preventing account lockouts and confusing partial runs.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs", "lines": "707-756", "note": "all failure branches return empty string, only set _last_error"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs", "lines": "758-786", "note": "substitution has no failure channel; empty value flows into command text"}
+  ]
+ },
+ {
+  "id": "BUG-010",
+  "title": "A misspelled function name in value position silently becomes the literal call text — which then gets sent to hosts or compared in conditions",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "scripting-functions",
+  "lens": "correctness",
+  "existing_state": "Function dispatch in value contexts falls through on unknown names instead of erroring. For `- set: cmd = uper(name)`: SetCommand tries TryEvaluateFunctionExpression (Services/Scripting/Commands/SetCommand.cs:178), which parses the call but hits the legacy switch's `default: return false` (Services/Scripting/JsonUtilities.cs:562-563); the chain then ends at ValueResolver.ResolveExpressionValue, which returns the raw expression text as a string (Services/Scripting/ValueResolver.cs:288). The variable now holds the literal string \"uper(name)\", and a later `- send: {{cmd}}` executes that literal on every host. The same fall-through exists in JsonUtilities.ResolveJsonValue (JsonUtilities.cs:312-333) and in inline substitution `{{uper(name)}}` via ScriptContext.ResolveVariableExpression (ScriptContext.cs:687-704). By contrast, the SAME typo inside an if:/while:/assert: condition throws FormatException(\"Unknown function: ...\") (Services/Scripting/ExpressionParser.cs:422-437) — so the engine already knows how to fail, just inconsistently. ScriptParser performs no static validation of function names, so nothing catches this before runtime either.",
+  "recommendation": "In the value-resolution chain (ValueResolver.ResolveExpressionValue and JsonUtilities.ResolveJsonValue), when TryParseFunctionCall succeeds (the expression is unambiguously a single name(...) call with an identifier name) but neither the registry, the legacy switch, nor json.* claims the name, throw the same FormatException the ExpressionParser throws instead of falling through to the literal. Additionally, add a parse-time validation warning in ScriptParser that checks called names against the union of FunctionRegistry.RegisteredNames + the legacy switch names + the json.* set, so typos surface in the editor before a fleet run.",
+  "user_benefit": "A one-character typo currently changes behavior silently: garbage commands run on every host, or a condition variable holds a non-empty literal string that is always truthy. Failing at parse/eval time turns a silent fleet-wide misfire into an immediate, pinpointed error.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ValueResolver.cs", "lines": "252-288", "note": "ResolveExpressionValue final fallback `return expr;` returns the literal call text"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\JsonUtilities.cs", "lines": "312-333, 562-563", "note": "value-position fall-through past TryEvaluateFunctionExpression; legacy switch default returns false"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SetCommand.cs", "lines": "178-197", "note": "set: resolution chain ends in ResolveExpressionValue"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionParser.cs", "lines": "422-437", "note": "condition context throws 'Unknown function' — the engine is inconsistent, not incapable"}
+  ]
+ },
+ {
+  "id": "BUG-011",
+  "title": "exit command silently reports Success for bare failure messages, and variable substitution can flip the exit status",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "scripting-commands-a",
+  "lens": "correctness",
+  "existing_state": "ExitCommand defaults the status to Success for any message that doesn't start with an English keyword: `exit: \"Could not reach host\"` produces `[EXIT Success] Could not reach host` and CommandResult.Exit(Success) (Services/Scripting/Commands/ExitCommand.cs:21-22, fall-through else at 61-64). Worse, variables are substituted BEFORE keyword parsing (line 18, parse at 24-60), so the status is derived from runtime data: `exit: \"{{summary}}\"` where summary happens to start with 'error ', 'fail '/'failure ', or 'success ' flips the exit status to whatever the data says — e.g. a device output of 'error count: 0' exits the script with status Error, while an intended failure message of 'failed to apply config' typed without the exact keyword prefix exits Success. In a scheduled-jobs / multi-host fleet context this directly mislabels run results (job history, notifications).",
+  "recommendation": "In ExitCommand.ExecuteAsync, parse the status keyword from the RAW step.Exit text first, and only substitute variables into the remaining message portion. Decide the bare-message default explicitly: either keep Success but emit a parser/editor warning for `exit: <message>` without a status keyword, or treat keyword-less exit as Failure (safer for the 'abort with reason' mental model). Also support the mapping form's explicit `status:` as authoritative so substitution can never affect it.",
+  "user_benefit": "Scheduled jobs and fleet runs stop reporting success on failure paths (and vice versa) — exit status becomes deterministic from the script text instead of depending on what a runtime variable happens to start with.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExitCommand.cs", "lines": "15-22", "note": "substitution at 18, default status Success at 21"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExitCommand.cs", "lines": "24-64", "note": "keyword prefixes parsed from the already-substituted text; bare message falls through to Success"}
+  ]
+ },
+ {
+  "id": "BUG-012",
+  "title": "on_error: continue is silently ignored by assert and extract failures (script stops anyway)",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "scripting-commands-a",
+  "lens": "correctness",
+  "existing_state": "The executor applies on_error only to thrown exceptions (ScriptExecutor.cs:517-531); a command that returns a plain Fail stops the host's script unconditionally (ScriptExecutor.cs:425-431). AssertCommand returns plain CommandResult.Fail for both evaluation errors and failed assertions (Services/Scripting/Commands/AssertCommand.cs:30, 56), and ExtractCommand returns plain Fail for empty-source, no-match-with-required, and regex parse/timeout errors (ExtractCommand.cs:35-37, 65-67, 108-119) — neither ever calls CommandResult.ApplyOnError. Yet the YAML surface actively accepts `on_error` on these steps: it is a generic step-level key (ScriptParser.cs:983) and the assert mapping explicitly parses a nested on_error and hoists it to the step root (ScriptParser.cs:3512-3515). So a user who writes `assert: {...}` / `extract: {...}` with `on_error: continue` gets no warning and the script still aborts mid-run on failure. Related inconsistency: user-cancel in choose and input also bypasses on_error with a plain Fail (ChooseCommand.cs:58-62, InputCommand.cs:61-65) while every other failure in those same commands honors ApplyOnError (ChooseCommand.cs:78, InputCommand.cs:82).",
+  "recommendation": "Route assert and extract failure returns through CommandResult.ApplyOnError(step, msg) like the other commands (one-line changes at AssertCommand.cs:30/56 and the Fail sites in ExtractCommand). For choose/input cancellation, either honor on_error too or make 'cancel always aborts' an explicit documented rule and have the parser warn when on_error is declared on steps where it cannot apply.",
+  "user_benefit": "A declared error-handling policy actually works: long fleet scripts with `on_error: continue` on validation/parsing steps no longer die mid-run on the first soft failure, and the behavior matches what the parser/editor accepts.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\AssertCommand.cs", "lines": "26-31, 55-56", "note": "plain Fail on eval error and failed assert; ApplyOnError never used"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExtractCommand.cs", "lines": "35-37, 65-67, 108-119", "note": "plain Fail on empty source / no match / regex errors"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs", "lines": "425-431, 517-531", "note": "executor stops on returned Fail; on_error applied only to exceptions"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs", "lines": "983, 3512-3515", "note": "on_error accepted step-level and explicitly parsed under assert"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ChooseCommand.cs", "lines": "58-62", "note": "cancel path is plain Fail, bypassing on_error (same in InputCommand.cs:61-65)"}
+  ]
+ },
+ {
+  "id": "BUG-013",
+  "title": "FortiGate parse 'sections' filter leaks excluded config into the result instead of skipping it",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "scripting-commands-b",
+  "lens": "correctness",
+  "existing_state": "`parse: { format: fortigate, sections: [...] }` is supposed to return only the listed sections. When a top-level `config` line fails the filter, the parser calls SkipConfigBlock (Services/Scripting/Parsers/FortiGateParser.cs:59-63) — but SkipConfigBlock is an empty placeholder (:248-252, the comment admits it does nothing). Only the `config` header line is skipped; every `set`/`edit`/`unset` line inside the excluded block then executes against the CURRENT context, which is the root result dict (:134-140, :103-132). So filtering `sections: [\"system interface\"]` on a full FortiGate config returns the wanted section PLUS a root-level soup of keys and edit-entries from every excluded section — and nested `config` lines inside the excluded block are themselves re-evaluated against the filter as if top-level (contextStack is 0), so fragments of excluded sections can appear under wrong names. Additionally, ShouldIncludeSection (:238-242) does bidirectional character-prefix matching (`filters.Any(f => path.StartsWith(f) || f.StartsWith(path))`), so a filter of \"sys\" matches \"system interface\", \"system admin\", etc. — no word-boundary check. Any script that branches on the parsed dictionary gets wrong data.",
+  "recommendation": "Replace the no-op SkipConfigBlock with real skipping: when a top-level section is filtered out, set a skipDepth counter and consume lines, incrementing on `config` and decrementing on `end`, until depth returns to zero — resuming normal parsing afterwards. Delete the dead ref-parameter signature. Fix ShouldIncludeSection to match on whole space-delimited tokens (e.g. filter must equal the path or be a token-boundary prefix: \"system\" matches \"system interface\" but \"sys\" does not).",
+  "user_benefit": "The sections filter actually does what it says — scripts that parse device configs get clean, correctly-scoped data instead of polluted root keys that silently corrupt downstream logic (foreach over interfaces, drift comparisons, etc.).",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Parsers\\FortiGateParser.cs", "lines": "56-65", "note": "filtered config line is 'skipped' by calling the no-op, then continue — only the header line is dropped"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Parsers\\FortiGateParser.cs", "lines": "248-252", "note": "SkipConfigBlock body is empty: 'This is a placeholder for future optimization'"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Parsers\\FortiGateParser.cs", "lines": "238-242", "note": "ShouldIncludeSection: bidirectional StartsWith at character level — 'sys' includes 'system interface'"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ParseCommand.cs", "lines": "56-59", "note": "polluted dict is stored directly into the 'into' variable and reported as success"}
+  ]
+ },
+ {
+  "id": "BUG-014",
+  "title": "Script update-column silently drops grid writes for hosts using the port column (and updates only the first duplicate row)",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "form1-b",
+  "lens": "data-integrity",
+  "existing_state": "The YAML `update-column` command (Services/Scripting/Commands/UpdateColumnCommand.cs:29) raises ColumnUpdateRequested, which lands in Form1.UpdateHostColumn (Form1.cs:14190-14214). That method finds the target row by re-parsing the grid's Host_IP cell (`HostConnection.Parse(hostIp)` at 14201) and requiring `rowHost.IpAddress == host.IpAddress && rowHost.Port == host.Port` (14202). But at run time the executing host's Port is set from the separate `port` grid column (Form1.cs:13318-13325) or from SSH config (HostConnection.ApplySshConfig, Models/HostConnection.cs:75-77), while `HostConnection.Parse` of a bare IP cell defaults Port to 22 (Models/HostConnection.cs:9,48-51). So any host whose non-22 port comes from the `port` column never matches: the script's grid write-back is a silent no-op — no warning, no log. Additionally, the loop `break`s after the first match (14212), so duplicate Host_IP rows only ever get the first row updated.",
+  "recommendation": "In UpdateHostColumn, resolve the row's effective port the same way GetHostConnections does (explicit `ip:port` in the cell, else the `port` column value, else 22) before comparing — or better, stop matching by string at all: thread the originating DataGridViewRow (or a row index) through SshColumnUpdateEventArgs since GetHostConnections already iterates concrete rows. Also decide intentionally whether duplicates should all update (remove the `break`) and append an output warning when no row matches so failures are visible.",
+  "user_benefit": "Scripts that harvest data back into the host grid (inventory, version capture, status columns) currently lose their results without any error for every host on a non-standard SSH port — a silent data-loss path in a core scripting feature.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "14190-14214", "note": "Match by Parse(Host_IP cell) + port equality, break after first match"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "13318-13325", "note": "Run-time host.Port comes from the `port` column, not the Host_IP cell"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HostConnection.cs", "lines": "38-54", "note": "Parse defaults Port to 22 when the cell has no :port suffix"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\UpdateColumnCommand.cs", "lines": "29", "note": "update-column command raises the event"}
+  ]
+ },
+ {
+  "id": "BUG-015",
+  "title": "Folder runs apply the first preset's timeout to every preset in the folder",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "form1-b",
+  "lens": "correctness",
+  "existing_state": "ExecuteFolderWithOptionsAsync computes one timeout for the whole folder: `int commandTimeout = presets.Values.FirstOrDefault()?.Timeout ?? config.Timeout;` (Form1.cs:12916) and passes a single SshTimeoutOptions into `_sshService.ExecuteFolderAsync` (12917-12929). SshExecutionService never re-resolves per-preset timeouts — the only timeout reads in the service are `timeouts.CommandTimeout` (SshExecutionService.cs:1628, 2226) and `timeouts.ConnectionTimeout` (2375). Per CLAUDE.md, `int? Timeout` is the one per-preset override that exists, and it is honored for single-preset runs (Form1.cs:12307-12309) — but in a folder run, every preset after the first runs under the first preset's (or default) timeout.",
+  "recommendation": "Thread per-preset timeouts into the folder pipeline: either pass `Dictionary<string, SshTimeoutOptions>` (or resolve `preset.Timeout ?? defaultTimeout` inside ExecuteFolderAsync's per-preset loop in SshExecutionService) so each preset executes with its own configured timeout. Keep ConnectionTimeout shared.",
+  "user_benefit": "A long-running preset (firmware upgrade, large transfer) placed after a quick preset in a folder is currently killed at the quick preset's timeout — runs fail with timeout errors that look like host problems, and the per-preset Timeout setting the user configured is silently ignored.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "12915-12929", "note": "Single timeout from first preset for entire folder run"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "618-660", "note": "ExecuteFolderAsync takes one SshTimeoutOptions; no per-preset timeout resolution anywhere in the service (only timeouts.CommandTimeout at 1628/2226)"}
+  ]
+ },
+ {
+  "id": "BUG-016",
+  "title": "Host grid paste mangles rows: LF-only clipboards collapse into one cell and dropped blank lines shift credentials onto the wrong hosts",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "ui-utilities",
+  "lens": "data-integrity",
+  "existing_state": "Both paste implementations corrupt row alignment. HostGridUtilities.PasteClipboardText splits clipboard text with StringSplitOptions.RemoveEmptyEntries (Utilities/HostGridUtilities.cs:234-236): copying a single column from Excel that contains blank cells produces empty lines in the TSV; those are silently removed, so every value after a gap pastes one row higher than it belongs. In the job editor's hosts grid (the consumer, JobEditorDialog.cs:1834) this means pasting a username/password/vault_path column next to existing Host_IP rows silently assigns credentials to the wrong hosts — a scheduled job then runs against hosts with mismatched credentials with no warning. Form1's main hosts grid has its own paste with the identical flaw plus one more: it splits ONLY on \"\\r\\n\" with RemoveEmptyEntries (Form1.cs:9612), so clipboard text with bare-LF line endings (VS Code, browsers, Linux terminals, WSL, many password managers) contains no \\r\\n at all and an entire multi-line host list is dumped into a single cell with embedded newlines. The grid is the credential source for executions (GetHostConnections reads these cells, Form1.cs:13313-13359) and SaveCurrentCsv persists the corrupted layout. Secondary defects: BuildClipboardText's all-selected branch also skips empty rows on copy (HostGridUtilities.cs:186-189), so even an in-app copy/paste round-trip shifts rows; and PasteClipboardText sets grid.AllowUserToAddRows = false at :238 and restores it at :265 with no try/finally, so an exception mid-paste permanently removes the new-row affordance.",
+  "recommendation": "In both paste implementations, split on any line-ending convention (`text.Split(new[] { \"\\r\\n\", \"\\n\", \"\\r\" }, StringSplitOptions.None)`), preserve interior empty lines as empty cells so row alignment is kept, and only trim a single trailing empty entry (clipboard TSV conventionally ends with a newline). Wrap the AllowUserToAddRows toggle in try/finally in HostGridUtilities.PasteClipboardText, and remove (or restrict to trailing) the isEmpty skip in BuildClipboardText's all-selected branch so copy/paste round-trips are position-faithful.",
+  "user_benefit": "Prevents the worst kind of fleet-tool error: SSH credentials and per-host variables silently landing on the wrong host rows after an ordinary spreadsheet paste — and makes pasting from any non-Windows source work at all.",
+  "mockup_idea": "Two side-by-side grids: source spreadsheet column (passwords with one blank cell mid-list) vs the pasted result, with a red arrow showing every password below the gap landing one host row too high; 'after fix' panel shows the blank preserved and rows aligned.",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\HostGridUtilities.cs", "lines": "224-273", "note": "RemoveEmptyEntries at :236; AllowUserToAddRows toggled at :238/:265 without try/finally"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\HostGridUtilities.cs", "lines": "165-190", "note": "All-selected copy skips empty rows (isEmpty guard), shifting round-trips"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "9604-9624", "note": "Main hosts grid duplicate paste path: RemoveEmptyEntries and \\r\\n-only split at :9612"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "13313-13359", "note": "Grid rows feed credentials directly into execution"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs", "lines": "1827-1834", "note": "Consumer: scheduled-job hosts grid copy/paste"}
+  ]
+ }
+]

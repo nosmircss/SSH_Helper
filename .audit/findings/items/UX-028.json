@@ -1,0 +1,41 @@
+{
+ "id": "UX-028",
+ "title": "Eight input prompts still use the legacy VB6 InputBox — unthemed, font-ignoring, and Cancel silently imports presets to root",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "ui-utilities",
+ "lens": "ux",
+ "existing_state": "DialogTheme provides themed replacements for MessageBox (Confirm/Show/ShowMessage, ~140 production call sites) but has no text-input prompt primitive (no Prompt method exists in UI/DialogTheme.cs:535-629). As a result every place that needs a string falls back to Microsoft.VisualBasic.Interaction.InputBox: rename folder (Form1.cs:8093), add column (9391), rename column (9419), import destination folder (10875), the generic ShowInputBox helper (11304-11313), job editor add/rename column (JobEditorDialog.cs:959, 995), and environment New/Duplicate/Rename names (EnvironmentDialog.cs:893-900). The VB InputBox is always a light classic dialog regardless of dark mode, ignores the user's configured dialog font (every DialogTheme surface honors it via SetDialogFont, UI/DialogTheme.cs:522-529), and returns \"\" for both Cancel and cleared input. That conflation has a real consequence: the code itself documents it as unresolved at Form1.cs:10880-10885 — pressing Cancel at the 'Import Destination Folder' prompt does not abort the import, it imports all presets to root level.",
+ "recommendation": "Add DialogTheme.Prompt(owner, message, title, defaultText, validator?) modeled on the existing ShowCore layout (auto-sizing label + TextBox + OK/Cancel, ApplyTo + SetDarkTitleBar + SetDialogFont), returning string? (null = cancelled). Replace the eight call sites — Form1.ShowInputBox already centralizes one and has a test override seam (_inputBoxPromptOverrideForTests), so it's the natural first adopter — and drop the Microsoft.VisualBasic dependency from those paths. The optional inline validator lets column-name and environment-name rules (duplicate check, sanitization) show errors in-place instead of an accept-then-error popup (Form1.cs:9401-9405). This simultaneously fixes the dark-mode break and the import-to-root-on-cancel trap.",
+ "user_benefit": "Dark-mode users stop getting a jarring white VB6-era popup for every rename, Cancel becomes distinguishable from 'clear the name', and cancelling an import actually cancels instead of dumping a folder export's presets loose into the root of the preset tree.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "8093, 9391, 9419, 10875, 11304-11313",
+   "note": "five Interaction.InputBox call sites incl. the generic ShowInputBox wrapper"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "10880-10885",
+   "note": "comment admits Cancel and empty are indistinguishable; Cancel imports to root"
+  },
+  {
+   "file": "JobEditorDialog.cs",
+   "lines": "959, 995",
+   "note": "job editor column prompts"
+  },
+  {
+   "file": "EnvironmentDialog.cs",
+   "lines": "893-900",
+   "note": "environment name prompts: null returned for both Cancel and blank"
+  },
+  {
+   "file": "UI/DialogTheme.cs",
+   "lines": "522-529, 535-629",
+   "note": "SetDialogFont + Confirm/Show/ShowMessage exist; no input-prompt counterpart"
+  }
+ ],
+ "mockup_idea": "Before/after in dark mode: the stock white VB InputBox ('Enter the name of the new column:') floating over the dark main window vs the same prompt as a dark, accent-buttoned dialog matching the existing themed message boxes.",
+ "merged_from": 3
+}

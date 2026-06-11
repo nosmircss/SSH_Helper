@@ -1,0 +1,46 @@
+{
+ "id": "SEC-001",
+ "title": "Job export (.sshjobs files and clipboard shares) leaks per-host plaintext SSH passwords despite documenting 'Credentials are stripped'",
+ "category": "SEC",
+ "severity": "critical",
+ "effort": "S",
+ "area": "jobs-scheduling",
+ "lens": "bugs",
+ "existing_state": "JobExportService.ExportToFile and ExportToString both document 'Credentials are stripped and running state cleared' (Services/JobExportService.cs:32-34, 50-52), but CloneForExport (JobExportService.cs:141-148) only resets CredentialMode to InheritFromApp, RunningState to null, and HasDriftWarning to false. The job's embedded host-grid snapshot (Hosts, List<Dictionary<string,string>>, Models/JobDefinition.cs:159) is serialized verbatim — including 'password' and 'username' columns, which are live credentials: PerHostColumn mode requires a filled password cell on every host row (Utilities/JobEditorValidator.cs:147-169; the editor instructs users to put credentials there, JobEditorDialog.cs:1144), and JobExecutionService.BuildHostConnections reads row['password'] as the SSH password at run time (Services/JobExecutionService.cs:527-534). Exposure is wider than PerHostColumn jobs: 'Copy from main grid' snapshots ALL named grid columns with no filtering (Utilities/HostGridUtilities.cs:325-340, wired via Form1.cs:15183), so any job whose hosts were copied from a grid containing a password column carries those secrets regardless of credential mode. ExportToFile writes indented plaintext JSON (JobExportService.cs:35-47); ExportToString is GZip+Base64 — encoding, not encryption — placed on the shared Windows clipboard (JobExportService.cs:53-65; entry points JobListDialog.cs:1140-1197). The same rows also sit unencrypted at rest in jobs.json and its .bak (Services/JobStorageService.cs:227-244), and in config.json's ApplicationState whenever Credential Manager is disabled — the default (CredentialSettings.UseCredentialManager defaults false, Models/AppConfiguration.cs:564-576; Form1.cs:14731-14751 blanks the main-grid password column only when it is enabled). Side effect of the same code: because CloneForExport blanks CredentialMode for ALL modes, a Vault or PerHostColumn job round-trips an import as InheritFromApp and silently runs with the app's default credentials.",
+ "recommendation": "In CloneForExport, blank the values of the 'password' (and arguably 'username') column case-insensitively in every Hosts row before serialization (matching the lookup convention in JobExecutionService.TryGetRowValue; the column itself can stay so the schema survives), and stop downgrading CredentialMode for Vault/PerHostColumn jobs — Vault paths and the now-blanked per-host schema are portable; only Stored mode needs the reset. On import, flag jobs whose password cells are empty under PerHostColumn so ImportPreviewDialog shows 'passwords must be re-entered' (same pattern as the existing MissingTarget status). As a follow-up, extend the Credential Manager redirection Form1 already does for the main grid to JobEditorDialog's host snapshot so jobs.json stops storing per-host passwords at rest, and consider excluding the password column from 'Copy from main grid' when the job is not in PerHostColumn mode.",
+ "user_benefit": "Sharing a .sshjobs file or pasting a clipboard export into chat no longer hands out every fleet host's SSH password in cleartext/trivially-decodable form — making the export feature's stated security contract actually true.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExportService.cs",
+   "lines": "32-65, 141-148",
+   "note": "Docs claim credentials stripped; CloneForExport only resets CredentialMode/RunningState/HasDriftWarning; Hosts exported verbatim to plaintext file and GZip+Base64 clipboard"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JobEditorValidator.cs",
+   "lines": "147-169",
+   "note": "PerHostColumn mode requires a filled password cell on every host row, so exported cells always contain real secrets"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "524-534",
+   "note": "Runtime consumes the plaintext 'password' row value as the live SSH credential"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\HostGridUtilities.cs",
+   "lines": "325-340",
+   "note": "Copy-from-main-grid snapshot includes every named column, password included — exposure not limited to PerHostColumn jobs"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs",
+   "lines": "1140-1197",
+   "note": "Export File / Export Clipboard entry points"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13126-13136, 1501-1523, 14731-14751",
+   "note": "Contrast: history capture strips the password column and main-grid passwords are migrated to Credential Manager (when enabled) — exports break that intent"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 3
+}

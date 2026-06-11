@@ -1,0 +1,36 @@
+{
+ "id": "ENH-011",
+ "title": "Scheduled jobs always execute hosts one at a time — no parallel-host option on jobs",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "ssh-execution",
+ "lens": "ux",
+ "existing_state": "Interactive runs can batch up to 100 hosts in parallel via the run dialog, but scheduled jobs cannot. Folder jobs build FolderExecutionOptions with only RunPresetsInParallel and StopOnFirstError (Services/JobExecutionService.cs:737-742); ParallelHostCount is never set so it stays at its default of 1 (Models/FolderExecutionOptions.cs:27), which the engine clamps into one-host-at-a-time batches (SshExecutionService.cs:636, 684-691). Single-preset jobs route through ExecutePresetAsync (JobExecutionService.cs:687) whose host loop is strictly sequential by construction (SshExecutionService.cs:434-451, script path 584-597). JobDefinition carries FolderExecutionMode and StopOnError (Models/JobDefinition.cs:229-235) but has no parallelism field, and JobEditorDialog therefore offers none. A nightly job against 200 devices at ~10s each runs 30+ minutes when it could finish in ~2.",
+ "recommendation": "Add ParallelHostCount to JobDefinition (default 1 for backward compatibility), surface it in JobEditorDialog next to the existing Stop-on-error option, and pass it into FolderExecutionOptions in ExecuteFolderJobAsync. For single-preset jobs, either route them through ExecuteFolderAsync with a one-entry preset dictionary (inherits batching, progress, and stop-on-first-error for free) or add the same batching to ExecuteAsync/ExecuteScriptAsync.",
+ "user_benefit": "Scheduled fleet jobs finish in minutes instead of hours, and the scheduler reaches feature parity with what the user can already do interactively — important since unattended runs are exactly where long sequential walls hurt most (maintenance windows).",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "737-744",
+   "note": "FolderExecutionOptions built without ParallelHostCount; stays 1"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "687",
+   "note": "Preset jobs use ExecutePresetAsync — sequential host loop"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\JobDefinition.cs",
+   "lines": "229-235",
+   "note": "Job model has FolderExecutionMode + StopOnError but no parallel-host knob"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "434-451, 584-597, 636",
+   "note": "ExecuteAsync/ExecuteScriptAsync iterate hosts strictly sequentially; only ExecuteFolderAsync batches, gated on ParallelHostCount"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

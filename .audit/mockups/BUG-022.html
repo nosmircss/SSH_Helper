@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>BUG-022 — Deleting a running job</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+  .cols{display:flex;gap:14px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{color:#ff5c5c;font-weight:600}
+  .cap .ok{color:#2bd97c;font-weight:600}
+  .dlg{background:#11151d;border:1px solid #1c2330;border-radius:6px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+  .tbar{background:#161b25;border-bottom:1px solid #1c2330;padding:6px 10px;display:flex;justify-content:space-between;color:#8294a8;font-size:11px}
+  .tbar .x{color:#5b6b7e}
+  .bod{padding:12px 12px 10px}
+  .bod p{margin:0 0 10px;line-height:1.5}
+  .jname{color:#4cc9f0}
+  .btns{display:flex;gap:8px;justify-content:flex-end;padding:10px 12px;border-top:1px solid #1c2330;background:#0e121a}
+  .btn{border:1px solid #2a3447;background:#1a2231;color:#c9d4e3;border-radius:4px;padding:5px 14px;font:inherit;font-size:11px}
+  .btn.danger{border-color:#7a2e2e;background:#3a1820;color:#ff9d9d}
+  .btn.safe{border-color:#2a3447}
+  .warn{display:flex;gap:8px;background:#2a1d10;border:1px solid #5c4018;border-radius:4px;padding:8px 10px;margin:0 0 10px;color:#ffb454;line-height:1.45}
+  .warn .ic{flex:0 0 auto}
+  .runrow{background:#0e121a;border:1px solid #1c2330;border-radius:4px;padding:7px 10px;margin-bottom:10px;font-size:11px;color:#8294a8}
+  .runrow .live{color:#2bd97c}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#2bd97c;margin-right:5px;box-shadow:0 0 6px #2bd97c}
+  .fall{margin-top:10px}
+  .fall .cap{margin-bottom:4px}
+  .fout{border-left:2px solid #ff5c5c;padding-left:9px;margin:0;list-style:none}
+  .fout li{margin:5px 0;line-height:1.45;color:#8294a8;font-size:11px}
+  .fout li b{color:#ff5c5c;font-weight:600}
+  code{color:#9fb6cc;background:#141a24;border:1px solid #1c2330;border-radius:3px;padding:0 4px;font-size:11px}
+  .note{margin-top:8px;font-size:10.5px;color:#8294a8;line-height:1.5}
+  .note .ok{color:#2bd97c}
+</style></head>
+<body>
+<div class="cols">
+
+  <div class="col">
+    <p class="cap">Before — <b>delete ignores the live run</b></p>
+    <div class="dlg">
+      <div class="tbar"><span>Delete Job</span><span class="x">✕</span></div>
+      <div class="bod">
+        <p>Delete job '<span class="jname">Nightly FortiGate config backup</span>'?</p>
+      </div>
+      <div class="btns"><button class="btn danger">Yes</button><button class="btn">No</button></div>
+    </div>
+    <div class="fall">
+      <p class="cap">What actually happens (job is mid-run)</p>
+      <ul class="fout">
+        <li><b>Zombie run:</b> SSH keeps executing against all 18 hosts (10.20.4.11&hellip;.28) — the row is gone, so Cancel no longer exists.</li>
+        <li><b>Orphan history:</b> on finish, <code>job-history/&lt;id&gt;/</code> is recreated right after it was wiped; nothing can ever delete it.</li>
+        <li><b>Resurrection:</b> a One-Time job is <code>Save()</code>d back into <code>jobs.json</code> — hosts, credentials and all.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col">
+    <p class="cap">After — <span class="ok">running-aware confirmation</span></p>
+    <div class="dlg">
+      <div class="tbar"><span>Delete Job</span><span class="x">✕</span></div>
+      <div class="bod">
+        <div class="runrow"><span class="dot"></span><span class="live">Running</span> &nbsp;7 / 18 hosts done &middot; started 02:00:14 &middot; fw-edge-07 in progress</div>
+        <p>'<span class="jname">Nightly FortiGate config backup</span>' is currently executing.</p>
+        <div class="warn"><span class="ic">⚠</span><span>Deleting now will cancel the in-flight run on the remaining 11 hosts before the job and its history are removed.</span></div>
+      </div>
+      <div class="btns"><button class="btn danger">Cancel run and delete</button><button class="btn safe">Keep job</button></div>
+    </div>
+    <p class="note">Plus service-side hardening: <span class="ok">HandlePostExecution</span> re-fetches via <code>Get(job.Id)</code> and skips <code>Save</code> when null (same pattern CompleteJob already uses), and history writes are skipped for deleted ids — so even a race can't resurrect the job or its history dir.</p>
+  </div>
+
+</div>
+</body></html>

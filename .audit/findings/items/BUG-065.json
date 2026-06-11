@@ -1,0 +1,31 @@
+{
+ "id": "BUG-065",
+ "title": "Corrupt history index orphans every run payload and the next index write clobbers the good index backup",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "M",
+ "area": "persistence-config",
+ "lens": "data-integrity",
+ "existing_state": "history.index.json is written atomically WITH a .bak (Services/HistoryStorageService.cs:609-613 -> JsonFileWriter.WriteJsonAtomic createBackup:true), but ReadIndexDocument never uses that backup: on a parse failure it copies the corrupt file to a timestamped .corrupt (HistoryStorageService.cs:602-606, :736-737 — copy, not move, so the corrupt file stays at the index path) and returns a fresh empty index. Two consequences: (1) all history/{id}.json payloads remain on disk but become permanently invisible — nothing rescans the run folder (only DeleteAll sweeps it, :518-524); (2) the next index write — which happens on the very next run save or delete — calls File.Replace(temp, index, index.bak) (Utilities/JsonFileWriter.cs:40), moving the still-corrupt index over the last good .bak, destroying the only file that could have restored the list. Per-run load failures are also indistinguishable: TryLoadRunPayload swallows every exception into `return false` (:92-96), so locked vs corrupt vs missing all render as the same generic failure.",
+ "recommendation": "In ReadIndexDocument's catch: first try history.index.json.bak before resetting to empty, and back up the corrupt file with useMove:true so it can't be re-promoted into .bak. Add an orphan-reconciliation pass (on empty-index load, scan history/*.json and rebuild entries from payload Id + file mtime — ParseCreatedAtUtc already exists for label-derived timestamps). Optionally log the swallowed exception in TryLoadRunPayload so locked-file vs corrupt-file failures are diagnosable.",
+ "user_benefit": "One corrupted index file no longer silently erases the entire execution-history list while the data still sits on disk unrecoverable.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\HistoryStorageService.cs",
+   "lines": "591-613",
+   "note": "corrupt index -> .corrupt copy + empty index; .bak written but never read"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JsonFileWriter.cs",
+   "lines": "34-41",
+   "note": "File.Replace promotes the still-corrupt index into .bak on next write"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\HistoryStorageService.cs",
+   "lines": "92-96, 510-528",
+   "note": "exception-swallowing payload load; only DeleteAll ever sweeps orphans"
+  }
+ ]
+}

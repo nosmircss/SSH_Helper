@@ -1,0 +1,26 @@
+{
+ "id": "ENH-035",
+ "title": "Retry is fixed-linear only — no backoff, no retry-on-pattern, no max elapsed time",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "ux",
+ "existing_state": "The retry loop (ScriptExecutor.cs:445-494) supports exactly two knobs: `retry: N` extra attempts and `retry_delay` as a fixed integer number of seconds (default 1, applied identically between every attempt at ScriptExecutor.cs:485-489). It retries on ANY failure — there is no way to retry only on transient errors (e.g. \"connection refused\", timeout) while failing fast on auth or syntax errors, no exponential backoff or jitter (with 200 hosts retrying in lockstep against a shared TACACS/RADIUS or jump host, fixed-interval hammering is the worst pattern), and no cap on total elapsed time. Ansible's `retries`/`delay`/`until` and every mature HTTP client (backoff + jitter) set the expectation here.",
+ "recommendation": "Extend the step-root retry options: `retry_backoff: exponential` (factor 2, capped by `retry_max_delay`), optional small jitter, `retry_if: <pattern-or-condition>` evaluated against `_last_error`/last output to gate which failures are retryable (reuse ExpressionEvaluator so `retry_if: _last_error contains \"timed out\"` works), and `retry_until: <condition>` for Ansible-style success polling. Parse them next to the existing retry keys (ScriptParser.cs:988-996), validate non-negative like retry/retry_delay already are, and apply in the ExecuteStepAsync loop.",
+ "user_benefit": "Flaky-WAN device fleets are the core use case; retrying only transient failures with backoff turns overnight job runs from \"rerun the failures by hand in the morning\" into self-healing runs without hammering shared infrastructure.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs",
+   "lines": "445-494",
+   "note": "retry loop: any-failure retry, fixed integer-seconds delay only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs",
+   "lines": "988-996",
+   "note": "only retry/retry_delay keys exist"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

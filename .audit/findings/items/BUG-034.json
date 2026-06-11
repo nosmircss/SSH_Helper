@@ -1,0 +1,31 @@
+{
+ "id": "BUG-034",
+ "title": "Deleting one wire silently drops every downstream block from the exported YAML — only the first orphan gets a warning",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "flowcanvas-bridge",
+ "lens": "data-integrity",
+ "existing_state": "Export order is built by walking edges from the Start block (FlowCanvasBridge.cs:1126-1137, BuildChain at 1696-1705); any node not reached is excluded from the YAML. The 'unreachable node' warning at FlowCanvasBridge.cs:1140-1152 only fires when the node ALSO has zero incoming edges (`!visited.Contains(nid) && !incomingCount.ContainsKey(nid)` at line 1145). So if a user deletes the wire between step 3 and step 4 of a 10-step preset and hits Run/Apply, only the orphan-chain head (step 4) gets a warning; steps 5-10 have incoming edges (from other orphans) and are dropped with NO diagnostic at all. The diagnostic is Warning-level, so export still succeeds (Success = no errors, FlowCanvasBridge.cs:1382-1385) and Form1.ApplyFlowCanvasGraph overwrites the editor text with the truncated YAML (Form1.cs:6932, 6966-6969). The preset layout saved at Form1.cs:6989-7001 stores only positions/comments — block content lives in the YAML snippets — so once the canvas reloads from the truncated YAML, the dropped steps are unrecoverable.",
+ "recommendation": "In ExportGraphToYaml, warn for EVERY excluded executable node, not just edge-less ones: compute the orphan set as all non-hidden, non-child, non-comment nodes absent from `visited` and emit one diagnostic each (or one grouped diagnostic listing them). Drop the `!incomingCount.ContainsKey(nid)` clause at FlowCanvasBridge.cs:1145. Consider escalating to Error severity (blocking apply) when the orphan set contains snippet-bearing top-level steps, or have Form1 require an explicit confirmation before overwriting txtCommand when any node was excluded.",
+ "user_benefit": "Prevents silent loss of script steps from a single accidental edge deletion — today most of a preset can vanish from the YAML with one easy-to-miss warning about a single node.",
+ "mockup_idea": "Before/after of the apply flow: 'before' shows the current single toast warning naming one node id while 9 blocks quietly disappear from the YAML preview; 'after' shows a blocking confirmation dialog listing all excluded blocks by label with Keep-in-YAML / Remove choices.",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "1126-1152",
+   "note": "chain built from Start only; warning gated on having zero incoming edges, so downstream orphans are silently excluded"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "1696-1705",
+   "note": "BuildChain DFS — defines `visited`"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "6932, 6966-6969",
+   "note": "graphChanged=true (an edge delete is a change) overwrites txtCommand with the truncated YAML; warnings do not block"
+  }
+ ]
+}

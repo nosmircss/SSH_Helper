@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>BUG-030 — interactive window errors vanish</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+  h1{font-size:12px;margin:0 0 2px;color:#c9d4e3;font-weight:600}
+  .sub{color:#8294a8;font-size:11px;margin:0 0 10px}
+  .cols{display:flex;gap:10px}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 4px}
+  .cap b{font-weight:600}
+  .before .cap b{color:#ffb454}.after .cap b{color:#2bd97c}
+  .panel{border:1px solid #1c2330;border-radius:6px;background:#0d1118;overflow:hidden}
+  .tbar{background:#11161f;border-bottom:1px solid #1c2330;padding:4px 8px;font-size:10px;color:#8294a8}
+  .out{padding:7px 8px;font-size:10.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+  .t{color:#5d6e82}
+  .ok{color:#2bd97c}.err{color:#ff5c5c}.run{color:#4cc9f0}.mut{color:#8294a8}
+  .errline{color:#ff5c5c;background:rgba(255,92,92,.08);display:block;border-left:2px solid #ff5c5c;padding-left:6px;margin-left:-8px}
+  .ghost{border:1px dashed #2a3445;border-radius:5px;color:#5d6e82;font-size:10px;padding:6px 8px;margin:6px 0;text-align:center}
+  .note{font-size:10px;color:#ffb454;margin-top:5px;line-height:1.45}
+  .after .note{color:#2bd97c}
+  .sum{border-top:1px solid #1c2330;padding:5px 8px;font-size:10.5px}
+  .pill{display:inline-block;border-radius:3px;padding:0 6px;font-size:10px}
+  .pill.g{background:rgba(43,217,124,.15);color:#2bd97c;border:1px solid rgba(43,217,124,.4)}
+  .pill.r{background:rgba(255,92,92,.12);color:#ff5c5c;border:1px solid rgba(255,92,92,.4)}
+  .foot{margin-top:10px;font-size:10px;color:#8294a8;border-top:1px solid #1c2330;padding-top:7px;line-height:1.5}
+  .foot code{color:#4cc9f0}
+</style></head><body>
+<h1>BUG-030 · Interactive window errors vanish; step still reports success</h1>
+<p class="sub">Script <span style="color:#4cc9f0">fw-maintenance.yaml</span> &rarr; 10.20.4.17 (fw-edge-01) — SSH drops mid-session during an <b>interactive:</b> step (window mode, no <b>command:</b>)</p>
+
+<div class="cols">
+  <div class="col before">
+    <p class="cap"><b>BEFORE</b> — window closes silently, run stays green</p>
+    <div class="panel">
+      <div class="tbar">Run Output</div>
+      <div class="out"><span class="t">[14:02:11]</span> <span class="ok">&#10003;</span> step 1  send: get system status
+<span class="t">[14:02:12]</span> <span class="ok">&#10003;</span> step 2  send: config system ha
+<span class="t">[14:02:12]</span> <span class="run">&#9655;</span> step 3  interactive: "Verify HA failover" — window opened</div>
+      <div class="ghost">[ terminal window — vanishes mid-session, no message shown ]</div>
+      <div class="out"><span class="t">[14:02:31]</span> <span class="ok">&#10003;</span> step 3  interactive  (19.2s)
+<span class="t">[14:02:31]</span> <span class="err">&#10007;</span> step 4  send: diagnose sys ha status
+<span class="t">          </span><span class="mut">session 'fw-edge-01' is not connected</span></div>
+      <div class="sum"><span class="pill g">Step 3: success</span> <span class="mut">close_reason: error — buried in history tab</span></div>
+    </div>
+    <p class="note">Rebex exception &rarr; <b>AppendOutput()</b> no-op &rarr; <b>Ok()</b> regardless of close reason. Failure gets blamed on step 4.</p>
+  </div>
+
+  <div class="col after">
+    <p class="cap"><b>AFTER</b> — real error surfaces, step fails correctly</p>
+    <div class="panel">
+      <div class="tbar">Run Output</div>
+      <div class="out"><span class="t">[14:02:11]</span> <span class="ok">&#10003;</span> step 1  send: get system status
+<span class="t">[14:02:12]</span> <span class="ok">&#10003;</span> step 2  send: config system ha
+<span class="t">[14:02:12]</span> <span class="run">&#9655;</span> step 3  interactive: "Verify HA failover" — window opened
+<span class="errline"><span class="t">[14:02:31]</span> &#10007; step 3  interactive step failed: The SSH connection
+           was closed by the remote host. (connection lost)</span><span class="mut">          close_reason: error · session 'fw-edge-01'</span></div>
+      <div class="sum"><span class="pill r">Step 3: failed</span> <span class="mut">run stopped — steps 4–6 not executed</span></div>
+    </div>
+    <p class="note">Close reason <b>error</b> &rarr; step failure with the actual exception text; <b>disconnected</b> at least emits a red output line — mirroring the existing capture-mode checks.</p>
+  </div>
+</div>
+
+<p class="foot">Fix (small): in <code>RunSeparateAsync</code>/<code>RunSharedAsync</code>, stop returning <code>Ok()</code> when close reason is error/disconnected (capture mode already does this), and route the <code>[interactive-error]</code> text into <code>context.EmitOutput(.., Error)</code> instead of the dead form sink.</p>
+</body></html>

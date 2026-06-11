@@ -1,0 +1,104 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace;margin:12px}
+.cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 4px}
+.cap b{font-weight:700}
+.row{display:flex;gap:10px;align-items:flex-start}
+.panel{flex:1;min-width:0}
+table{border-collapse:collapse;width:100%;background:#0e1219}
+th{background:#141a26;color:#8294a8;font-weight:600;font-size:9px;text-align:left}
+th,td{border:1px solid #1c2330;padding:3px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+td{color:#c9d4e3}
+.ip{color:#4cc9f0}
+.blank{color:#8294a8;font-style:italic}
+.bad{background:rgba(255,92,92,.12);color:#ff5c5c}
+.good{background:rgba(43,217,124,.10)}
+.keep{background:rgba(255,180,84,.10);color:#ffb454}
+.note{font-size:9px;color:#8294a8;margin:4px 0 0;line-height:1.5}
+.note .r{color:#ff5c5c}.note .g{color:#2bd97c}.note .a{color:#ffb454}.note .c{color:#4cc9f0}
+.shift{color:#ff5c5c;font-size:9px}
+h1{font-size:12px;margin:0 0 2px;color:#c9d4e3;font-weight:700}
+.sub{font-size:9px;color:#8294a8;margin:0 0 10px}
+.divider{border-top:1px solid #1c2330;margin:12px 0 8px}
+code{color:#ffb454}
+.onecell{white-space:pre-line;line-height:1.4}
+.b-red{border-left:2px solid #ff5c5c}.b-green{border-left:2px solid #2bd97c}.b-cyan{border-left:2px solid #4cc9f0}
+.panel.b-red,.panel.b-green,.panel.b-cyan{padding-left:8px}
+</style></head><body>
+
+<h1>BUG-016 &nbsp;&mdash;&nbsp; Host grid paste drops blank lines &rarr; credentials shift onto the wrong hosts</h1>
+<p class="sub">Pasting a <code>password</code> column from Excel next to existing Host_IP rows. Row 3 (lab-r1, decommissioned) has a blank cell.</p>
+
+<div class="row">
+  <div class="panel b-cyan">
+    <p class="cap"><b>Source</b> &mdash; Excel column copied</p>
+    <table>
+      <tr><th>password</th></tr>
+      <tr><td>Sw1tch#Edge1</td></tr>
+      <tr><td>C0re!Aa9</td></tr>
+      <tr><td class="blank">(blank)</td></tr>
+      <tr><td>D1st$wB4</td></tr>
+      <tr><td>Edge2#Fw!7</td></tr>
+    </table>
+    <p class="note">Clipboard TSV contains an <span class="a">empty line</span> for the blank cell.</p>
+  </div>
+
+  <div class="panel b-red">
+    <p class="cap"><b>Before</b> &mdash; blank line silently removed</p>
+    <table>
+      <tr><th>Host_IP</th><th>password</th></tr>
+      <tr><td class="ip">10.20.0.1</td><td class="good">Sw1tch#Edge1</td></tr>
+      <tr><td class="ip">10.20.0.2</td><td class="good">C0re!Aa9</td></tr>
+      <tr><td class="ip">10.20.0.3</td><td class="bad">D1st$wB4 <span class="shift">&uarr;1</span></td></tr>
+      <tr><td class="ip">10.20.0.4</td><td class="bad">Edge2#Fw!7 <span class="shift">&uarr;1</span></td></tr>
+      <tr><td class="ip">10.20.0.5</td><td class="bad blank">(missing)</td></tr>
+    </table>
+    <p class="note"><span class="r">Every password below the gap lands one host too high.</span> The job runs &mdash; against the wrong devices, with no warning.</p>
+  </div>
+
+  <div class="panel b-green">
+    <p class="cap"><b>After fix</b> &mdash; empty line kept as empty cell</p>
+    <table>
+      <tr><th>Host_IP</th><th>password</th></tr>
+      <tr><td class="ip">10.20.0.1</td><td class="good">Sw1tch#Edge1</td></tr>
+      <tr><td class="ip">10.20.0.2</td><td class="good">C0re!Aa9</td></tr>
+      <tr><td class="ip">10.20.0.3</td><td class="keep">(blank kept)</td></tr>
+      <tr><td class="ip">10.20.0.4</td><td class="good">D1st$wB4</td></tr>
+      <tr><td class="ip">10.20.0.5</td><td class="good">Edge2#Fw!7</td></tr>
+    </table>
+    <p class="note"><span class="g">Row alignment preserved</span> &mdash; split on any line ending, keep interior blanks, trim only the trailing newline.</p>
+  </div>
+</div>
+
+<div class="divider"></div>
+<p class="cap"><b>Second flaw</b> &mdash; main grid splits only on <code>\r\n</code>: bare-LF clipboards (VS Code, WSL, browsers) collapse entirely</p>
+
+<div class="row">
+  <div class="panel b-red">
+    <p class="cap">Before &mdash; whole host list in one cell</p>
+    <table>
+      <tr><th>Host_IP</th></tr>
+      <tr><td class="bad onecell">10.20.0.1
+10.20.0.2
+10.20.0.3</td></tr>
+      <tr><td class="blank">&nbsp;</td></tr>
+      <tr><td class="blank">&nbsp;</td></tr>
+    </table>
+  </div>
+  <div class="panel b-green">
+    <p class="cap">After fix &mdash; one host per row</p>
+    <table>
+      <tr><th>Host_IP</th></tr>
+      <tr><td class="ip good">10.20.0.1</td></tr>
+      <tr><td class="ip good">10.20.0.2</td></tr>
+      <tr><td class="ip good">10.20.0.3</td></tr>
+    </table>
+  </div>
+  <div class="panel">
+    <p class="cap">Fix (both paste paths)</p>
+    <p class="note"><code>text.Split(new[]{"\r\n","\n","\r"},<br>&nbsp;&nbsp;StringSplitOptions.None)</code><br><br>
+    Plus: <span class="c">try/finally</span> around the <code>AllowUserToAddRows</code> toggle, and stop skipping empty rows in all-selected copy so round-trips stay position-faithful.</p>
+  </div>
+</div>
+
+</body></html>

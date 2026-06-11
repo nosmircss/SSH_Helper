@@ -1,0 +1,68 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>UX-016 mockup</title><style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{color:#4cc9f0;font-weight:600}
+  .win{border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden;margin-bottom:16px}
+  .menubar{display:flex;gap:14px;padding:5px 10px;background:#11161f;border-bottom:1px solid #1c2330;color:#8294a8;font-size:11px}
+  .menubar span:first-child{color:#c9d4e3}
+  .body{padding:10px 12px;min-height:54px}
+  .ghost{color:#8294a8;font-size:11px;font-style:italic}
+  .statusbar{display:flex;gap:18px;padding:4px 10px;background:#11161f;border-top:1px solid #1c2330;color:#8294a8;font-size:11px}
+  .dlg{margin:8px 0 2px;border:1px solid #1c2330;border-radius:4px;background:#10141c;max-width:470px}
+  .dlg-t{padding:4px 8px;font-size:10px;color:#8294a8;border-bottom:1px solid #1c2330;background:#131923}
+  table{border-collapse:collapse;width:100%;font-size:11px}
+  td,th{padding:3px 8px;text-align:left;border-bottom:1px solid #161d29}
+  th{color:#8294a8;font-weight:400;font-size:10px}
+  tr:last-child td{border-bottom:0}
+  .ok{color:#2bd97c}.skip{color:#ffb454}.dim{color:#8294a8}
+  .anno{color:#ffb454;font-size:10px;margin-top:7px}
+  .anno .arr{color:#8294a8}
+  .banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 10px;background:#1d1708;border-bottom:1px solid #4d3a10;border-left:3px solid #ffb454}
+  .warn{color:#ffb454;font-size:14px;line-height:1}
+  .btxt{flex:1 1 300px;font-size:11px;line-height:1.5}
+  .btxt b{color:#ffb454;font-weight:600}
+  .btxt .job{color:#c9d4e3}
+  .btns{display:flex;gap:6px}
+  .btn{padding:3px 9px;border-radius:3px;border:1px solid #1c2330;background:#131923;color:#c9d4e3;font-size:11px;white-space:nowrap}
+  .btn.pri{border-color:#2bd97c;color:#2bd97c}
+  .btn.sec{border-color:#274457;color:#4cc9f0}
+  .miss{color:#ffb454}
+</style></head><body>
+
+<div class="cap"><b>Before</b> — startup after laptop was off all weekend: silence</div>
+<div class="win">
+  <div class="menubar"><span>SSH Helper</span><span>File</span><span>Presets</span><span>Jobs</span><span>Tools</span><span>Help</span></div>
+  <div class="body">
+    <div class="ghost">Main window — no banner, no toast, no hint that anything was missed.</div>
+    <div class="dlg">
+      <div class="dlg-t">Job List &gt; Nightly Backup &gt; History &nbsp;(separate dialog, 3 clicks deep)</div>
+      <table>
+        <tr><th>Scheduled</th><th>Result</th><th>Hosts</th></tr>
+        <tr><td>2026-06-09 02:00</td><td class="skip">SKIPPED (3)</td><td class="dim">&mdash;</td></tr>
+        <tr><td>2026-06-06 02:00</td><td class="ok">Success</td><td>fw-edge-01, 10.20.4.11 +2</td></tr>
+        <tr><td>2026-06-05 02:00</td><td class="ok">Success</td><td>fw-edge-01, 10.20.4.11 +2</td></tr>
+      </table>
+    </div>
+    <div class="anno">&#9650; only discovery path: Jobs <span class="arr">&rarr;</span> Job List <span class="arr">&rarr;</span> select that job <span class="arr">&rarr;</span> notice the orange row. Cert Check's 2 misses hide under a different job.</div>
+  </div>
+  <div class="statusbar"><span>Scheduler: 3 active</span><span>Connected: 0</span></div>
+</div>
+
+<div class="cap"><b>After</b> — one-shot banner under the menu bar + status-bar suffix</div>
+<div class="win">
+  <div class="menubar"><span>SSH Helper</span><span>File</span><span>Presets</span><span>Jobs</span><span>Tools</span><span>Help</span></div>
+  <div class="banner">
+    <span class="warn">&#9888;</span>
+    <span class="btxt"><b>5 scheduled runs were missed</b> while SSH Helper was closed (2 jobs):<br>
+      <span class="job">Nightly Backup</span> <span class="miss">&times;3</span> <span class="dim">last due Mon 02:00</span> &nbsp;&middot;&nbsp;
+      <span class="job">Cert Check</span> <span class="miss">&times;2</span> <span class="dim">last due Sun 06:00</span></span>
+    <span class="btns"><span class="btn pri">Run missed jobs now</span><span class="btn sec">Open Scheduler</span><span class="btn">Dismiss</span></span>
+  </div>
+  <div class="body" style="min-height:34px">
+    <div class="ghost">Run now routes through existing RunTrackedJobNowAsync; missed runs are still never auto-executed &mdash; the user just finally gets the choice.</div>
+  </div>
+  <div class="statusbar"><span>Scheduler: 3 active <span class="miss">(5 missed)</span></span><span>Connected: 0</span></div>
+</div>
+
+</body></html>

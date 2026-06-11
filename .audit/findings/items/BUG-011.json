@@ -1,0 +1,26 @@
+{
+ "id": "BUG-011",
+ "title": "exit command silently reports Success for bare failure messages, and variable substitution can flip the exit status",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "scripting-commands-a",
+ "lens": "correctness",
+ "existing_state": "ExitCommand defaults the status to Success for any message that doesn't start with an English keyword: `exit: \"Could not reach host\"` produces `[EXIT Success] Could not reach host` and CommandResult.Exit(Success) (Services/Scripting/Commands/ExitCommand.cs:21-22, fall-through else at 61-64). Worse, variables are substituted BEFORE keyword parsing (line 18, parse at 24-60), so the status is derived from runtime data: `exit: \"{{summary}}\"` where summary happens to start with 'error ', 'fail '/'failure ', or 'success ' flips the exit status to whatever the data says — e.g. a device output of 'error count: 0' exits the script with status Error, while an intended failure message of 'failed to apply config' typed without the exact keyword prefix exits Success. In a scheduled-jobs / multi-host fleet context this directly mislabels run results (job history, notifications).",
+ "recommendation": "In ExitCommand.ExecuteAsync, parse the status keyword from the RAW step.Exit text first, and only substitute variables into the remaining message portion. Decide the bare-message default explicitly: either keep Success but emit a parser/editor warning for `exit: <message>` without a status keyword, or treat keyword-less exit as Failure (safer for the 'abort with reason' mental model). Also support the mapping form's explicit `status:` as authoritative so substitution can never affect it.",
+ "user_benefit": "Scheduled jobs and fleet runs stop reporting success on failure paths (and vice versa) — exit status becomes deterministic from the script text instead of depending on what a runtime variable happens to start with.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExitCommand.cs",
+   "lines": "15-22",
+   "note": "substitution at 18, default status Success at 21"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExitCommand.cs",
+   "lines": "24-64",
+   "note": "keyword prefixes parsed from the already-substituted text; bare message falls through to Success"
+  }
+ ]
+}

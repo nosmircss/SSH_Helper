@@ -1,0 +1,31 @@
+{
+ "id": "BUG-019",
+ "title": "EnvironmentDialog: Delete/Rename/Import write to disk instantly — the Cancel button does not cancel anything",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "dialogs-general",
+ "lens": "data-integrity",
+ "existing_state": "The dialog presents a standard Save/Cancel pair (EnvironmentDialog.cs:249-250, _btnCancel has DialogResult.Cancel), but every action button mutates persistent state at click time: BtnDelete_Click calls _environmentService.DeleteEnvironment + _presetManager.ClearFolderBaseEnvironment (EnvironmentDialog.cs:496-501), BtnRename_Click calls RenameEnvironment + RenameFolderBaseEnvironment (470-473), BtnImport_Click calls ImportEnvironment with overwriteExisting (595), and every list selection change pushes description/color/variables through UpdateEnvironmentDetails (403-413 -> 802-823). All of these end in ConfigurationService.SaveEnvironmentState which writes config.json immediately (Services/EnvironmentService.cs:207, 323-326). BtnSave_Click's only real effect is setting SelectedEnvironmentName so Form1 switches environments (EnvironmentDialog.cs:639-643; Form1.cs:1941-1944). A user who deletes or renames an environment and then clicks Cancel has still permanently destroyed it — all its variables, description, and vault-profile binding are gone with no undo and no indication that Cancel was ineffective.",
+ "recommendation": "Make the dialog operate on an in-memory working copy (clone of the environment map) and commit through EnvironmentService only in BtnSave_Click; Cancel then discards the working copy. If a full staging refactor is too invasive, the minimal fix is (a) remove the Cancel button and relabel Save to Close so the UI stops lying, and (b) keep the per-action confirmation prompts. Either way the current Save/Cancel pair must not remain as-is.",
+ "user_benefit": "Prevents permanent, unrecoverable loss of an environment (and its variables) by a user who reasonably believes Cancel reverts their session.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\EnvironmentDialog.cs",
+   "lines": "481-507, 458-479, 595, 249-250, 639-643",
+   "note": "Destructive ops fire immediately; Save only sets SelectedEnvironmentName; Cancel closes with DialogResult.Cancel and reverts nothing"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\EnvironmentService.cs",
+   "lines": "187-213, 301-327",
+   "note": "DeleteEnvironment and UpdateEnvironmentDetails both call SaveEnvironmentState (disk write) synchronously"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "1935-1957",
+   "note": "Form1 only consumes SelectedEnvironmentName on OK; Cancel path returns early"
+  }
+ ]
+}

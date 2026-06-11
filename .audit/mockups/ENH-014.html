@@ -1,0 +1,77 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+h1{font-size:13px;margin:0 0 2px;color:#c9d4e3;font-weight:600}
+.sub{color:#8294a8;font-size:11px;margin:0 0 10px}
+.cols{display:flex;gap:12px;align-items:flex-start}
+.panel{flex:1;min-width:0}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+.cap b{color:#c9d4e3;font-weight:600}
+.grid{border:1px solid #1c2330;border-radius:4px;overflow:visible;background:#0e1218}
+table{border-collapse:collapse;width:100%;font-size:11px}
+th{background:#121722;color:#8294a8;font-weight:600;text-align:left;padding:4px 7px;border-bottom:1px solid #1c2330}
+td{padding:4px 7px;border-bottom:1px solid #161c28;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.ip{color:#c9d4e3}
+.host{color:#8294a8}
+.res{font-weight:600}
+.ok{color:#2bd97c}.fail{color:#ff5c5c}.ssh{color:#4cc9f0}.port{color:#8294a8}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:0}
+.dot.g{background:#5b6b7d}.dot.b{background:#4cc9f0}
+.truth{color:#ffb454;font-style:italic;font-size:10px}
+.truth.fine{color:#3d4a5c}
+.note{font-size:10px;color:#8294a8;margin-top:6px;line-height:1.5}
+.note .amber{color:#ffb454}
+.legend{margin-top:10px;font-size:10px;color:#8294a8;display:flex;gap:14px;flex-wrap:wrap}
+.legend span{white-space:nowrap}
+.tipwrap{position:relative}
+.tip{position:absolute;left:96px;top:100%;margin-top:3px;z-index:9;background:#121722;border:1px solid #ff5c5c55;border-radius:4px;padding:5px 8px;font-size:10px;color:#c9d4e3;box-shadow:0 4px 14px #0008;white-space:nowrap}
+.tip:before{content:"";position:absolute;top:-5px;left:18px;border:5px solid transparent;border-bottom-color:#ff5c5c55;border-top:0}
+.tip b{color:#ff5c5c}
+.tip .diag{color:#8294a8;display:block;margin-top:2px}
+.menu{display:inline-block;background:#121722;border:1px solid #1c2330;border-radius:4px;padding:3px 0;font-size:10px;margin-top:8px}
+.menu div{padding:2px 12px;color:#8294a8}
+.menu div.new{color:#4cc9f0;background:#4cc9f01a}
+</style></head><body>
+<h1>ENH-014 — Test connection: TCP-only check vs real SSH login test</h1>
+<p class="sub">Grid right-click test paints the Host_IP cell — today a green cell only means port 22 answered.</p>
+<div class="cols">
+  <div class="panel">
+    <p class="cap"><b>Before</b> — "Test connection" (TCP only)</p>
+    <div class="grid"><table>
+      <tr><th>Host_IP</th><th>hostname</th><th>result</th></tr>
+      <tr><td class="ip">10.20.4.11</td><td class="host">fw-edge-01</td><td class="res ok">✓ OK · 9 ms</td></tr>
+      <tr><td class="ip">10.20.4.12</td><td class="host">sw-core-02</td><td class="res ok">✓ OK · 11 ms</td></tr>
+      <tr><td class="ip">10.20.4.17</td><td class="host">rtr-branch-07</td><td class="res ok">✓ OK · 14 ms</td></tr>
+      <tr><td class="ip">10.20.4.23</td><td class="host">ups-mgmt-03</td><td class="res ok">✓ OK · 8 ms</td></tr>
+      <tr><td class="ip">10.20.4.31</td><td class="host">sw-access-12</td><td class="res ok">✓ OK · 12 ms</td></tr>
+    </table></div>
+    <p class="note">All green — but at run time:<br>
+    <span class="amber">rtr-branch-07</span> rejects the password,
+    <span class="amber">ups-mgmt-03</span> is a telnet listener on 22,
+    <span class="amber">sw-access-12</span> has an unresolved vault_path.
+    Each failure surfaces one timeout at a time, mid-run.</p>
+  </div>
+  <div class="panel">
+    <p class="cap"><b>After</b> — "Test SSH login" (real connect path)</p>
+    <div class="grid"><table>
+      <tr><th>Host_IP</th><th>hostname</th><th>result</th></tr>
+      <tr><td class="ip">10.20.4.11</td><td class="host">fw-edge-01</td><td class="res ok">✓ Login OK · 142 ms</td></tr>
+      <tr><td class="ip">10.20.4.12</td><td class="host">sw-core-02</td><td class="res ok">✓ Login OK · 156 ms</td></tr>
+      <tr class="tipwrap"><td class="ip">10.20.4.17</td><td class="host">rtr-branch-07</td><td class="res fail">✕ Auth failed
+        <span class="tip"><b>Authentication failed for netops</b> (password rejected)
+        <span class="diag">SSH-2.0-Cisco-1.25 · kex curve25519-sha256 · tried: password</span></span>
+      </td></tr>
+      <tr><td class="ip">10.20.4.23</td><td class="host">ups-mgmt-03</td><td class="res port"><span class="dot g"></span>Port open · no SSH banner</td></tr>
+      <tr><td class="ip">10.20.4.31</td><td class="host">sw-access-12</td><td class="res ssh"><span class="dot b"></span>SSH OK · vault_path unresolved</td></tr>
+    </table></div>
+    <div class="menu"><div>Test connection</div><div class="new">Test SSH login</div></div>
+  </div>
+</div>
+<div class="legend">
+  <span><span class="dot g"></span>Port open (TCP only)</span>
+  <span><span class="dot b"></span><span class="ssh">SSH negotiated</span></span>
+  <span class="ok">✓ Authenticated</span>
+  <span class="fail">✕ Failed — tooltip carries negotiation diagnostics</span>
+</div>
+</body></html>

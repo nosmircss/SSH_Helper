@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX-009 — terminal disconnect handling</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;margin:12px;font:12px "Cascadia Code",Consolas,monospace}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{color:#ff5c5c;font-weight:600}.cap b.g{color:#2bd97c}
+  .row{display:flex;gap:12px;align-items:stretch;margin-bottom:16px}
+  .win{background:#0d1119;border:1px solid #1c2330;border-radius:6px;overflow:hidden;flex:1;min-width:0}
+  .tbar{display:flex;align-items:center;gap:8px;background:#131927;border-bottom:1px solid #1c2330;padding:5px 8px;font-size:11px;color:#c9d4e3;white-space:nowrap;overflow:hidden}
+  .tbar .btns{margin-left:auto;display:flex;gap:6px}
+  .tbar .btns span{width:9px;height:9px;border:1px solid #2a3447;border-radius:2px;display:inline-block}
+  .term{padding:8px 10px;line-height:1.45;white-space:pre;font-size:11px;overflow:hidden}
+  .p{color:#2bd97c}.out{color:#c9d4e3}.dim2{color:#8294a8}
+  .gone{flex:1;border:1px dashed #2a3447;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:#8294a8;text-align:center;padding:14px;font-size:11px}
+  .gone .x{font-size:20px;color:#3a4558}
+  .arrow{align-self:center;color:#ffb454;font-size:11px;text-align:center;flex:0 0 86px}
+  .faded .term{opacity:.55}
+  .strip{display:flex;align-items:center;gap:10px;background:#2a1216;border-top:1px solid #ff5c5c;padding:6px 10px;font-size:11px}
+  .strip .ic{color:#ff5c5c;font-weight:700}
+  .strip .msg{color:#c9d4e3;flex:1;min-width:0}
+  .strip .msg b{color:#ff5c5c;font-weight:600}
+  .btn{border:1px solid #2a3447;border-radius:4px;padding:3px 10px;background:#131927;color:#c9d4e3;font-size:11px;white-space:nowrap}
+  .btn.pri{border-color:#4cc9f0;color:#4cc9f0}
+  .note{color:#8294a8;font-size:10.5px;line-height:1.5;margin-top:6px}
+  .note code{color:#4cc9f0}
+  .tag{display:inline-block;border:1px solid #1c2330;border-radius:3px;padding:0 5px;color:#8294a8;font-size:10px;margin-left:6px}
+</style>
+</head>
+<body>
+
+<p class="cap">Before — <b>connection drops → window vanishes, error text discarded</b></p>
+<div class="row">
+  <div class="win">
+    <div class="tbar">192.168.10.40 - Interactive (separate)<span class="btns"><span></span><span></span><span></span></span></div>
+    <div class="term"><span class="p">fw-edge-01 #</span> get system status
+<span class="out">Version: FortiGate-100F v7.4.5,build2702
+Serial-Number: FG100FTK22001234</span>
+<span class="p">fw-edge-01 #</span> diagnose sys session stat
+<span class="out">misc info: session_count=18342 setup_rate=210</span>
+<span class="p">fw-edge-01 #</span> ▍</div>
+  </div>
+  <div class="arrow">network blip<br>──────▶<br><span class="dim2">Disconnected →<br>RequestCloseSafe()</span></div>
+  <div class="gone">
+    <span class="x">✕</span>
+    window closes silently
+    <span class="dim2">"[interactive-error] Connection was closed by the server."<br>→ AppendOutput (no-op) → discarded</span>
+  </div>
+</div>
+
+<p class="cap">After — <b class="g">screen preserved (read-only) + status strip with reconnect</b></p>
+<div class="win faded">
+  <div class="tbar">192.168.10.40 - Interactive (separate) - Disconnected (read-only)<span class="btns"><span></span><span></span><span></span></span></div>
+  <div class="term"><span class="p">fw-edge-01 #</span> get system status
+<span class="out">Version: FortiGate-100F v7.4.5,build2702
+Serial-Number: FG100FTK22001234</span>
+<span class="p">fw-edge-01 #</span> diagnose sys session stat
+<span class="out">misc info: session_count=18342 setup_rate=210</span>
+<span class="p">fw-edge-01 #</span></div>
+</div>
+<div class="win" style="margin-top:-1px;border-top:0;border-radius:0 0 6px 6px">
+  <div class="strip">
+    <span class="ic">⚠</span>
+    <span class="msg"><b>Connection lost:</b> server closed the connection (disconnected)</span>
+    <span class="btn pri">⟳ Reconnect</span>
+    <span class="btn">Close</span>
+  </div>
+</div>
+
+<p class="note">Last screen stays visible via the existing <code>EnableDetachedReadOnlyMode</code>; the four <code>[interactive-error]</code> emit sites route to the strip instead of the no-op.
+Shared-mode sessions show <i>"Session ended — close window"</i> (pooled session owns reconnect)<span class="tag">auto-close kept only for show_window:false capture</span></p>
+
+</body>
+</html>

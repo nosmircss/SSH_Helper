@@ -1,0 +1,31 @@
+{
+ "id": "PERF-004",
+ "title": "Every step completion ships the entire accumulated host transcript to the Flow Canvas (quadratic IPC churn on long runs)",
+ "category": "PERF",
+ "severity": "high",
+ "effort": "S",
+ "area": "flowcanvas-bridge",
+ "lens": "perf",
+ "existing_state": "When the Flow Canvas window is open, Form1.SshService_StepCompleted (Form1.cs:13620-13650) attaches variables = activeContext?.GetAllVariables() (Form1.cs:13636) to the execution-update message sent for every completed step. ScriptContext.GetAllVariables (Services/Scripting/ScriptContext.cs:606-618) injects _output = LastCommandOutput and _outputwindow = OutputWindowText (lines 615-616), where OutputWindowText (lines 488-496) returns the FULL pane-formatted transcript accumulated for the host so far. FlowCanvasForm.SendMessage (UI/FlowCanvasForm.cs:337-362) runs JsonConvert.SerializeObject on the whole payload per call and posts it cross-process via PostWebMessageAsJson, where React must JSON.parse it again. There is no truncation or size guard anywhere on this path. Net effect: total bytes shipped grow as O(steps x transcript size) — quadratic in run length. A loop issuing 500 sends with ~2KB output each means the final execution-update messages each carry 1MB+, and a single host's run pushes hundreds of MB of serialize/IPC/parse churn; multiply by per-host execution and per-iteration step events. Users see the canvas (and the app, since posting marshals to the shared UI thread) get progressively more sluggish during exactly the runs this preset-builder is for.",
+ "recommendation": "Strip _outputwindow (and consider capping _output and any individual value to a few KB with a truncation marker) from the variables payload built for execution-update — either filter in SshService_StepCompleted before sending, or add a ScriptContext.GetCanvasVariablesSnapshot() that excludes transcript pseudo-variables. Keep the full snapshot only for debug-paused (Form1.cs:13683), which is rare and genuinely needs inspection data. Optionally stop sending variables on every step entirely and only send when the variables panel is visible or on pause/branch events.",
+ "user_benefit": "Long multi-host script runs and big loops stop degrading the canvas and UI thread; memory/GC churn during runs drops by orders of magnitude on output-heavy scripts.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "13620-13650",
+   "note": "execution-update built per StepCompleted with variables = GetAllVariables(), no size guard"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptContext.cs",
+   "lines": "606-618, 488-496",
+   "note": "GetAllVariables injects _outputwindow = full accumulated host transcript (StringBuilder.ToString of the whole run so far)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/FlowCanvasForm.cs",
+   "lines": "337-362",
+   "note": "SendMessage serializes the full payload per call and posts via PostWebMessageAsJson (cross-process string copy)"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

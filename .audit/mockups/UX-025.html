@@ -1,0 +1,89 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;margin:12px;font:11px/1.45 "Cascadia Code",Consolas,monospace}
+.cap{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+.cap b{color:#ffb454;font-weight:600}.cap i{color:#2bd97c;font-style:normal;font-weight:600}
+.row{display:flex;gap:10px;margin-bottom:12px}
+.card{flex:1;border:1px solid #1c2330;border-radius:6px;background:#0e131b;overflow:hidden;min-width:0}
+.hd{font-size:9px;color:#8294a8;padding:4px 8px;border-bottom:1px solid #1c2330;background:#11161f}
+.note{font-size:9px;padding:4px 8px;border-top:1px solid #1c2330}
+.bad{color:#ff5c5c}.warn{color:#ffb454}.ok{color:#2bd97c}
+/* BEFORE: light-mode window with hardcoded dark bar */
+.lite{position:relative;background:#f5f6f8;color:#444;padding:6px 8px;height:84px;font-size:10px}
+.lite .ttl{color:#888;font-size:9px;margin-bottom:4px}
+.vsbar{position:absolute;top:4px;right:4px;display:flex;align-items:center;gap:4px;background:#252526;border:1px solid #454545;padding:3px 5px;border-radius:2px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+.vsin{background:#3c3c3c;color:#ccc;padding:1px 5px;font-size:9px;min-width:86px}
+.vsin s{color:#9e9e9e;text-decoration:none;float:right}
+.vsb{color:#ccc;font-size:9px;padding:0 2px}
+/* editor + output panes */
+.code{padding:6px 8px;font-size:10px;white-space:pre}
+.ln{color:#3d4a5c;margin-right:8px}
+.k{color:#4cc9f0}.s{color:#2bd97c}.v{color:#ffb454}
+.hl{background:rgba(255,180,84,.22);outline:1px solid rgba(255,180,84,.55);border-radius:2px}
+.cur{background:rgba(76,201,240,.3);outline:1px solid #4cc9f0;border-radius:2px}
+/* bespoke run-output search */
+.crude{display:flex;align-items:center;gap:6px;background:#161b24;padding:4px 6px;border-bottom:1px solid #1c2330}
+.crude input{background:#0b0e13;border:1px solid #3a4356;color:#c9d4e3;font:10px Consolas,monospace;padding:1px 5px;width:110px}
+.xbtn{border:1px solid #3a4356;color:#8294a8;font-size:9px;padding:0 5px}
+/* AFTER: unified bar */
+.bar{display:flex;align-items:center;gap:6px;background:#121826;border-bottom:1px solid #1c2330;padding:4px 6px}
+.inp{display:flex;align-items:center;gap:10px;background:#0b0e13;border:1px solid #4cc9f0;border-radius:3px;padding:1px 6px;font-size:10px}
+.cnt{color:#8294a8;font-size:9px}
+.tog{border:1px solid #2a3447;border-radius:3px;padding:0 4px;color:#8294a8;font-size:9px}
+.tog.on{color:#4cc9f0;border-color:#4cc9f0;background:rgba(76,201,240,.12)}
+.nav{color:#c9d4e3;font-size:10px;padding:0 2px}.dim{color:#8294a8}
+</style></head><body>
+
+<div class="cap"><b>Before</b> — three disconnected finds (and one missing)</div>
+<div class="row">
+ <div class="card">
+  <div class="hd">Main window · light mode · Ctrl+F</div>
+  <div class="lite"><div class="ttl">SSH Helper — Output</div>
+   [10.20.4.11] fw-edge-01: connected<br>[10.20.4.11] session opened, 2 cmds<br>[10.20.4.12] fw-edge-02: connected
+   <div class="vsbar"><span class="vsin">session<s>2 of 5</s></span><span class="vsb">Aa</span><span class="vsb">↑</span><span class="vsb">↓</span><span class="vsb">×</span></div>
+  </div>
+  <div class="note warn">FindDialog hardcodes VS Code dark — floats as a dark slab over the white app</div>
+ </div>
+ <div class="card">
+  <div class="hd">Script editor (Scintilla) · Ctrl+F</div>
+  <div class="code"><span class="ln">14</span><span class="k">- name:</span> <span class="s">Backup config</span>
+<span class="ln">15</span>  <span class="k">send:</span> <span class="s">"save {{<span class="v">backup_path</span>}}"</span>
+<span class="ln">16</span><span class="k">- if:</span> <span class="s">"{{exit_code}} == 0"</span>
+<span class="ln">17</span>  <span class="k">then:</span> …</div>
+  <div class="note bad">No find at all — Ctrl+F yanks focus to the <u>output</u> find; F3 too</div>
+ </div>
+ <div class="card">
+  <div class="hd">Run Output viewer · its own search</div>
+  <div class="crude"><input value="denied"><span class="dim" style="font-size:9px"></span><span class="xbtn">X</span></div>
+  <div class="code" style="font-size:9px">[10.20.4.11] Permission denied (publickey)
+[10.20.4.13] auth: denied for user svc-net</div>
+  <div class="note bad">Re-implemented from scratch: Enter-only · no counter · no Aa · no incremental</div>
+ </div>
+</div>
+
+<div class="cap"><i>After</i> — one themed find bar, routed by focus</div>
+<div class="row">
+ <div class="card">
+  <div class="hd">Ctrl+F in the script editor → searches the YAML</div>
+  <div class="bar"><span class="inp">backup_path<span class="cnt">2 of 3</span></span><span class="tog on">Aa</span><span class="tog">ab</span><span class="tog">.*</span><span class="nav">↑</span><span class="nav">↓</span><span class="nav dim">×</span></div>
+  <div class="code"><span class="ln">14</span><span class="k">- name:</span> <span class="s">Backup config</span>
+<span class="ln">15</span>  <span class="k">send:</span> <span class="s">"save {{<span class="hl">backup_path</span>}}"</span>
+<span class="ln">16</span><span class="k">- if:</span> <span class="s">"{{exit_code}} == 0"</span>
+<span class="ln">17</span>  <span class="k">then:</span>
+<span class="ln">18</span>    <span class="k">- log:</span> <span class="s">"saved {{<span class="cur">backup_path</span>}}"</span>
+<span class="ln">19</span>  <span class="k">else:</span>
+<span class="ln">20</span>    <span class="k">- send:</span> <span class="s">"ls {{<span class="hl">backup_path</span>}}"</span></div>
+  <div class="note ok">Highlight-all + Enter/Shift+Enter · Esc returns to editor · whole-word/regex finished, not hidden</div>
+ </div>
+ <div class="card">
+  <div class="hd">Same control in output pane &amp; Run Output viewer</div>
+  <div class="bar"><span class="inp">denied<span class="cnt">1 of 3</span></span><span class="tog">Aa</span><span class="tog">ab</span><span class="tog">.*</span><span class="nav">↑</span><span class="nav">↓</span><span class="nav dim">×</span></div>
+  <div class="code" style="font-size:10px">[10.20.4.11] Permission <span class="cur">denied</span> (publickey)
+[10.20.4.12] config saved /var/tmp/fw-edge-02.cfg
+[10.20.4.13] auth: <span class="hl">denied</span> for user svc-net
+[10.20.4.13] retry 2: <span class="hl">denied</span>, giving up
+[10.20.4.14] config saved /var/tmp/fw-edge-04.cfg</div>
+  <div class="note ok">One reusable bar, colors from DialogTheme — correct in light mode, identical shortcuts everywhere</div>
+ </div>
+</div>
+
+</body></html>

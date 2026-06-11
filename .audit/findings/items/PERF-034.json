@@ -1,0 +1,31 @@
+{
+ "id": "PERF-034",
+ "title": "Every dotnet build runs a full FlowCanvas npm build — no incrementality, and CI rebuilds it twice per release",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "models-samples-build",
+ "lens": "perf",
+ "existing_state": "The BuildFlowCanvas MSBuild target (SSH_Helper.csproj:95-97) runs npm run build (which is tsc && vite build, a full TypeScript compile + production bundle) BeforeTargets=BeforeBuild with no Inputs/Outputs, so MSBuild can never skip it as up-to-date. Every dotnet build, every F5 in the IDE, and every dotnet test (the test project references SSH_Helper, so building tests triggers it too) pays the full frontend build even when nothing under FlowCanvas/ changed. The only escape is remembering to pass -p:SkipFlowCanvasBuild=true manually. In CI, the release job runs two publishes back-to-back (.github/workflows/build-release.yml:84-87, standard + portable), and each independently re-runs the identical npm build — wasted minutes per release, and the two exes get different BuildTimestamp values (csproj:33-35) for the same tag.",
+ "recommendation": "Make the target incremental: add Inputs=@(FlowCanvasSources) (a glob over FlowCanvas/src/**, package.json, package-lock.json, vite.config.ts, index.html) and Outputs pointing at a stamp file the target touches after a successful npm build (e.g. FlowCanvas/dist/.buildstamp). MSBuild then skips the npm step when dist is newer than all sources. In build-release.yml, pass -p:SkipFlowCanvasBuild=true on the second (portable) publish since dist/ is already built — or rely on the new stamp. This removes tens of seconds from every inner-loop build with zero behavior change.",
+ "user_benefit": "The single biggest recurring time tax in the dev loop disappears: C#-only edits build at .NET speed instead of paying tsc+Vite every time, and release CI gets meaningfully faster.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SSH_Helper.csproj",
+   "lines": "95-97",
+   "note": "BuildFlowCanvas target: Exec npm run build, BeforeBuild, no Inputs/Outputs"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/.github/workflows/build-release.yml",
+   "lines": "84-87",
+   "note": "two dotnet publish invocations, each re-triggering the npm build"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SSH_Helper.csproj",
+   "lines": "33-35",
+   "note": "BuildTimestamp computed per build — the two release exes diverge"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

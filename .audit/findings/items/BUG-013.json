@@ -1,0 +1,36 @@
+{
+ "id": "BUG-013",
+ "title": "FortiGate parse 'sections' filter leaks excluded config into the result instead of skipping it",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "scripting-commands-b",
+ "lens": "correctness",
+ "existing_state": "`parse: { format: fortigate, sections: [...] }` is supposed to return only the listed sections. When a top-level `config` line fails the filter, the parser calls SkipConfigBlock (Services/Scripting/Parsers/FortiGateParser.cs:59-63) — but SkipConfigBlock is an empty placeholder (:248-252, the comment admits it does nothing). Only the `config` header line is skipped; every `set`/`edit`/`unset` line inside the excluded block then executes against the CURRENT context, which is the root result dict (:134-140, :103-132). So filtering `sections: [\"system interface\"]` on a full FortiGate config returns the wanted section PLUS a root-level soup of keys and edit-entries from every excluded section — and nested `config` lines inside the excluded block are themselves re-evaluated against the filter as if top-level (contextStack is 0), so fragments of excluded sections can appear under wrong names. Additionally, ShouldIncludeSection (:238-242) does bidirectional character-prefix matching (`filters.Any(f => path.StartsWith(f) || f.StartsWith(path))`), so a filter of \"sys\" matches \"system interface\", \"system admin\", etc. — no word-boundary check. Any script that branches on the parsed dictionary gets wrong data.",
+ "recommendation": "Replace the no-op SkipConfigBlock with real skipping: when a top-level section is filtered out, set a skipDepth counter and consume lines, incrementing on `config` and decrementing on `end`, until depth returns to zero — resuming normal parsing afterwards. Delete the dead ref-parameter signature. Fix ShouldIncludeSection to match on whole space-delimited tokens (e.g. filter must equal the path or be a token-boundary prefix: \"system\" matches \"system interface\" but \"sys\" does not).",
+ "user_benefit": "The sections filter actually does what it says — scripts that parse device configs get clean, correctly-scoped data instead of polluted root keys that silently corrupt downstream logic (foreach over interfaces, drift comparisons, etc.).",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Parsers\\FortiGateParser.cs",
+   "lines": "56-65",
+   "note": "filtered config line is 'skipped' by calling the no-op, then continue — only the header line is dropped"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Parsers\\FortiGateParser.cs",
+   "lines": "248-252",
+   "note": "SkipConfigBlock body is empty: 'This is a placeholder for future optimization'"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Parsers\\FortiGateParser.cs",
+   "lines": "238-242",
+   "note": "ShouldIncludeSection: bidirectional StartsWith at character level — 'sys' includes 'system interface'"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ParseCommand.cs",
+   "lines": "56-59",
+   "note": "polluted dict is stored directly into the 'into' variable and reported as success"
+  }
+ ]
+}

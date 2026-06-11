@@ -1,0 +1,76 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace}
+.cols{display:flex;gap:14px;align-items:flex-start}
+.col{flex:1;min-width:0}
+.cap{font-size:9px;letter-spacing:.12em;color:#8294a8;text-transform:uppercase;margin:0 0 5px 2px}
+.cap b{color:#4cc9f0;font-weight:600}
+.panel{background:#10141c;border:1px solid #1c2330;border-radius:6px;overflow:hidden}
+.row{padding:5px 8px;border-bottom:1px solid #161c28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row:last-child{border-bottom:0}
+.sel{background:#16202e}
+.dim{color:#8294a8}
+.menu{position:relative;margin:-44px 6px 8px auto;width:108px;background:#141a24;border:1px solid #1c2330;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,.5);font-size:10px}
+.menu div{padding:3px 9px;color:#c9d4e3}
+.menu .mdim{color:#8294a8;border-top:1px solid #1c2330}
+.note{margin-top:6px;font-size:10px;color:#8294a8;line-height:1.45;padding:0 2px}
+.note em{color:#ff5c5c;font-style:normal}
+.bar{display:flex;gap:6px;padding:6px;border-bottom:1px solid #1c2330;background:#0d1118}
+.search{flex:1;display:flex;align-items:center;gap:5px;background:#0b0e13;border:1px solid #2a3448;border-radius:4px;padding:3px 7px;color:#c9d4e3}
+.search .ph{color:#8294a8}.search .caret{color:#4cc9f0}
+.drop{background:#0b0e13;border:1px solid #2a3448;border-radius:4px;padding:3px 7px;color:#ffb454;white-space:nowrap}
+.drop b{color:#8294a8;font-weight:400}
+.r2{padding:5px 8px;border-bottom:1px solid #161c28}
+.r2 .l1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r2 .l2{display:flex;gap:5px;margin-top:3px;flex-wrap:wrap;align-items:center}
+.chip{font-size:9px;padding:1px 6px;border-radius:8px;border:1px solid}
+.cp{color:#4cc9f0;border-color:rgba(76,201,240,.35);background:rgba(76,201,240,.08)}
+.ce{color:#ffb454;border-color:rgba(255,180,84,.35);background:rgba(255,180,84,.08)}
+.ch{color:#8294a8;border-color:#1c2330}
+.bad{font-size:9px;padding:1px 6px;border-radius:8px;color:#ff5c5c;border:1px solid rgba(255,92,92,.4);background:rgba(255,92,92,.1);font-weight:600}
+.ok{font-size:9px;padding:1px 6px;border-radius:8px;color:#2bd97c;border:1px solid rgba(43,217,124,.35);background:rgba(43,217,124,.08)}
+.hit{color:#4cc9f0}
+.foot{padding:5px 8px;background:#0d1118;border-top:1px solid #1c2330;color:#4cc9f0;font-size:10px}
+.foot span{color:#8294a8}
+</style></head><body>
+<div class="cols">
+<div class="col">
+<div class="cap">Before — flat label list</div>
+<div class="panel">
+<div class="row">2026-06-10 06:00:14 - Daily FortiGate Backup</div>
+<div class="row">2026-06-09 22:15:02 - &#128193; Core Switches</div>
+<div class="row sel">2026-06-09 06:00:11 - Daily FortiGate Backup</div>
+<div class="row">2026-06-08 14:32:40 - CANCELLED - vlan-audit</div>
+<div class="row">2026-06-08 06:00:09 - Daily FortiGate Backup</div>
+<div class="row">2026-06-07 06:00:12 - Daily FortiGate Backup</div>
+<div class="row dim">2026-06-06 06:00:08 - Daily FortiGate Backup</div>
+<div class="row dim">2026-06-05 06:00:10 - Daily FortiGate Backup</div>
+</div>
+<div class="menu"><div>Save As...</div><div>Save All...</div><div>View Details</div><div class="mdim">Delete / Delete All</div></div>
+<div class="note">Which of these runs failed? Which touched <em>10.1.2.3</em>? Only option: open entries one by one and scroll.</div>
+</div>
+<div class="col">
+<div class="cap">After — <b>search + status filter + metadata badges</b></div>
+<div class="panel">
+<div class="bar">
+<div class="search">&#128269; <span>fortigate</span><span class="caret">|</span></div>
+<div class="drop"><b>status:</b> Had failures &#9662;</div>
+</div>
+<div class="r2 sel">
+<div class="l1">2026-06-09 06:00:11 - Daily <span class="hit">FortiGate</span> Backup</div>
+<div class="l2"><span class="chip cp">backup-config.yaml</span><span class="chip ce">Production</span><span class="chip ch">200 hosts</span><span class="bad">3 failed</span></div>
+</div>
+<div class="r2">
+<div class="l1">2026-06-05 06:00:10 - Daily <span class="hit">FortiGate</span> Backup</div>
+<div class="l2"><span class="chip cp">backup-config.yaml</span><span class="chip ce">Production</span><span class="chip ch">198 hosts</span><span class="bad">1 failed</span></div>
+</div>
+<div class="r2">
+<div class="l1 dim">2026-06-10 06:00:14 - Daily FortiGate Backup</div>
+<div class="l2"><span class="chip cp">backup-config.yaml</span><span class="chip ce">Production</span><span class="chip ch">200 hosts</span><span class="ok">all ok</span></div>
+</div>
+<div class="foot">&#128269; Search outputs... <span>— stream run files for "10.1.2.3" (uses existing lightweight readers)</span></div>
+</div>
+<div class="note">Index gains PresetName / EnvironmentName / HostCount / FailedHostCount — already in the ExecutionDetails payload at SaveRun time. Old entries just render without badges.</div>
+</div>
+</div>
+</body></html>

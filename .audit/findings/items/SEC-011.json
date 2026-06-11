@@ -1,0 +1,36 @@
+{
+ "id": "SEC-011",
+ "title": "Self-update verifies integrity but not authenticity — no code-signature check, and the update source repo is config-controlled",
+ "category": "SEC",
+ "severity": "medium",
+ "effort": "M",
+ "area": "persistence-config",
+ "lens": "bugs",
+ "existing_state": "The update pipeline mandates SHA256 verification (UpdateDialog.cs:542-558 aborts without a checksum; VerifyUpdatePackageAsync at Services/UpdateService.cs:366-379), but the checksum file is just a sibling asset in the same GitHub release (FindChecksumAsset, UpdateService.cs:627-647) — anyone who can modify the release (compromised maintainer token, supply-chain, or a malicious repo) regenerates both, so the check proves only download integrity, not publisher authenticity. The downloaded exe/zip is then installed by a hidden PowerShell run with -ExecutionPolicy Bypass that copies over the running binary and relaunches it (UpdateService.cs:404-424, embedded script :470-624) with no Authenticode/signature check. Compounding this, GitHubOwner/GitHubRepo are plain config values (Models/AppConfiguration.cs:447-452) fed straight into the API URL (Form1.cs:374-376, UpdateService.cs:128), and config.json is an unsigned user-writable file — any process or person able to edit it can silently point the updater (which checks on every startup, AppConfiguration.cs:457) at an attacker-controlled repo whose release passes all current checks.",
+ "recommendation": "Add an authenticity gate before LaunchUpdaterAndExit: verify the downloaded executable's Authenticode signature (X509Certificate.CreateFromSignedFile / WinVerifyTrust) and pin the expected publisher thumbprint, refusing unsigned or differently-signed packages; for zips, verify the contained exe post-extraction in the script or pre-extraction in C#. Treat the SHA256 check as a corruption guard, not an authenticity guarantee. Independently, stop sourcing GitHubOwner/GitHubRepo from config (hardcode, or at minimum show a prominent warning in the update dialog when the configured repo differs from the compiled-in default).",
+ "user_benefit": "A compromised GitHub release or a one-line edit to a plaintext config file can currently become arbitrary code execution delivered through the app's own trusted update prompt; signature pinning closes that path for every machine that auto-updates.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\UpdateService.cs",
+   "lines": "366-379, 627-647",
+   "note": "SHA256 checksum sourced from the same release as the binary — integrity only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\UpdateService.cs",
+   "lines": "404-424",
+   "note": "Hidden powershell -ExecutionPolicy Bypass installs over the app; no signature check"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs",
+   "lines": "447-457",
+   "note": "GitHubOwner/GitHubRepo config-editable; CheckOnStartup default true"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "374-376",
+   "note": "UpdateService constructed from config values"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

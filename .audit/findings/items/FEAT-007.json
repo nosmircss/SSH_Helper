@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-007",
+ "title": "No jump-host/bastion (ProxyJump) support for reaching devices behind a management host",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "L",
+ "area": "ssh-execution",
+ "lens": "ux",
+ "existing_state": "There is no proxy or jump-host capability anywhere in the SSH layer: a repo-wide grep for ProxyJump/ProxyCommand/proxy/jump/bastion finds no SSH-related hits. The OpenSSH config parser explicitly supports only six directives — HostName, Port, User, IdentityFile, HostKeyAlgorithms, Ciphers (Utilities/SshConfigParser.cs:8, 12-15) — so ProxyJump lines in a user's existing ~/.ssh/config are silently ignored, and both connect paths (SshExecutionService.CreateConnectedClientWithFallback at 2365+ and SshConnectionPool.CreateConnectionAsync) dial the target IP directly. Network fleets very commonly sit behind a bastion/management host; users of OpenSSH, SecureCRT (firewall sessions), and Ansible all get this natively, and such users simply cannot reach their devices with this app today.",
+ "recommendation": "Add jump-host support: parse ProxyJump in SshConfigParser (plus an optional per-environment/global 'Jump host' setting with its own credentials), then implement connection-via-bastion in both connect paths — Rebex supports this via an Ssh session to the bastion plus local port forwarding (or its Settings.Proxy SOCKS support pointed at a bastion-side tunnel). Pool the bastion connection itself so 20 parallel target connections share one bastion session. Scope v1 to a single hop.",
+ "user_benefit": "Unlocks the app for the very common topology where 200 devices are only reachable through a management bastion — currently a hard blocker that forces those users back to scripts over plain OpenSSH.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\SshConfigParser.cs",
+   "lines": "8, 12-15",
+   "note": "SupportedOptions set contains only six directives; ProxyJump silently dropped"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "2365-2412",
+   "note": "Direct client.Connect(host.IpAddress, host.Port) — no tunnel/proxy hook"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs",
+   "lines": "365-459",
+   "note": "Pool connect path equally direct; bastion session pooling would slot in here"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

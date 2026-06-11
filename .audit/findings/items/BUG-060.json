@@ -1,0 +1,26 @@
+{
+ "id": "BUG-060",
+ "title": "EnvironmentDialog Save swallows all persistence failures and closes as if it succeeded",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-general",
+ "lens": "ux",
+ "existing_state": "PersistCurrentEnvironmentDetails wraps the only write of description/color/variables/vault-binding in a bare `catch { }` (EnvironmentDialog.cs:807-823) — the comment claims \"actionable errors are shown on explicit operations,\" but the explicit Save button routes through this exact method (BtnSave_Click, 639-643) and the button carries DialogResult.OK (249), so the form closes successfully even when ConfigurationService.SaveEnvironmentState threw (config.json locked by AV/backup tooling, disk full, KeyNotFoundException from UpdateEnvironmentDetails at Services/EnvironmentService.cs:311-312). Every variable the user just entered is silently discarded while the UI reports success and Form1 proceeds to switch environments.",
+ "recommendation": "Split the behavior: keep the silent catch for the high-frequency selection-change autosave, but have BtnSave_Click call a throwing variant — on exception, show a DialogTheme.Show error and set `DialogResult = DialogResult.None` so the dialog stays open and the user's grid contents are not lost.",
+ "user_benefit": "A failed disk write no longer eats an entire environment-variable editing session without a word — the user gets a chance to retry or copy their data out.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\EnvironmentDialog.cs",
+   "lines": "802-823",
+   "note": "catch-all with no logging or surfacing"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\EnvironmentDialog.cs",
+   "lines": "639-643, 249",
+   "note": "Save routes through the swallowing method; button's DialogResult.OK closes the form regardless"
+  }
+ ]
+}

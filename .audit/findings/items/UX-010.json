@@ -1,0 +1,31 @@
+{
+ "id": "UX-010",
+ "title": "A misspelled function name silently becomes a literal string in set: expressions — no parse-time or runtime signal",
+ "category": "UX",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-functions",
+ "lens": "ux",
+ "existing_state": "Unknown-function handling is inconsistent by context. In value position (`- set: x = uper(host)`), JsonUtilities.ResolveJsonValue tries the function dispatchers (Services/Scripting/JsonUtilities.cs:307-315), and on miss falls through to variable lookup and finally to substitute-and-parse (:317-333) — so the typo resolves to the literal string 'uper(host)' and can be interpolated straight into a command sent to 200 devices. In condition position (if:/while:/assert:), ExpressionParser.ResolveFunction throws FormatException('Unknown function: ...') at runtime (Services/Scripting/ExpressionParser.cs:422-437). ScriptParser validation warns about unknown YAML keys (ScriptParser.cs:1151-1152 and ~15 similar sites) but performs zero function-name checking, so neither the editor's validation pass nor the Flow Canvas catches the typo before a run. The same silent philosophy runs through the library: int() parse-fail → 0, date_add unknown unit → input unchanged (DateTimeFunctions.cs:102), count() with an unparseable lambda degrades to a plain count (CollectionFunctions.cs:130-131).",
+ "recommendation": "Add a function-name lint to the existing ScriptParser validation pass: scan set: expressions and condition strings for name(...) patterns (TryParseFunctionCall at JsonUtilities.cs:567 already does the parsing) and check each name against a unified known-function set (registry + legacy switch names + json.* methods — the same metadata table as the autocomplete work in UX-024). Surface misses through the same warning channel as 'Unknown step key', with a did-you-mean suggestion (edit distance catches uper→upper, indexof→index_of). Optionally also log a runtime warning from ResolveJsonValue when a name(...)-shaped expression falls through to literal.",
+ "user_benefit": "Today a one-letter typo produces a literal 'uper(host)' string sent to live network gear with no error anywhere; users discover it from device output. Catching it at validation, like unknown step keys already are, turns a silent field failure into a squiggle in the editor.",
+ "evidence": [
+  {
+   "file": "Services/Scripting/JsonUtilities.cs",
+   "lines": "307-333",
+   "note": "Unknown function falls through to variable lookup then literal substitution — no error"
+  },
+  {
+   "file": "Services/Scripting/ExpressionParser.cs",
+   "lines": "422-437",
+   "note": "Condition context instead throws FormatException at runtime — inconsistent with value context"
+  },
+  {
+   "file": "Services/Scripting/ScriptParser.cs",
+   "lines": "1151-1152",
+   "note": "Validation warns on unknown YAML keys but never checks function names"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

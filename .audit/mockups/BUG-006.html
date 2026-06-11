@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BUG-006 — cron fires at UTC, UI shows local</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;
+    font:12px "Cascadia Code",Consolas,monospace}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    color:#8294a8;margin:0 0 6px}
+  .cap b{font-weight:700}
+  .cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+  .panel{border:1px solid #1c2330;border-radius:6px;background:#0e1219;
+    margin-bottom:14px;overflow:hidden}
+  .bar{display:flex;justify-content:space-between;align-items:center;
+    padding:5px 10px;background:#11161f;border-bottom:1px solid #1c2330;
+    color:#8294a8;font-size:11px}
+  .bar .tz{color:#ffb454}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.08em;
+    color:#8294a8;text-align:left;font-weight:600;
+    padding:5px 10px;border-bottom:1px solid #1c2330}
+  td{padding:6px 10px;border-bottom:1px solid #161c28;white-space:nowrap}
+  tr:last-child td{border-bottom:0}
+  .name{color:#c9d4e3}.cron{color:#4cc9f0}
+  .next{color:#4cc9f0;font-weight:700}
+  .hist-bad{color:#ff5c5c;font-weight:700}
+  .hist-good{color:#2bd97c;font-weight:700}
+  .ok{color:#2bd97c}
+  .tag{font-size:9px;padding:1px 5px;border-radius:3px;margin-left:6px;
+    vertical-align:1px;letter-spacing:.05em}
+  .tag.bad{background:rgba(255,92,92,.13);color:#ff5c5c;
+    border:1px solid rgba(255,92,92,.4)}
+  .tag.good{background:rgba(43,217,124,.12);color:#2bd97c;
+    border:1px solid rgba(43,217,124,.4)}
+  .note{padding:6px 10px;font-size:11px;border-top:1px solid #1c2330}
+  .note.bad{color:#ff5c5c;background:rgba(255,92,92,.06)}
+  .note.good{color:#2bd97c;background:rgba(43,217,124,.06)}
+  .muted{color:#8294a8}
+  .fix{font-size:11px;color:#8294a8;border-left:3px solid #4cc9f0;
+    padding:4px 10px;margin-top:2px}
+  .fix code{color:#4cc9f0}
+</style>
+</head>
+<body>
+
+<p class="cap"><b class="bad">Before</b> — Job List promises local time, history shows the UTC-interpreted run <span class="muted">(machine: Pacific, UTC−8)</span></p>
+<div class="panel">
+  <div class="bar"><span>Job List &nbsp;·&nbsp; Run History</span><span class="tz">System TZ: America/Los_Angeles (UTC−8)</span></div>
+  <table>
+    <tr><th>Job</th><th>Schedule</th><th>Next Run</th><th>Last Run (history)</th><th>Result</th></tr>
+    <tr>
+      <td class="name">FortiGate config backup</td>
+      <td class="cron">0 9 * * *</td>
+      <td class="next">Tomorrow 9:00 AM</td>
+      <td class="hist-bad">Started 1:00 AM<span class="tag bad">9:00 UTC</span></td>
+      <td class="ok">✓ 12 hosts</td>
+    </tr>
+    <tr>
+      <td class="name">Core switch health check</td>
+      <td class="cron">30 17 * * 1-5</td>
+      <td class="next">Today 5:30 PM</td>
+      <td class="hist-bad">Started 9:30 AM<span class="tag bad">17:30 UTC</span></td>
+      <td class="ok">✓ 4 hosts</td>
+    </tr>
+  </table>
+  <div class="note bad">⚠ Cronos matches the cron fields against the UTC clock — every field-anchored job runs 8 h off what the UI shows. “Business-hours” scripts fire at 1 AM.</div>
+</div>
+
+<p class="cap"><b class="good">After</b> — execution uses <b>TimeZoneInfo.Local</b>, matching every UI surface</p>
+<div class="panel">
+  <div class="bar"><span>Job List &nbsp;·&nbsp; Run History</span><span class="tz">System TZ: America/Los_Angeles (UTC−8)</span></div>
+  <table>
+    <tr><th>Job</th><th>Schedule</th><th>Next Run</th><th>Last Run (history)</th><th>Result</th></tr>
+    <tr>
+      <td class="name">FortiGate config backup</td>
+      <td class="cron">0 9 * * *</td>
+      <td class="next">Tomorrow 9:00 AM</td>
+      <td class="hist-good">Started 9:00 AM<span class="tag good">matches</span></td>
+      <td class="ok">✓ 12 hosts</td>
+    </tr>
+    <tr>
+      <td class="name">Core switch health check</td>
+      <td class="cron">30 17 * * 1-5</td>
+      <td class="next">Today 5:30 PM</td>
+      <td class="hist-good">Started 5:30 PM<span class="tag good">matches</span></td>
+      <td class="ok">✓ 4 hosts</td>
+    </tr>
+  </table>
+  <div class="note good">✓ Next Run, status-bar countdown, cron-builder preview, and actual execution all agree.</div>
+</div>
+
+<div class="fix">Fix is one line: <code>GetMissedOccurrences</code> (SchedulingService.cs:97) switches to the
+Cronos overload taking <code>TimeZoneInfo.Local</code> — IsJobDue and missed-run detection all funnel through it.
+Pure-interval crons (<code>*/5 * * * *</code>) are unaffected; one-time schedules already convert correctly.</div>
+
+</body>
+</html>

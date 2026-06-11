@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-033",
+ "title": "Registry stores bare name-to-delegate entries; ~60 handlers hand-roll argument parsing with inconsistent silent failures, blocking validation and autocomplete",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-functions",
+ "lens": "perf",
+ "existing_state": "Every registered function has the shape `object? ScriptFunction(string argsString, ScriptContext context)` — the raw, unsplit argument text (Services/Scripting/Functions/IFunctionCategory.cs:9), and FunctionRegistry stores nothing but the name and delegate (Services/Scripting/FunctionRegistry.cs:25, 37-43). Consequently each handler re-implements the same preamble — JsonUtilities.SplitTopLevelCommas + per-arg resolve + arity check — 63 call sites across 9 files (grep count; e.g. StringFunctions 14, JsonFunctions 15, MathFunctions 7). The hand-rolled arity checks fail inconsistently and always silently: vault() with 1 arg returns null (Services/Scripting/Functions/VaultFunctions.cs:22-23), count() with an unparseable lambda silently degrades to a plain count (Services/Scripting/Functions/CollectionFunctions.cs:130-131), reduce() with a 1-param lambda returns null (CollectionFunctions.cs:67-68), regex_match with 1 arg returns \"\" while regex_replace with 2 returns null (Services/Scripting/Functions/StringFunctions.cs:159, 182). Because the registry has no arity/signature metadata, ScriptParser validation cannot check function calls, the Scintilla autocomplete provider cannot offer signatures (Services/Editor/ScriptAutocompleteProvider.cs has zero function knowledge), and SCRIPTING.md is hand-maintained with nothing to keep it honest.",
+ "recommendation": "Extend Register to accept a small FunctionDescriptor (name, min/max arity, param names, category, one-line summary) alongside the delegate — handlers stay untouched, descriptors are added per category class incrementally. Then (a) wrap dispatch so arity violations produce a uniform script warning ('vault() expects 2-3 arguments, got 1') instead of the current per-function null/\"\"/false lottery, (b) feed ScriptAutocompleteProvider and parser-time validation from registry metadata, and (c) optionally generate the SCRIPTING.md function tables from the same source. Do this after (or together with) the function-dispatch consolidation so the metadata covers the full ~112-name surface, not 71.",
+ "user_benefit": "Wrong-argument-count mistakes — currently the single most common scripting error class, and currently invisible until a fleet run produces empty values — get a clear message, and the editor can finally offer function completion and signature help from a single source of truth.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Functions/IFunctionCategory.cs",
+   "lines": "9",
+   "note": "delegate receives raw unsplit argsString; no metadata anywhere"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/FunctionRegistry.cs",
+   "lines": "25, 37-43",
+   "note": "Dictionary<string, ScriptFunction> only"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Functions/CollectionFunctions.cs",
+   "lines": "67-68, 130-131",
+   "note": "reduce wrong-arity lambda -> null; count bad lambda silently becomes plain count"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Functions/VaultFunctions.cs",
+   "lines": "22-23",
+   "note": "missing arg -> silent null"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Functions/StringFunctions.cs",
+   "lines": "159, 182",
+   "note": "same error class returns null in one function, empty string in the next"
+  }
+ ],
+ "mockup_idea": "Side-by-side editor screenshot: BEFORE — user types 'set: pw = vault(secret/db)' and the run output later shows hosts receiving an empty password with no error; AFTER — squiggle under the call with tooltip 'vault(path, key[, profile]) — expects 2-3 arguments, got 1' plus an autocomplete popup listing functions with signatures.",
+ "merged_from": 1
+}

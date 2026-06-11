@@ -1,0 +1,36 @@
+{
+ "id": "BUG-002",
+ "title": "Running a preset against a vault_path host deadlocks (hangs) the entire app on the first uncached secret read",
+ "category": "BUG",
+ "severity": "critical",
+ "effort": "S",
+ "area": "integrations",
+ "lens": "reliability",
+ "existing_state": "VaultCredentialProvider.TryGetPassword resolves a vault secret by blocking on async with `_vaultService.ReadSecretKeysAsync(...).GetAwaiter().GetResult()` (Services/Vault/VaultCredentialProvider.cs:48-49). VaultService never uses ConfigureAwait(false) anywhere (grep over Services/Vault found ConfigureAwait only in VaultOidcLoginFlow.cs) — ReadSecretKeysAsync -> GetAuthenticatedProfileAsync (VaultService.cs:282-313) -> AuthenticateWith*Async -> SendWithErrorTranslationAsync all await without ConfigureAwait(false), so the first genuinely-async HTTP continuation captures the calling thread's SynchronizationContext. Form1.GetHostConnections calls TryGetPassword at Form1.cs:13334, and the main preset path ExecutePresetOnRowsAsync runs synchronously from method entry (Form1.cs:12268) to `GetHostConnections(hostRows).ToList()` (Form1.cs:12277) with NO await in between — i.e. on the WinForms UI thread, which has a WindowsFormsSynchronizationContext. When the secret is not cached (first run after launch, after the 300s CacheTtl expires, or a new path/profile), the HTTP continuation is posted back to the UI thread while the UI thread is blocked inside GetResult() -> classic sync-over-async deadlock. The app hangs permanently and must be force-killed, losing any in-progress work. (If the profile is OIDC with an expired token it is even worse: the blocking call launches a full HttpListener browser login on the UI thread.)",
+ "recommendation": "Make the credential resolution off the UI thread or non-blocking. Minimal fix: add ConfigureAwait(false) to every await in VaultService (ReadSecretKeysAsync/ReadSecretAsync/GetAuthenticatedProfileAsync/SendWithErrorTranslationAsync/auth methods/KV detect) so continuations don't require the UI thread. Better: make GetHostConnections async (resolve vault_path via `await ReadSecretKeysAsync`) and await it in ExecutePresetOnRowsAsync, or hoist the vault resolution onto a Task.Run/await boundary before building HostConnection so no Vault HTTP ever runs under .GetAwaiter().GetResult() on the UI thread. Add a regression test that resolves a vault_path on a thread carrying a SynchronizationContext.",
+ "user_benefit": "Users who store SSH credentials in Vault (a headline feature) can currently freeze the whole app just by clicking Run on a host whose secret isn't already cached. Fixing this keeps the app responsive and prevents lost work from force-kills.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultCredentialProvider.cs",
+   "lines": "48-49",
+   "note": "blocking .GetAwaiter().GetResult() on async Vault read"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13332-13343",
+   "note": "GetHostConnections calls TryGetPassword for vault_path"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12268-12278",
+   "note": "ExecutePresetOnRowsAsync runs to GetHostConnections with no preceding await -> UI thread"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+   "lines": "282-313",
+   "note": "GetAuthenticatedProfileAsync awaits HTTP without ConfigureAwait(false); no ConfigureAwait anywhere in VaultService"
+  }
+ ]
+}

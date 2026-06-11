@@ -1,0 +1,31 @@
+{
+ "id": "PERF-018",
+ "title": "Every variable substitution copies the entire live run transcript (quadratic allocation on big runs)",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-core",
+ "lens": "perf",
+ "existing_state": "ScriptContext.SubstituteVariables (Services/Scripting/ScriptContext.cs:625-644) unconditionally takes the shared StateLock and materializes the whole pane transcript via _sharedState.OutputWindow.ToString() (line 635) on EVERY call — even when the input string contains no ${_outputwindow} or ${_output} token; it also always runs the ${_output} Replace (line 639). The transcript grows continuously during execution: SshExecutionService appends every received output chunk via outputWindowContext?.AppendOutputWindowText(e.Output) (Services/SshExecutionService.cs:1640, also 1803) under the same lock. SubstituteVariables has 109 call sites across 39 command classes (every send/print/http/notify/sftp/etc., typically several calls per step), so a loop-heavy script against verbose devices copies an ever-growing multi-megabyte string per interpolation — copies over 85KB land on the Large Object Heap. Relatedly, the shared FullOutput StringBuilder (ScriptContext.cs:108) is appended on every RecordCommandOutput/EmitOutput (lines 860, 883) with no cap — unlike localcmd, which has a per-command max_output_bytes.",
+ "recommendation": "In SubstituteVariables, only snapshot the transcript when the input actually references it: guard the lock/ToString with an Ordinal Contains check for ${_outputwindow} and the Replace with a Contains check for ${_output}. Optionally add a configurable character cap (keep-tail) on the shared Output/OutputWindow builders for runaway loop scripts, mirroring localcmd's max_output_bytes. Both changes are local to ScriptContext.cs.",
+ "user_benefit": "Long fleet runs and scheduled jobs with chunky device output stop progressively slowing down and churning the GC/LOH; the live-output handler also stops contending on the lock during interpolation-heavy loops.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptContext.cs",
+   "lines": "625-644",
+   "note": "unconditional lock + OutputWindow.ToString() + Replace on every substitution"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "1637-1643",
+   "note": "per-chunk AppendOutputWindowText keeps the transcript growing during the run"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptContext.cs",
+   "lines": "108, 855-893",
+   "note": "unbounded shared Output StringBuilder appended on every command output and EmitOutput"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,36 @@
+{
+ "id": "SEC-003",
+ "title": "No SSH host-key verification on any connection path (execution, pool, interactive terminal, sftp) — connections are MITM-trivial",
+ "category": "SEC",
+ "severity": "critical",
+ "effort": "L",
+ "area": "ssh-execution",
+ "lens": "cross",
+ "existing_state": "There is no fingerprint check, no known_hosts store, and no trust-on-first-use prompt anywhere in the SSH layer — every connection accepts whatever host key the server presents, then sends the user's password (or Vault-resolved credential) to it. Rebex paths: CreateConfiguredClient builds the Ssh client applying only timeout and cipher/host-key-algorithm settings, never a Fingerprint/key-acceptance handler (Services/SshExecutionService.cs:2372-2378); bare client.Connect calls at SshExecutionService.cs:2393/2412/2444/2485 with Login immediately after (:2211, :1612); the pool mirrors this at Services/SshConnectionPool.cs:389/411/433/452 (Login :472). The interactive terminal is a separate dial-out with the same gap: ConnectAndLogin (Services/Terminal/InteractiveTerminalService.cs:3728-3740) connects and logs in with no verification, while ApplyAlgorithmSettings (:3742-3753) only sets algorithms — and here a human is typing live credentials and privileged commands into the session. The sftp script command bypasses the Rebex stack entirely via SSH.NET's new SftpClient(host, port, username, password) with no HostKeyReceived subscription (Services/Scripting/Commands/SftpCommand.cs:66-72) — SSH.NET's default when the event is unhandled is to trust any key. A repo-wide grep for Fingerprint/HostKeyReceived/known_hosts/VerifyHostKey returns only CSV change-detection hits. Secondary issues in the same sftp code: auth is password-only (no key-file or Vault option despite the app having both, :130-136), and ParseHostWithOptionalPort splits on LastIndexOf(':') so a bare IPv6 literal is mangled into a bogus host+port (:139-156). For a multi-host admin tool that sprays credentials at fleets, an on-path attacker (rogue switch, ARP/DNS spoofing, compromised jump host) can impersonate any host, harvest every password, capture live terminal sessions, and inject forged command output.",
+ "recommendation": "Implement a single shared host-key trust store: persist accepted SHA-256 fingerprints keyed by host:port in a known_hosts-style file under AppDataPaths (via JsonFileWriter.WriteJsonAtomic). Wire verification into all four paths — Rebex's fingerprint/key-validation callback in CreateConfiguredClient and the pool's client factory, the same check between Connect and Login in InteractiveTerminalService.ConnectAndLogin, and an SSH.NET HostKeyReceived handler in SftpCommand. On first contact show a TOFU accept/reject dialog (themed via DialogTheme) displaying the fingerprint; on mismatch hard-fail with a prominent warning. Offer a strict / TOFU / explicitly-opt-in insecure policy in SettingsDialog, defaulting to TOFU so existing users aren't hard-broken. While in SftpCommand, add key-file and Vault credential options and fix IPv6 host:port parsing (skip splitting on multiple ':' unless bracketed).",
+ "user_benefit": "Without host-key checking, anyone able to intercept the network path can impersonate a target device and silently harvest the SSH passwords this tool types into every host in the fleet. Host-key verification is the baseline expectation for a professional multi-host SSH tool, and one shared store fixes all four connection paths consistently.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "2372-2378, 2393, 2412, 2444, 2485, 2211",
+   "note": "CreateConfiguredClient attaches no key-acceptance handler; all Connect tiers accept any key; password sent immediately after unverified connect"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs",
+   "lines": "389-452, 472",
+   "note": "Pool connect+login path likewise accepts any key"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "3728-3753",
+   "note": "Interactive terminal ConnectAndLogin: Connect + Login with no fingerprint verification; ApplyAlgorithmSettings sets algorithms/ciphers only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SftpCommand.cs",
+   "lines": "66-72, 130-156",
+   "note": "SSH.NET SftpClient with no HostKeyReceived handler (default: trust any key); password-only auth; IPv6 host:port mangling"
+  }
+ ],
+ "mockup_idea": "One-time TOFU dialog: 'First connection to 10.0.0.5:22 — ED25519 SHA256:abc... Accept / Reject', plus a red key-mismatch warning variant that blocks the connection.",
+ "merged_from": 4
+}

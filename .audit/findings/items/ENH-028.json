@@ -1,0 +1,31 @@
+{
+ "id": "ENH-028",
+ "title": "Per-job command timeout override is capped at 300s while the app and presets allow 3600s — long-running script jobs can't be tuned upward",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-jobs-history",
+ "lens": "ux",
+ "existing_state": "JobEditorValidator.MaxCommandTimeoutOverrideSeconds is 300 (Utilities/JobEditorValidator.cs:13) and the Advanced-tab NumericUpDown is bound to that maximum (JobEditorDialog.cs:1249-1250), but everywhere else in the app a command timeout may be up to 3600s (InputValidator.IsValidTimeout, Utilities/InputValidator.cs:95-98). Worse, when the user first checks 'Override command timeout', the control is seeded with the inherited app/preset timeout passed through ClampNumericValue (JobEditorDialog.cs:1501-1507) — so a job targeting a preset with a 20-minute timeout silently shows 300, and the override can only ever shorten, never extend, beyond 5 minutes. Long-running YAML script jobs (config backups, firmware staging) are a core use case for the scheduler, and this is exactly where a per-job timeout bump is wanted.",
+ "recommendation": "Raise MaxCommandTimeoutOverrideSeconds to 3600 to match InputValidator.IsValidTimeout (one constant in Utilities/JobEditorValidator.cs:13; the NumericUpDown maximum and the validation message at JobEditorValidator.cs:199 follow automatically). Update the corresponding bound in JobEditorValidationTests if asserted. Optionally, when the seeded inherited value would have been clamped, surface it in the guidance label ('Inherited: preset X timeout (1200 sec)') instead of silently snapping the spinner.",
+ "user_benefit": "Scheduled jobs running long scripts can finally be given the timeout they need per job instead of forcing a global or per-preset change; removes a silent surprise where the editor shows 300 for a 1200-second inherited timeout.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JobEditorValidator.cs",
+   "lines": "12-13, 191-200",
+   "note": "MaxCommandTimeoutOverrideSeconds = 300 and the range validation"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\InputValidator.cs",
+   "lines": "95-98",
+   "note": "App-wide timeout validity allows up to 3600s"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs",
+   "lines": "1249-1250, 1501-1507, 1552-1559",
+   "note": "Spinner bound to the 300 cap; inherited value silently clamped on first check via ClampNumericValue"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

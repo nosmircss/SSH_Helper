@@ -1,0 +1,179 @@
+[
+ {
+  "id": "BUG-067",
+  "title": "HostConnection.Parse silently mangles IPv6 addresses into wrong hosts; explicit port 22 is overridden by ssh-config",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "models-samples-build",
+  "lens": "correctness",
+  "existing_state": "HostConnection.Parse splits the Host_IP value on ':' and takes parts[0] as the address (Models/HostConnection.cs:45-51). Any IPv6 literal is silently truncated — `2001:db8::1` becomes host \"2001\" port 22, and `[::1]:2222` becomes host \"[\" — with no error; the app then attempts an SSH connection to the garbage hostname. This is on real execution paths: the main-form run (Form1.cs:13317, 14201) and scheduled jobs (Services/JobExecutionService.cs:497). It compounds in jobs: TryGetExplicitPortFromHostValue at JobExecutionService.cs:500 treats any ':'-containing Host_IP as having an explicit port, so the per-row `port` column override is also skipped for IPv6 entries. Related defect in the same file: ApplySshConfig only honors the grid port when it equals 22 (`if (Port == 22 && config.Port.HasValue)`, HostConnection.cs:75-77), so a user who deliberately enters `host:22` to pin the standard port gets it silently replaced by a different Port directive from ~/.ssh/config when EnableSshConfig is on.",
+  "recommendation": "In Parse, first try System.Net.IPAddress.TryParse on the whole string (bare IPv6 -> address, port 22), support bracket syntax `[v6]:port`, and only then fall back to the single-colon host:port split (e.g. treat inputs with more than one ':' and no brackets as a bare IPv6 address). Mirror the same recognition in JobExecutionService.TryGetExplicitPortFromHostValue. For ApplySshConfig, track whether the port was explicitly supplied (e.g. a nullable backing field or a flag set by Parse when ':port' was present) instead of comparing against the default 22.",
+  "user_benefit": "IPv6-managed fleets currently cannot be targeted at all — entries fail with misleading connect errors against a truncated hostname — and ssh-config users can have a deliberately pinned port silently changed.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HostConnection.cs", "lines": "38-54", "note": "Split(':') truncates IPv6 literals to the first hextet; no bracket handling"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HostConnection.cs", "lines": "75-77", "note": "Port==22 used as 'not explicitly set' sentinel in ssh-config merge"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "494-506", "note": "Parse consumed for job hosts; ':' in value also suppresses the port column override"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "13317, 14201", "note": "Main-form execution paths parse Host_IP through the same code"}
+  ]
+ },
+ {
+  "id": "BUG-068",
+  "title": "Terminal normalizer leaks OSC title-sequence payloads (']0;user@host: ~') into captured command output and can break prompt stripping",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "ui-utilities",
+  "lens": "correctness",
+  "existing_state": "TerminalOutputProcessor.ProcessEscapeSequence handles only ESC s/u and CSI (ESC [) (Utilities/TerminalOutputProcessor.cs:351-393). For OSC sequences (ESC ] 0 ; title BEL — emitted by the default Ubuntu/Debian bash PS1 and many other shells on every prompt render), neither branch matches: the ESC is consumed at Normalize:98-99, then ']0;user@host: ~' falls into the printable default case (:102-108) and is rendered as literal text, while the BEL terminator is silently dropped (:109-110; Sanitize at :16-18 also strips it but keeps the payload). Every consumer of normalized output gets the garbage — SshShellSession command output (Services/SshShellSession.cs:309,413,498,976) and the interactive terminal transcript (Services/Terminal/InteractiveTerminalService.cs:2719 and siblings). Knock-on effect: the leaked payload prefixes the prompt line, so StripTrailingPrompt's exact-match/regex check (TerminalOutputProcessor.cs:284-286) fails — PromptDetector.BuildPromptRegex anchors the prompt at line start with only \\s* slack before the anchor (Utilities/PromptDetector.cs:61) — leaving a ']0;user@host: ~user@host:~$' tail line inside per-command output saved to history. Charset designators (ESC ( B) leak the same way.",
+  "recommendation": "In ProcessEscapeSequence, add an OSC branch: on ESC ']', consume until BEL (0x07) or ST (ESC \\) and emit nothing; also consume two-character sequences ESC ( X / ESC ) X (charset designation) and ESC = / ESC > (keypad modes). Add Normalize unit tests using the stock Ubuntu PS1 byte sequence (\\x1b]0;user@host: ~\\x07user@host:~$).",
+  "user_benefit": "Clean command output and history for the most common class of Linux targets — no ']0;...' artifacts in saved run results, and prompt stripping keeps working on hosts whose shells set the terminal title.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\TerminalOutputProcessor.cs", "lines": "351-393", "note": "Only ESC s/u and CSI handled; ESC ] returns startIndex, payload prints as text"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\TerminalOutputProcessor.cs", "lines": "98-110", "note": "BEL terminator silently swallowed by the 'ignore other control characters' default; payload chars are printable and kept"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\PromptDetector.cs", "lines": "56-63", "note": "Prompt regex anchored at line start with only \\s* slack — an OSC prefix defeats the match"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs", "lines": "309,413,976", "note": "Normalize output feeds command results and real-time UI output"}
+  ]
+ },
+ {
+  "id": "BUG-069",
+  "title": "'Comment Selected Lines' inside a command block scalar doesn't disable anything — it mutates what gets sent to remote hosts",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "editor",
+  "lens": "correctness",
+  "existing_state": "The context-menu Comment/Uncomment actions (Form1.cs:5827-5835) call a purely textual per-line transform that inserts `#` after the leading indent of every selected line with no YAML structure awareness (UI/ScintillaScriptEditorControl.cs:406-443, TransformSelectedLines at 1579-1631). Inside a `command: |` / `content: |` block scalar, `#` is NOT a YAML comment — it is literal payload. So a user who selects a few command lines inside a send step and clicks \"Comment Selected Lines\" believes those commands are disabled, but the step still executes and now sends `#show version`-style lines verbatim to every targeted host. On shells that's usually benign; on network appliances (Cisco/FortiGate CLIs where `#` is not a comment leader) the device receives and reacts to garbage input across the whole fleet. The misleading syntax highlighting compounds it: the highlighter colors the `#...` payload line green like a real comment (YamlSshSyntaxHighlighter.cs:87-88, 148-151 — FindCommentStartIndex has no block-scalar state), visually confirming the wrong mental model.",
+  "recommendation": "Detect block-scalar regions in CommentSelectedLines/UncommentSelectedLines (same region detection as proposed for the hygiene lints in BUG-070, ideally shared). When the selection is inside a payload, either (a) show a status hint and refuse (\"these lines are command payload — '#' would be sent to the host\"), or (b) offer to comment out the enclosing step instead. Also stop the highlighter from styling `#` as a comment inside block-scalar bodies so the editor doesn't visually lie about it.",
+  "user_benefit": "Prevents accidentally shipping '#'-prefixed junk lines to an entire host fleet while believing those commands were disabled.",
+  "mockup_idea": "Side-by-side: a send step with two payload lines '#commented' shown green (current, looks disabled) vs the proposed warning state where the payload lines stay payload-colored and a hint explains '#' will be sent to the host.",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs", "lines": "406-443", "note": "CommentSelectedLines/UncommentSelectedLines: blind per-line '#' insert/remove, no YAML context"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\YamlSshSyntaxHighlighter.cs", "lines": "87-88, 148-151", "note": "per-line comment detection with no block-scalar state — payload '#' lines render as comments"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "5827-5835", "note": "context-menu wiring for comment/uncomment"}
+  ]
+ },
+ {
+  "id": "BUG-070",
+  "title": "YAML hygiene lints flag block-scalar payloads: false tab/duplicate-key warnings on valid scripts",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "M",
+  "area": "editor",
+  "lens": "correctness",
+  "existing_state": "The hygiene lints run line-by-line over the whole script with zero block-scalar awareness (ScriptEditorValidationService.cs:259-354 — the loop never tracks `|`/`>` literal blocks). Consequences: (1) any tab inside a `command: |` / `content: |` payload (a Makefile written via writefile, tab-indented heredoc/Python sent via send) draws \"Tab indentation detected; use spaces for YAML indentation\" plus a second \"Mixed indentation\" warning on every such line (lines 267-301) — and a user who 'fixes' it corrupts the payload (Makefiles require tabs); (2) repeated `word: value`-shaped lines at the same indent inside a payload (e.g. two `description: ...` lines in a device config block, or YAML/config content written via writefile) trigger \"Duplicate key\" warnings (lines 304-354) even though the script is valid YAML — the real parser accepts it, only the lint complains. Additionally duplicate detection uses OrdinalIgnoreCase (line 337) although YAML keys are case-sensitive, so distinct keys like `Path:`/`path:` are falsely flagged. EnableYamlHygieneWarnings is on by default (Models/AppConfiguration.cs:182), so these squiggles persist on perfectly valid production scripts and train users to ignore warnings.",
+  "recommendation": "In BuildYamlHygieneDiagnostics, pre-compute block-scalar regions (a line whose value ends with `|`, `|-`, `|+`, `>` etc. starts a body covering all subsequent lines indented deeper than the key) and skip both lints inside those regions. Switch the duplicate-key HashSet to StringComparer.Ordinal. ~40 lines in ScriptEditorValidationService.cs plus unit cases in SSH_Helper.Tests/Editor.",
+  "user_benefit": "Warning squiggles only appear on real problems; users stop being told to 'fix' tabs that are part of the payload they're shipping to remote hosts.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptEditorValidationService.cs", "lines": "267-301", "note": "tab/mixed-indent lint inspects leading whitespace of every line, including block-scalar bodies"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptEditorValidationService.cs", "lines": "304-354", "note": "duplicate-key lint matches `key:`-shaped payload lines; case-insensitive comparer at line 337"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs", "lines": "182", "note": "EnableYamlHygieneWarnings defaults to true"}
+  ]
+ },
+ {
+  "id": "BUG-071",
+  "title": "Manual 'Validate Script' silently does nothing for plain presets/folders and contradicts inline validation on library scripts",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "editor",
+  "lens": "ux",
+  "existing_state": "Two defects in the right-click Validate Script menu. (1) Silent no-op: with a folder selected (Form1.cs:5777-5778) or a non-YAML plain-command preset (Form1.cs:5782-5783) the handler just returns — no message box, no output line. The user clicks Validate and gets zero feedback, which reads as 'validated OK'. (2) Flag divergence: the menu calls `parser.Validate(script, scriptText, enforceCanonicalSyntax: true)` (Form1.cs:5790) without `allowLibraryDefinitions`, whose default is false (ScriptParser.cs:4185), so a `library: true` preset fails with \"Library scripts cannot be executed directly\" (ScriptParser.cs:4206-4209) — while the inline validator passes `allowLibraryDefinitions: true` (ScriptEditorValidationService.cs:124-128) and shows the same script squiggle-free. The same editor gives two contradictory verdicts on the same content, and the well-tested `ValidateNowAsync` service entry point exists but is used only by tests (ScriptEditorValidationService.cs:60-63).",
+  "recommendation": "Route the menu handler through the existing ScriptEditorValidationService (or at minimum pass `allowLibraryDefinitions: true` to match inline behavior, with a separate informational note that library scripts aren't directly executable). Replace the silent returns with explicit feedback: \"This is a plain command list — YAML validation does not apply\" / \"Select a preset to validate\".",
+  "user_benefit": "Validate Script always answers, and the answer matches the squiggles — library authors stop getting a false failure from the menu on scripts the editor says are clean.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "5775-5790", "note": "silent returns at 5777-5778 and 5782-5783; Validate call at 5790 omits allowLibraryDefinitions"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs", "lines": "4181-4209", "note": "allowLibraryDefinitions defaults to false; false adds 'Library scripts cannot be executed directly' error"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptEditorValidationService.cs", "lines": "124-128", "note": "inline validation passes allowLibraryDefinitions: true — divergent flags"}
+  ]
+ },
+ {
+  "id": "BUG-072",
+  "title": "Editor diagnostics delivery from the validation thread lacks handle/disposal guards (latent cross-thread control access and post-dispose crash)",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "editor",
+  "lens": "reliability",
+  "existing_state": "ScriptEditorValidationService raises DiagnosticsUpdated on a threadpool continuation (`ConfigureAwait(false)` + invoke, ScriptEditorValidationService.cs:82-87). The control's handler (UI/ScintillaScriptEditorControl.cs:2291-2305) checks only `IsDisposed` and `InvokeRequired`. Two gaps: (1) Pre-handle delivery — `QueueRefreshAndValidation` explicitly requests validation when the handle is NOT yet created (lines 620-625), and JobEditorDialog assigns editor text in its constructor before ShowDialog (JobEditorDialog.cs:222 `PrepopulateFromJob()` -> line 1581). If the debounced result (min 150ms) arrives before handle creation, `InvokeRequired` returns false (documented WinForms behavior when no handle exists) and `SetDiagnostics` -> `ApplyDiagnosticsVisuals` runs on the threadpool thread, where touching `_editor.TextLength`/indicators (lines 2192-2200) forces the Scintilla handle to be created on a non-UI thread — the control is then permanently broken for the real UI thread. (2) Disposal race — the marshaled lambda `BeginInvoke(() => SetDiagnostics(diagnostics))` (line 2300) has no disposal guard inside it, so a callback that lands after the dialog is closed mid-debounce hits disposed Scintilla and throws ObjectDisposedException. The author guarded the exact same pattern in the sibling path (`IsDisposed || _editor.IsDisposed` inside the lambda, lines 628-634) but not here.",
+  "recommendation": "In ValidationService_DiagnosticsUpdated: bail (or stash the diagnostics for OnHandleCreated) when `!IsHandleCreated`; add the same `IsDisposed || _editor.IsDisposed` check inside the BeginInvoke lambda as QueueRefreshAndValidation already has; optionally wrap the BeginInvoke call in try/catch (ObjectDisposedException, InvalidOperationException). Alternatively suppress the pre-handle RequestValidationOrClear at line 620-625 and re-request on OnHandleCreated.",
+  "user_benefit": "Eliminates a rare but real crash/corruption window when opening or closing the Job Editor (or main form) while validation of a YAML preset is in flight.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs", "lines": "2291-2305", "note": "handler: IsDisposed check then InvokeRequired-gated BeginInvoke; no IsHandleCreated guard, no guard inside the lambda"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs", "lines": "613-639", "note": "sibling QueueRefreshAndValidation requests validation pre-handle (620-625) yet guards its own lambda (631-634) — asymmetry"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptEditorValidationService.cs", "lines": "82-87", "note": "DiagnosticsUpdated invoked on threadpool after ConfigureAwait(false)"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs", "lines": "222, 1581", "note": "editor text assigned during constructor (PrepopulateFromJob), before any handle exists"}
+  ]
+ },
+ {
+  "id": "BUG-073",
+  "title": "Flow Canvas layout autosave races preset switches: the previous preset's positions and sticky notes overwrite the newly active preset",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "flowcanvas-bridge",
+  "lens": "data-integrity",
+  "existing_state": "React debounces layout-autosave by 300ms (FlowCanvas/src/utils/layoutAutosave.ts:14-17) and nothing cancels the pending timer when a new graph loads. On the C# side, ApplyLayoutAutosave resolves the destination preset from `_activePresetName` AT MESSAGE-ARRIVAL TIME with no identity check in the payload (Form1.cs:2419-2424). Switching presets sets `_activePresetName` first and then reloads the canvas (LoadPresetIntoEditor, Form1.cs:2156-2160). So: drag a block (or toggle expand/disable — debugSlice.ts:75-104 also autosaves), switch presets within ~300ms, and the stale autosave lands on the NEW preset — Positions are cleared and replaced with the old preset's node positions (Form1.cs:2433-2443), and layout.Comments is cleared and replaced with the old preset's canvas notes (Form1.cs:2450-2472). Sticky-kind notes live ONLY in CanvasLayoutData, so the new preset's notes are destroyed and the old preset's notes appear on it; because node ids are deterministically `node-{counter}` for every preset, the corrupted positions also pass the Manual-mode structure-hash merge on the next load.",
+  "recommendation": "Tag the canvas session with the preset identity: when Form1 sends load-graph, include the active preset name (or a session token), have React echo it back on every layout-autosave/set-layout-mode, and have ApplyLayoutAutosave drop payloads whose preset doesn't match `_activePresetName`. Cheaper stopgap: capture `_activePresetName` into a field when LoadCurrentScriptIntoCanvas sends the graph and route autosaves to that captured name instead of the live one.",
+  "user_benefit": "Manual layouts and canvas sticky notes are user-authored work; a routine preset switch can currently scramble one preset's arrangement and permanently delete its notes with no error.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "2419-2472", "note": "ApplyLayoutAutosave keys off live _activePresetName, clears+replaces Positions and Comments from the payload"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\layoutAutosave.ts", "lines": "8-23", "note": "300ms debounce; flush only on layout-mode switch, not on load-graph/preset switch"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "2148-2160", "note": "preset switch updates _activePresetName then reloads the canvas — the race window"}
+  ]
+ },
+ {
+  "id": "BUG-074",
+  "title": "Flow Canvas undo/redo restores only nodes+edges — breakpoint/expanded Sets, the host's pending breakpoints, isDirty, and the persisted layout all desync",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "flowcanvas-state",
+  "lens": "correctness",
+  "existing_state": "UndoSnapshot holds nodes and edges only (FlowCanvas/src/stores/slices/undoSlice.ts:7-12); undo/redo swap them wholesale and clear export status, nothing else (undoSlice.ts:46-98 — no Set state, no `sendLayoutAutosave`, and `isDirty` is neither set nor restored). Three resulting desyncs from the one incomplete restore: (1) Phantom debugger state — toggleBreakpoint writes the breakpoints Set + node data.breakpoint + notifies the host (debugSlice.ts:41-56), and toggleExpanded writes the expandedNodes Set + data.expanded (debugSlice.ts:78-91). Make any snapshotted edit, toggle a breakpoint on, then Ctrl+Z: node data reverts (the gutter dot disappears — BaseBlock.tsx:149 renders from data.breakpoint) but the Set AND the host's _pendingBreakpoints still hold the id, so the next run pauses at a block with no visible breakpoint; the mirror case leaves a dot the executor ignores. The expandedNodes desync recreates the render-expanded vs layout-collapsed mismatch class that previously caused block overlap on preset switches. (2) Stale persisted layout — the host's saved layout is only updated by explicit autosave triggers (drag stop App.tsx:176-179, comment edits, expand/disable toggles, settings commits — utils/layoutAutosave.ts:14-23), so after drag + Ctrl+Z the canvas shows the restored arrangement while the host still holds the pre-undo positions; in Manual layout mode the next open merges the stale positions back via the tuple merge (Services/FlowCanvasBridge.cs:5403-5441), silently resurrecting the exact arrangement the user undid (same for undone comment moves/additions). (3) Undoing all changes back to the loaded state still reports the graph dirty.",
+  "recommendation": "After every undo/redo in undoSlice.ts: rebuild the three Sets (breakpoints/expandedNodes/disabledBlocks) from the restored node data (data.breakpoint/expanded/disabled carry the truth — one source of truth, ~30 lines) and send the host the breakpoint delta so _pendingBreakpoints stays in sync; call the debounced `sendLayoutAutosave()` so the host's persisted layout always reflects the visible graph; and track the snapshot index at load time to clear `isDirty` when undo returns to the loaded state. (Alternative: include the Sets in UndoSnapshot and diff/replay on restore — more state, same outcome.)",
+  "user_benefit": "Undo stops creating phantom debugger state (runs pausing at blocks with no breakpoint mark), Manual-mode users' undone layout experiments stop silently resurrecting on the next open, and the dirty flag stops lying after a full undo.",
+  "mockup_idea": "",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\undoSlice.ts", "lines": "7-12, 46-98", "note": "snapshots restore nodes/edges only; no Set state, no host re-notification, no autosave, no isDirty handling"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\debugSlice.ts", "lines": "41-56, 78-91", "note": "breakpoint/expanded live in Set + node.data + (for breakpoints) host pending set — three copies, only one undone"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\nodes\\BaseBlock.tsx", "lines": "149", "note": "visual reads data.breakpoint — desynced Set entries are invisible"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\layoutAutosave.ts", "lines": "14-23", "note": "autosave only fires from explicit edit triggers — never from undo/redo"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "5403-5441", "note": "Manual-mode reopen merges the stale saved positions back onto the graph"}
+  ]
+ },
+ {
+  "id": "BUG-075",
+  "title": "React Flow's default Backspace delete handler is still enabled — a second, snapshot-less delete pipeline that bypasses undo and dirty tracking",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "flowcanvas-state",
+  "lens": "correctness",
+  "existing_state": "The app implements Delete/Backspace itself (hooks/useKeyboardShortcuts.ts:84-94) routing through `removeNodes`/`removeEdges`, which push undo snapshots and set isDirty (graphSlice.ts:427-476). But the <ReactFlow> element never sets `deleteKeyCode` (App.tsx:363-396), and the library default is 'Backspace' (node_modules/@xyflow/react/dist/esm/index.mjs:3586), so React Flow's internal delete handler is ALSO live, emitting removals through `onNodesChange`/`onEdgesChange` — paths that push no undo snapshot, and (for node removals) never set isDirty (graphSlice.ts:243-326; the remove branch at :317-323 returns no isDirty). The two pipelines disagree because selection state is tracked twice and only partially synced: `selectedEdgeIds` is only populated by explicit `selectEdge` calls (graphSlice.ts:478-483; `onEdgesChange` at :328-344 ignores edge 'select' changes), and `selectNodes` (used by paste, :629-631) sets the store Set without setting RF's `node.selected` flags. Whenever RF's internal selection has something the store Sets don't (e.g. edges selected via the selection box, or selected-flagged nodes restored by undo), Backspace deletes them through the snapshot-less RF path — un-undoable, and for nodes also not flagged dirty. The asymmetric key handling also means Backspace and Delete behave differently for the same selection.",
+  "recommendation": "Set `deleteKeyCode={null}` on the <ReactFlow> element in App.tsx so all deletions funnel through the app's own handler, and make that handler read RF's authoritative selection (nodes/edges with `selected === true`) in addition to the store Sets. As defense in depth, set `isDirty: true` in the `onNodesChange` remove branch (graphSlice.ts:317-323) to match `onEdgesChange`.",
+  "user_benefit": "Eliminates the class of 'I hit Backspace and Ctrl+Z won't bring it back' losses, and makes Delete/Backspace behave identically — deletions of wiring are structural edits to a preset and must always be undoable.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\App.tsx", "lines": "363-396", "note": "no deleteKeyCode override on ReactFlow"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\node_modules\\@xyflow\\react\\dist\\esm\\index.mjs", "lines": "3586", "note": "deleteKeyCode = 'Backspace' default in installed v12.10.1"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\graphSlice.ts", "lines": "243-344, 478-483, 629-631", "note": "RF-routed removals: no pushSnapshot, node removals no isDirty; selectedEdgeIds never synced from edge select changes; selectNodes doesn't set node.selected"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\hooks\\useKeyboardShortcuts.ts", "lines": "84-94", "note": "app's own delete path (snapshotting) only sees the store Sets"}
+  ]
+ }
+]

@@ -1,0 +1,41 @@
+{
+ "id": "UX-038",
+ "title": "Canvas Ctrl+F search never pans the viewport to the current match, and matches hidden internal metadata",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-ui",
+ "lens": "ux",
+ "existing_state": "Enter/Shift+Enter in the search overlay (FlowCanvas/src/panels/SearchOverlay.tsx:28-34) call nextSearchResult/prevSearchResult, which only increment searchIndex modulo results (stores/slices/uiSlice.ts:246-260). App.tsx:280-317 applies 'search-match'/'search-current' classNames to nodes — and that is all: nothing calls setCenter/fitView, so on any graph larger than one screen the 'current' match is usually off-viewport and cycling results appears to do nothing. The codebase already has the exact pattern needed: ProblemsPanel.tsx:19-25 selects a node and setCenter-animates to it (reduced-motion aware). Separately, the match predicate includes JSON.stringify(data.props) (uiSlice.ts:236-239), and imported blocks carry hidden bridge metadata inside props — _stepPath like 'steps/3/then/0' is written for every step (Services/FlowCanvasBridge.cs:422) and _isChildOf/_branchColor/_yamlSnippet for branch children (FlowCanvasBridge.cs:743-746) — so queries like 'step', 'then', 'if', or a node id match blocks whose visible fields contain nothing of the sort, inflating the 'n of m' count with phantom hits.",
+ "recommendation": "In SearchOverlay (or a store subscription on searchIndex/searchResults), look up the current match node and call reactFlow.setCenter(nodeCenterX, nodeCenterY, { zoom: Math.max(currentZoom, 0.75), duration: reducedMotion ? 0 : 300 }) — mirror ProblemsPanel.tsx:24. In uiSlice.setSearchQuery, build the props haystack from Object.entries(props).filter(([k]) => !k.startsWith('_')) and match against values only (not raw JSON with keys/braces). Optionally render a small result list under the search box (block label + type) for click-to-jump.",
+ "user_benefit": "Search becomes usable on real-world presets (50+ blocks): hit Ctrl+F, type, Enter-cycle, and the canvas flies to each hit like VS Code or any node editor. Match counts stop lying about phantom hits from internal YAML snippets and layout metadata.",
+ "evidence": [
+  {
+   "file": "FlowCanvas/src/stores/slices/uiSlice.ts",
+   "lines": "226-260",
+   "note": "setSearchQuery stringifies full props (incl. _yamlSnippet/_stepPath); next/prev only mutate searchIndex"
+  },
+  {
+   "file": "FlowCanvas/src/panels/SearchOverlay.tsx",
+   "lines": "28-34",
+   "note": "Enter cycles results, no viewport action"
+  },
+  {
+   "file": "FlowCanvas/src/App.tsx",
+   "lines": "280-317",
+   "note": "search results only become classNames; no setCenter/fitView"
+  },
+  {
+   "file": "FlowCanvas/src/panels/ProblemsPanel.tsx",
+   "lines": "19-25",
+   "note": "existing select+setCenter pattern to reuse"
+  },
+  {
+   "file": "Services/FlowCanvasBridge.cs",
+   "lines": "422, 743-746",
+   "note": "bridge writes _stepPath/_isChildOf/_branchColor into data.props for every imported block — inside the search haystack"
+  }
+ ],
+ "mockup_idea": "Before/after split: left shows today's search box reading '3 of 17' with the highlighted node off-screen; right shows the same query with the viewport smoothly centered on the pulsing current match plus a dropdown list of result labels under the search box.",
+ "merged_from": 2
+}

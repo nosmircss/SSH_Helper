@@ -1,0 +1,85 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>UX-038 mockup</title><style>
+  body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+  .hd{font-size:12px;margin:0 0 2px;color:#c9d4e3}
+  .sub{color:#8294a8;font-size:10.5px;margin:0 0 10px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+  .cap b{color:#ff5c5c;font-weight:600}.cap i{color:#2bd97c;font-style:normal;font-weight:600}
+  .canvas{position:relative;height:218px;border:1px solid #1c2330;border-radius:8px;overflow:hidden;
+    background:#0d1118 radial-gradient(#1c2330 1px,transparent 1px);background-size:18px 18px}
+  .sbox{position:absolute;top:8px;right:8px;display:flex;align-items:center;gap:5px;background:#131825;
+    border:1px solid #1c2330;border-radius:6px;padding:4px 6px;z-index:3;box-shadow:0 4px 14px #0008}
+  .sin{background:#0b0e13;border:1px solid #1c2330;border-radius:4px;padding:2px 6px;width:74px;color:#c9d4e3}
+  .sin span{border-right:1px solid #4cc9f0;animation:caret 1s steps(1) infinite}
+  @keyframes caret{50%{border-color:transparent}}
+  .cnt{font-size:10px;color:#8294a8;white-space:nowrap}
+  .btn{border:1px solid #1c2330;border-radius:3px;padding:1px 4px;font-size:9px;color:#8294a8}
+  .blk{position:absolute;width:158px;background:#131825;border:1px solid #2a3447;border-radius:7px;padding:5px 7px;z-index:2}
+  .blk .t{font-size:9px;text-transform:uppercase;letter-spacing:.08em}
+  .blk .n{font-size:10.5px;color:#c9d4e3;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .blk .m{font-size:9px;color:#8294a8;margin-top:1px}
+  .send .t{color:#4cc9f0}.iff .t{color:#ffb454}.var .t{color:#2bd97c}
+  .hit{outline:2px dashed #ffb454;outline-offset:2px}
+  .cur{outline:2px solid #ffb454;outline-offset:2px;animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{50%{box-shadow:0 0 16px 2px #ffb45466}}
+  .wire{position:absolute;width:2px;background:#2a3447;left:99px;z-index:1}
+  .tag{position:absolute;font-size:9px;color:#ff5c5c;background:#1a0f12;border:1px solid #ff5c5c55;border-radius:4px;padding:2px 5px;z-index:3;max-width:150px}
+  .off{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(#0d111800,#0d1118 55%);padding:14px 10px 7px;font-size:9.5px;color:#ff5c5c;z-index:3}
+  .list{position:absolute;top:36px;right:8px;width:196px;background:#131825;border:1px solid #1c2330;border-radius:6px;z-index:3;overflow:hidden;box-shadow:0 6px 16px #000a}
+  .list div{padding:3px 8px;font-size:10px;color:#8294a8;border-top:1px solid #1c233066;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .list div:first-child{border-top:0}
+  .list .sel{background:#4cc9f01a;color:#c9d4e3;border-left:2px solid #4cc9f0}
+  .list em{font-style:normal;color:#4cc9f0;margin-right:5px}
+  .chip{position:absolute;left:8px;bottom:8px;font-size:9px;color:#4cc9f0;background:#0b0e13d9;border:1px solid #1c2330;border-radius:4px;padding:2px 6px;z-index:3}
+  ul{margin:7px 0 0;padding:0;list-style:none;font-size:10.5px}
+  li{margin:3px 0;color:#8294a8}
+  li.bad:before{content:"\2715  ";color:#ff5c5c}
+  li.ok:before{content:"\2713  ";color:#2bd97c}
+</style></head><body>
+<p class="hd">UX-038 &mdash; Ctrl+F never pans to the match &amp; counts phantom hits on hidden metadata</p>
+<p class="sub">52-block preset &middot; user searches <b style="color:#c9d4e3">down</b> and presses Enter to cycle</p>
+<div class="grid">
+
+<div>
+  <p class="cap"><b>Before</b> &middot; today</p>
+  <div class="canvas">
+    <div class="sbox"><span class="sin">down<span>&nbsp;</span></span><span class="cnt">3 of 12</span><span class="btn">&#9650;</span><span class="btn">&#9660;</span><span class="btn">&#10005;</span></div>
+    <div class="wire" style="top:48px;height:110px"></div>
+    <div class="blk send" style="top:14px;left:20px"><div class="t">send_command</div><div class="n">show system interface</div><div class="m">edge-fw-01 &middot; 10.0.4.12</div></div>
+    <div class="blk var hit" style="top:74px;left:20px"><div class="t">set_var</div><div class="n">retry_count = 0</div></div>
+    <div class="tag" style="top:80px;left:186px">phantom &mdash; hidden _yamlSnippet contains &laquo;down&raquo;</div>
+    <div class="blk send hit" style="top:130px;left:20px"><div class="t">wait</div><div class="n">5 seconds</div></div>
+    <div class="tag" style="top:138px;left:186px">phantom &mdash; _stepPath &laquo;steps/3/then/0&raquo;</div>
+    <div class="off">current match #3 (&laquo;notify ops-team&raquo;) is ~1,400&nbsp;px below &mdash; Enter cycles, viewport never moves &#8595;</div>
+  </div>
+  <ul>
+    <li class="bad">No setCenter/fitView &mdash; on any real preset the &laquo;current&raquo; hit sits off-screen, so cycling appears dead</li>
+    <li class="bad">Haystack = JSON.stringify(props): _stepPath / _yamlSnippet inflate the count (&laquo;then&raquo;, &laquo;step&raquo;, ids all phantom-match)</li>
+  </ul>
+</div>
+
+<div>
+  <p class="cap"><i>After</i> &middot; pan to match + clean haystack</p>
+  <div class="canvas">
+    <div class="sbox"><span class="sin">down<span>&nbsp;</span></span><span class="cnt" style="color:#2bd97c">1 of 4</span><span class="btn">&#9650;</span><span class="btn">&#9660;</span><span class="btn">&#10005;</span></div>
+    <div class="list">
+      <div class="sel"><em>if</em>{{output}} contains 'down'</div>
+      <div><em>notify</em>link down: edge-fw-01</div>
+      <div><em>send</em>ping 10.0.4.12 (downlink)</div>
+      <div><em>log</em>record downtime window</div>
+    </div>
+    <div class="wire" style="top:100px;height:96px;left:88px"></div>
+    <div class="blk iff cur" style="top:108px;left:9px"><div class="t">if</div><div class="n">{{output}} contains 'down'</div><div class="m">steps/4 &middot; then / else</div></div>
+    <div class="blk send" style="top:170px;left:9px;opacity:.55"><div class="t">notify</div><div class="n">link down: edge-fw-01</div></div>
+    <div class="chip">setCenter(node, {zoom:0.85, duration: reducedMotion ? 0 : 300})</div>
+  </div>
+  <ul>
+    <li class="ok">Enter flies the viewport to each hit &mdash; reuses the exact ProblemsPanel.tsx select+setCenter pattern</li>
+    <li class="ok">Props filtered: keys starting with &laquo;_&raquo; skipped, match values only &rarr; 12 &rarr; 4 honest hits</li>
+    <li class="ok">Result list under the box: click any row to jump</li>
+  </ul>
+</div>
+
+</div>
+</body></html>

@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-034",
+ "title": "Squiggle positions are regex-scraped from human-readable error strings instead of structured parser output",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "L",
+ "area": "editor",
+ "lens": "perf",
+ "existing_state": "ScriptParser.Validate returns List<string> (ScriptParser.cs:4181-4185) — positions known at validation time are flattened into prose. ScriptEditorValidationService then reverse-engineers locations from the message text with three regexes (ScriptEditorValidationService.cs:9-16): any message lacking a parseable 'Line N' lands on line 1 with a full-line squiggle (line 164), and the underlined token is found by the FIRST case-insensitive IndexOf occurrence in that line (line 172), which underlines the wrong instance when the token appears twice. MapExceptionToDiagnostic does the same scrape on exception text (193-205). This structure means every new validation message added to the 4000+-line Validate method must remember the exact 'Line N:' string format or the editor silently mis-places the squiggle — the contract is an undocumented string convention between two services, and there is no test that can catch a formatting miss generically.",
+ "recommendation": "Add a structured diagnostic type to the parser (line, column/token span, severity, message) and a Validate overload that returns it, populating positions at the emit sites that already compute them (the originalYaml/lines plumbing at ScriptParser.cs:4188 shows line info is already threaded through). Migrate incrementally: structured where available, fall back to the existing string-scrape for unconverted sites, then have ScriptEditorValidationService consume the structured list directly and keep string formatting only for the MessageBox/manual-validate path. The regex scrapers become dead code at the end.",
+ "user_benefit": "Squiggles land on the actual offending line/token instead of defaulting to line 1 or underlining the wrong duplicate — and new validation rules can't silently break editor placement via a string-format mismatch.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptParser.cs",
+   "lines": "4181-4188",
+   "note": "Validate returns List<string>; line text already threaded in via originalYaml"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptEditorValidationService.cs",
+   "lines": "9-16",
+   "note": "LineMessageRegex/LooseLineRegex/TokenRegex scrape positions back out of message prose"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptEditorValidationService.cs",
+   "lines": "159-191",
+   "note": "no line match => line 1 (164); token underline = first case-insensitive occurrence (172)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptEditorValidationService.cs",
+   "lines": "193-205",
+   "note": "exception path repeats the same scrape"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

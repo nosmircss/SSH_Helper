@@ -1,0 +1,41 @@
+{
+ "id": "BUG-005",
+ "title": "Per-host passwords are stored under one credential key but looked up under another — silently lost for any host using a non-default port",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "form1-a",
+ "lens": "security",
+ "existing_state": "When Windows Credential Manager is available, the app moves plaintext `password` cells into the credential store and blanks the cell, keyed by the RAW Host_IP cell text: on environment load (Form1.cs:2294-2303), on every environment switch and app close via BuildApplicationState (Form1.cs:14726-14747 — also writes the blank into the persisted state), on startup state restore (Form1.cs:14824-14833), and in MigratePasswordsToCredentialManager (Form1.cs:1510-1521). At execution time, however, GetHostConnections resolves the password under a DIFFERENT key: it parses Host_IP, overrides the port from the documented `port` convention column (Form1.cs:13317-13325), and looks up `host.ToString()` (Form1.cs:13346-13356), which renders `ip:port` for non-22 ports and bare `ip` for port 22 (Models/HostConnection.cs:92). So a row with Host_IP `10.0.0.5` and port column `2222` stores the password under `10.0.0.5` but looks it up under `10.0.0.5:2222` — a guaranteed miss; `host:22` in the Host_IP cell mismatches the other direction. The username half of the key has the same drift: it falls back to the live toolbar username at blank time (Form1.cs:2298) vs at run time (Form1.cs:13348), so changing the toolbar username also orphans stored passwords. On a miss the run silently falls back to the toolbar default password (Services/SshExecutionService.cs:1198, 1300) — wrong credentials fired at the whole fleet, with the grid cell already blanked so the user sees nothing to fix.",
+ "recommendation": "Create one key-builder helper (parse the Host_IP cell, apply the `port` column override, return HostConnection.ToString() plus a deterministic username resolution) and use it at every StoreHostPassword/TryResolveHostPassword call site (Form1.cs:1520, 2301, 13351, 13353, 14733, 14831). At resolve time, additionally probe the legacy raw-cell key so passwords already stored under the old key are migrated forward instead of lost. Consider warning (status bar) when a per-host password lookup misses and the default password is substituted.",
+ "user_benefit": "Hosts with hardened/non-default SSH ports stop silently authenticating with the wrong password after an environment switch or app restart — which today can fail whole fleet runs and even trigger account lockouts on devices that count failed logins.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "2294-2303",
+   "note": "env load: store under raw Host_IP cell value, blank the cell"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "14726-14747",
+   "note": "every env switch/app close: same raw-key store + blanks password into persisted state"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13317-13356",
+   "note": "execution: port column applied to HostConnection, lookup under host.ToString()"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HostConnection.cs",
+   "lines": "38-54,92",
+   "note": "Parse/ToString normalize the key: drops :22, renders ip:port otherwise"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "1198,1300",
+   "note": "empty host.Password silently falls back to toolbar default password"
+  }
+ ]
+}

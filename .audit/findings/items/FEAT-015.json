@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-015",
+ "title": "No structured (CSV/JSON) export of per-host results — only plain-text transcripts",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "S",
+ "area": "fleet-workflow",
+ "lens": "cross",
+ "existing_state": "All result exports are flat text: SaveHistoryEntry writes the whole concatenated run transcript to one .txt (Form1.cs:14265-14285), SaveAllHistory concatenates every run into one .txt (Form1.cs:14296-14342), and the per-host export writes a single host's output to .txt (Form1.cs:8814-8840). Yet the per-host structured data already exists in every history payload — HostHistoryEntry has HostAddress, Success, WasCancelled, Timestamp, Label (Models/AppConfiguration.cs:428-437). There is no way to produce the artifact a fleet operator actually reports with: a host-by-host status table (which of the 300 hosts succeeded/failed and why) that can be opened in Excel or fed to another tool. Comparing output across hosts is also manual — multi-selecting hosts just concatenates outputs (BuildSelectedHostOutput, Form1.cs:8515), even though a diff engine already exists in the codebase (Utilities/InlineDiffBuilder.cs, currently used only by UnsavedPresetDiffDialog).",
+ "recommendation": "Add \"Export Results as CSV...\" to the history list context menu: one row per HostHistoryEntry with host, status (OK/FAILED/CANCELLED), timestamp, label/error, optional truncated or full output column; reuse CsvManager's escaping. Consider a sibling JSON export for tooling. As a follow-on, add a two-host \"Compare outputs\" view reusing InlineDiffBuilder for drift triage across hosts.",
+ "user_benefit": "Produces the report every fleet change actually ends with — a spreadsheet of per-host outcomes — in one click, instead of hand-parsing a concatenated text transcript.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "14265-14342",
+   "note": "single-entry and all-history exports are concatenated .txt only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs",
+   "lines": "428-437",
+   "note": "structured per-host fields already persisted in payloads"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\InlineDiffBuilder.cs",
+   "lines": "",
+   "note": "existing diff engine, used only for preset diffs"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

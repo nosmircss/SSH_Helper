@@ -1,0 +1,31 @@
+{
+ "id": "UX-016",
+ "title": "Missed scheduled runs during downtime are buried in per-job history with no startup prompt or catch-up affordance",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "jobs-scheduling",
+ "lens": "ux",
+ "existing_state": "On startup, RecordMissedSchedulerRunsOnStartup (Form1.cs:15258-15283) calls SchedulingService.DetectMissedRunSummaries (Services/SchedulingService.cs:148-181) and writes one skipped-run summary per affected job into that job's history file via SaveSkippedRunSummary — and nothing else. There is no dialog, banner, toast, or status-bar indication that runs were missed. The only way to discover that 'Nightly Backup' missed 5 runs while the laptop was off is to open the Job List dialog, select that specific job, and notice an orange 'Skipped' row in its history grid (JobListDialog.cs:690-693). Missed runs are never auto-executed by design (a reasonable policy), but the user is also never offered the choice, so the design intent ('inform the user') ends one click short of actually informing anyone.",
+ "recommendation": "After RecordMissedSchedulerRunsOnStartup collects skippedSummaries (Form1.cs:15271-15274), if non-empty show a one-shot non-modal banner or themed dialog: 'While SSH Helper was closed, N scheduled runs were missed across M jobs' with a per-job list (name, missed count, last scheduled time) and buttons Run Now (per job, routing through existing RunTrackedJobNowAsync at Form1.cs:15311), Open Scheduler, and Dismiss. Cheapest credible version: a toast via the existing NotificationService plus a temporary status-bar suffix like 'Scheduler: 3 active (5 missed)'.",
+ "user_benefit": "A user whose machine was off over the weekend immediately sees which maintenance jobs didn't run and can catch up with one click, instead of silently operating on stale device configs.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "15258-15283",
+   "note": "Detection result written to history only; no UI surface"
+  },
+  {
+   "file": "Services/SchedulingService.cs",
+   "lines": "148-181",
+   "note": "DetectMissedRunSummaries aggregates missed occurrences per enabled recurring job"
+  },
+  {
+   "file": "JobListDialog.cs",
+   "lines": "690-693",
+   "note": "Skipped entries render orange only inside the selected job's history grid"
+  }
+ ],
+ "mockup_idea": "Startup banner strip under the menu bar: warning icon + '5 scheduled runs were missed while the app was closed (Nightly Backup x3, Cert Check x2)' with [Run missed jobs now] [Open Scheduler] [Dismiss] buttons; banner uses DialogTheme dark-mode colors.",
+ "merged_from": 1
+}

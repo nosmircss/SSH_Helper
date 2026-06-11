@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-023",
+ "title": "sftp is a second, divergent SSH stack: new connection per step, fully synchronous body, cancellation checked only before connect",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-b",
+ "lens": "perf",
+ "existing_state": "SftpCommand uses SSH.NET's SftpClient (SftpCommand.cs:5,66) — a completely separate stack from the Rebex SshShellSession/connection pool that powers send. Every sftp step constructs a fresh SftpClient with password-only auth and performs a full TCP connect + key exchange + auth (66-72), then disposes it — so a foreach uploading N files to a host pays N complete SSH handshakes, and a fleet run multiplies that by host count. The entire method is synchronous despite returning Task (ExecuteAsync has zero awaits, 15-103): Connect() (72), UploadFile (82) and DownloadFile (91) all block the worker thread, and the cancellation token is checked exactly once before connecting (64) — pressing Stop during a stuck connect or a large transfer does nothing until OperationTimeout fires (default 120s, 35, or much longer for a slow multi-GB transfer). Capability divergence breeds defects: hosts reachable via send (Rebex pool, key/Vault credentials via CredentialMode.Vault) fail on sftp because only username/password literals or context vars are accepted (111-137), with no key auth and no Vault path.",
+ "recommendation": "Cache one connected SftpClient per host endpoint on ScriptContext (keyed host:port:user, disposed when the host scope ends) so loops reuse the connection instead of re-handshaking per step. Switch to SSH.NET's async surface: ConnectAsync(cancellationToken), and replace UploadFile/DownloadFile with sftp.Open(...) + Stream.CopyToAsync(buffer, cancellationToken) so Stop actually interrupts transfers. Route credential resolution through the same path the Rebex session uses (per-host vault_path column / CredentialMode.Vault) so sftp and send agree on how a host authenticates. Longer term, evaluate whether Rebex (already licensed and pooled) exposes SFTP so the second stack can be deleted entirely.",
+ "user_benefit": "Bulk file transfers across a fleet stop paying a full SSH handshake per file, the Stop button works during transfers instead of hanging for up to the timeout, and scripts that authenticate via Vault/keys for send no longer mysteriously fail on sftp steps.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/SftpCommand.cs",
+   "lines": "15-103",
+   "note": "Task-returning method with zero awaits — fully synchronous body"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/SftpCommand.cs",
+   "lines": "64-72",
+   "note": "single token check, then new SftpClient(host,port,user,password) + blocking Connect() per step"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/SftpCommand.cs",
+   "lines": "82, 91",
+   "note": "blocking UploadFile/DownloadFile, no cancellation mid-transfer"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/SftpCommand.cs",
+   "lines": "111-137",
+   "note": "password-only credential resolution; no key or Vault integration"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

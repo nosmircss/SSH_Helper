@@ -1,0 +1,31 @@
+{
+ "id": "ENH-022",
+ "title": "Copy/paste is a second-class citizen: fixed-offset paste, no cut/duplicate, and container subtrees don't duplicate cleanly",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-state",
+ "lens": "ux",
+ "existing_state": "Paste always lands at the ORIGINAL node position +30/+30 (FlowCanvas/src/utils/clipboard.ts:48-56) — copy a block, scroll to the other end of a long preset, Ctrl+V, and the paste appears off-screen back where the source was. Only Ctrl+C/Ctrl+V exist (hooks/useKeyboardShortcuts.ts:48-74); there is no Ctrl+X cut or Ctrl+D duplicate-in-place. The deep copy keeps data.props untouched (clipboard.ts:44-57), so a copied container child still carries _isChildOf/_stepPath/_membershipFromConnect pointing at the ORIGINAL container — branch bands, the layout tree, and export-regeneration then treat the pasted copy as a member of the original's branch, so duplicating an If with its children does not produce an independent subtree. The module-level clipboard (clipboard.ts:9) also survives preset switches, so paste can inject nodes whose metadata references ids from a different preset.",
+ "recommendation": "Track the last pointer position (or use ReactFlow screenToFlowPosition of the viewport center) and paste there. In pasteNodes, sanitize props: drop _membershipFromConnect/_branchLabel/_branchColor/_forceGraphExport always; remap _isChildOf through idMap when the parent was copied too, else strip _isChildOf/_stepPath so the paste is a clean orphan ready to wire. Add Ctrl+X (copy + removeNodes) and Ctrl+D (copy+paste near selection in one snapshot). Clear the clipboard in the load-graph handler (stores/messageBridge.ts resetGraphSessionState) to stop cross-preset id leakage.",
+ "user_benefit": "Duplicating a worked-out If/Try pattern — the most common way power users build the next section of a 200-host script — becomes a one-keystroke, lands-where-you-look operation instead of producing a half-linked copy you must hunt down and untangle.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\clipboard.ts",
+   "lines": "9, 38-70",
+   "note": "module-level clipboard; paste at source position +30/+30; data.props (incl. _isChildOf/_stepPath) copied verbatim, never sanitized or remapped"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\hooks\\useKeyboardShortcuts.ts",
+   "lines": "48-74",
+   "note": "only Ctrl+C/Ctrl+V wired; no cut, no duplicate"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\childMembership.ts",
+   "lines": "43-45",
+   "note": "membership is read from data.props — stale copied metadata is honored by bands/layout/export"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

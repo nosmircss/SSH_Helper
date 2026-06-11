@@ -1,0 +1,31 @@
+{
+ "id": "BUG-057",
+ "title": "Running a folder silently excludes presets inside its subfolders",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "M",
+ "area": "form1-b",
+ "lens": "correctness",
+ "existing_state": "ExecuteFolderPresetsAsync builds the run list via GetSortedPresetsInFolder (Form1.cs:12836-12837), which calls PresetManager.GetPresetsInFolder — an exact ordinal match on the folder path (Services/PresetManager.cs:762-769). Presets in nested subfolders are never included; the FolderExecutionDialog (Form1.cs:12850) simply lists the direct children, so nothing tells the user that 'Datacenter/Switches' presets were left out of a 'Datacenter' run. The app is inconsistent about folder semantics: deleting the same folder counts and operates on all descendants (CountPresetsInFolderAndDescendants, Form1.cs:8124-8126).",
+ "recommendation": "Include descendant presets in the folder-run preset list (grouped/prefixed by subfolder path in FolderExecutionDialog so users can uncheck whole subfolders), or at minimum show an explicit note in the dialog when N presets in subfolders were excluded. Whichever semantic is chosen, align it with the delete-folder behavior.",
+ "user_benefit": "Operators who organize presets hierarchically and run a parent folder currently get a partial run that reports success — the missing subfolder presets are easy to overlook in the dialog and there is no warning anywhere.",
+ "mockup_idea": "Before/after of FolderExecutionDialog: before shows a flat list of 3 direct-child presets for 'Datacenter'; after shows the same plus a 'Switches/' group with its 4 presets indented and checkable, with a count line 'Includes 4 presets from 1 subfolder'.",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12836-12857",
+   "note": "Run list = GetSortedPresetsInFolder, dialog shows only that list"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\PresetManager.cs",
+   "lines": "762-769",
+   "note": "Exact-folder ordinal match; no descendants"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8124-8126",
+   "note": "Folder delete counts descendants — inconsistent semantics"
+  }
+ ]
+}

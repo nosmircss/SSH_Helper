@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-025",
+ "title": "Active host grid has two persisted sources of truth, with a synthetic 'Default' environment papering over the seam",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "L",
+ "area": "persistence-config",
+ "lens": "perf",
+ "existing_state": "Every SaveConfiguration writes the live grid to two places in the same config.json: the active EnvironmentConfig.Hosts (Form1.cs:14630-14633 → EnvironmentService.SaveCurrentGridToEnvironment) and SavedState.Hosts via BuildApplicationState (Form1.cs:14679-14686). Nothing in the model layer ties them together — reconciliation is Form1 convention. The seam is bridged by a synthetic environment: 'Default' is not stored in the Environments map at all until a 'first adoption' event; until then BuildLegacyDefaultEnvironment regenerates it on demand from SavedState (ConfigurationService.cs:202-206, EnvironmentConfig.FromApplicationState:26-46). Because FromApplicationState carries no Variables, GetEnvironment(\"Default\") before adoption always returns an environment with empty Variables — Default-environment variables conceptually cannot exist until some unrelated action (creating an env, EnvironmentService.cs:162-165; saving a non-Default env, :126-129; importing, :338-341; or a variable write while Default is active, :282-285) materializes it. Beyond the behavioral trap, the duplication roughly doubles the persisted grid payload and any future feature that reads hosts must know which copy wins when.",
+ "recommendation": "Make the Environments map the single source of truth for host-grid data: materialize 'Default' into the map once at load time (one-shot migration from SavedState, mirroring the existing legacy-preset migration pattern), drop Hosts/HostColumns/SelectedHostIndices from ApplicationState, and have SaveConfiguration write the grid only through EnvironmentService. SavedState then shrinks to genuine UI state (selection, last CSV path, preset choice).",
+ "user_benefit": "Removes a whole category of 'which copy is real' bugs (empty Default variables, grid/environment drift after partial saves), shrinks config.json, and halves the grid data serialized on every save.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "14630-14633, 14679-14686",
+   "note": "Same grid written to active environment and to SavedState in one SaveConfiguration"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+   "lines": "202-206",
+   "note": "Synthetic Default rebuilt from SavedState on every request until adoption"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/EnvironmentConfig.cs",
+   "lines": "26-46",
+   "note": "FromApplicationState carries hosts/columns/CSV info but no Variables — pre-adoption Default variables are always empty"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/EnvironmentService.cs",
+   "lines": "126-129, 162-165, 282-285, 338-341",
+   "note": "Four scattered 'first adoption' sites that materialize Default — the seam every environment operation must remember"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

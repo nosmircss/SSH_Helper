@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-018",
+ "title": "No strip_ansi() or lines() helpers for cleaning raw SSH output — docs recommend a hand-typed escape-code regex instead",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-functions",
+ "lens": "ux",
+ "existing_state": "There is no built-in to strip ANSI escape sequences from captured output. SCRIPTING.md's own string-function examples tell users to write `- set: clean = regex_replace(output, '/\\x1b\\[[0-9;]*m/', \"\")` (SCRIPTING.md:1006) — an incantation that only removes SGR color codes and misses cursor-movement CSI sequences, OSC titles, and other escapes that colored/paged device CLIs (modern NX-OS, JunOS, Linux boxes with PROMPT styling) emit. StringFunctions has 16 functions (Services/Scripting/Functions/StringFunctions.cs:30-38 registration tail) with nothing output-oriented; turning _output into iterable lines requires legacy split(output, delimiter) (JsonUtilities.cs:397-416) where the user must guess the right newline delimiter for CRLF-vs-LF transcripts and then compact() the blanks.",
+ "recommendation": "Add to StringFunctions: strip_ansi(text) using a comprehensive escape regex (CSI, OSC, single-char escapes — well-known pattern, one line with the existing 5s regex timeout convention) and lines(text) that splits on \\r\\n|\\n|\\r and optionally drops blank lines (flag arg, default keep). Update the SCRIPTING.md example at line 1006 to use strip_ansi. Both slot into the existing registration block and JsonUtilities.SplitTopLevelCommas plumbing.",
+ "user_benefit": "Every parse of colored device output starts with de-ANSI-fying and line-splitting; making the first step a memorized regex with a known blind spot is beneath the tool's polish level. One word instead of an escape-code incantation.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SCRIPTING.md",
+   "lines": "1006",
+   "note": "Official docs recommend regex_replace(output, '/\\x1b\\[[0-9;]*m/', \"\") — SGR-only, misses other escape classes"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs",
+   "lines": "30-38",
+   "note": "Registration list — no output-cleanup helpers among the 16 string functions"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\JsonUtilities.cs",
+   "lines": "397-416",
+   "note": "split() with manual delimiter is the only line-splitting path; default delimiter is ','"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,87 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box}
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace}
+.cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap b{color:#ff5c5c;font-weight:600}.cap.g b{color:#2bd97c}
+.row{display:flex;gap:14px;align-items:flex-start}
+.col{flex:1;min-width:0}
+.win{background:#10141c;border:1px solid #1c2330;border-radius:6px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.tb{display:flex;align-items:center;gap:6px;padding:5px 8px;background:#151a24;border-bottom:1px solid #1c2330;font-size:10px}
+.tb .sp{flex:1}.tb i{font-style:normal;color:#8294a8;width:14px;text-align:center}
+.tb i.off{color:#3a4456;text-decoration:line-through}
+.tabs{display:flex;border-bottom:1px solid #1c2330;background:#0e1219;overflow:hidden;white-space:nowrap}
+.tabs span{padding:4px 8px;color:#8294a8;border-right:1px solid #1c2330;font-size:10px;flex-shrink:0}
+.tabs .on{color:#4cc9f0;background:#10141c;border-bottom:1px solid #10141c;margin-bottom:-1px}
+.bd{padding:8px}
+.fr{display:flex;align-items:center;gap:6px;margin:0 0 6px}
+.fr label{color:#8294a8;font-size:10px;width:88px;flex-shrink:0}
+.in{background:#0b0e13;border:1px solid #2a3344;border-radius:3px;padding:3px 6px;font-size:10.5px;color:#c9d4e3;overflow:hidden;white-space:nowrap}
+.clip{border-right:2px dashed #ff5c5c;color:#c9d4e3}
+.full{flex:1;border-color:#2bd97c55}
+.note{font-size:9.5px;color:#8294a8;margin:6px 0 0;padding-left:14px}
+.note li{margin:2px 0}.note .r{color:#ff5c5c}.note .g{color:#2bd97c}.note .c{color:#4cc9f0}
+.grip{text-align:right;color:#2bd97c;font-size:9px;padding:0 4px 2px}
+.search{display:flex;align-items:center;gap:6px;margin:8px 8px 0;background:#0b0e13;border:1px solid #4cc9f0aa;border-radius:4px;padding:4px 8px;font-size:10.5px}
+.search .mag{color:#4cc9f0}.search .ph{color:#8294a8}
+.hit{background:#141a14;border:1px solid #2bd97c44;border-left:3px solid #2bd97c;border-radius:3px;padding:4px 8px;margin:0 0 5px;display:flex;align-items:center;gap:8px;font-size:10.5px}
+.badge{font-size:8.5px;color:#4cc9f0;border:1px solid #4cc9f055;border-radius:3px;padding:1px 5px;flex-shrink:0}
+mark{background:none;color:#ffb454;font-weight:600;border-bottom:1px solid #ffb454}
+.hit .v{margin-left:auto;color:#8294a8}
+.dim{color:#5b6a7e;font-size:9.5px;padding:2px 8px}
+.sb{position:absolute;right:2px;top:30px;bottom:8px;width:5px;background:#1c2330;border-radius:3px}
+.sb i{position:absolute;top:8%;height:34%;left:0;right:0;background:#3a4456;border-radius:3px}
+.rel{position:relative}
+h1{font-size:12px;margin:0 0 8px;color:#c9d4e3;font-weight:600}
+h1 code{color:#4cc9f0}
+</style></head><body>
+
+<h1><code>UX-029</code> — Settings dialog: fixed 544×620 → sizable + reflowing rows + search</h1>
+
+<div class="row">
+<div class="col" style="flex:.88">
+  <p class="cap">Before — <b>FixedDialog 544×620</b>, UI font at 125%</p>
+  <div class="win rel">
+    <div class="tb">Settings<span class="sp"></span><i class="off">▢</i><i>✕</i></div>
+    <div class="tabs"><span>General</span><span>Updates</span><span class="on">Vault</span><span>Appearan</span><span style="border:0;color:#ff5c5c">…</span></div>
+    <div class="bd" style="font-size:11.5px">
+      <div class="fr"><label>Address:</label><div class="in clip" style="width:148px">https://vault.prod.nwcd.in</div></div>
+      <div class="fr"><label>Namespace:</label><div class="in clip" style="width:148px">admin/network-op</div></div>
+      <div class="fr"><label style="border-right:2px dashed #ff5c5c;width:80px">CA Certifi</label><div class="in clip" style="width:118px">C:\certs\nwcd-r</div><div class="in" style="width:34px;color:#8294a8">Bro…</div></div>
+      <div class="fr"><label>Cache TTL (sec):</label><div class="in" style="width:48px">300</div></div>
+    </div>
+    <div class="sb"><i></i></div>
+  </div>
+  <ul class="note">
+    <li><span class="r">Rows hardcoded Width=430</span> — long Vault URLs clip</li>
+    <li><span class="r">AutoScaleMode.None</span>: text grows, shell doesn't</li>
+    <li>Appearance: 13 font spinners behind a <span class="r">scrollbar</span></li>
+    <li>No maximize, no resize, no way to find a setting</li>
+  </ul>
+</div>
+
+<div class="col" style="flex:1.12">
+  <p class="cap g">After — <b>sizable</b> (min 544×620), stretched to ~900×700</p>
+  <div class="win">
+    <div class="tb">Settings<span class="sp"></span><i style="color:#2bd97c">▢</i><i>✕</i></div>
+    <div class="search"><span class="mag">⌕</span><span>timeout<span style="color:#4cc9f0">|</span></span><span class="sp"></span><span class="ph">3 matches</span></div>
+    <div class="tabs" style="border-top:1px solid #1c2330;margin-top:8px"><span class="on">All results</span><span>General</span><span>Updates</span><span>Command Editor</span><span>Appearance</span><span>Vault</span><span>Notifications</span></div>
+    <div class="bd">
+      <div class="hit"><span class="badge">General</span>Default command <mark>timeout</mark> (sec)<span class="v">30</span></div>
+      <div class="hit"><span class="badge">General</span>Connection <mark>timeout</mark> (sec)<span class="v">15</span></div>
+      <div class="hit"><span class="badge">Vault</span>OIDC <mark>Timeout</mark> (sec)<span class="v">120</span></div>
+      <div class="dim">42 settings hidden by filter — clear to show all</div>
+      <div class="fr" style="margin-top:8px"><label>Address:</label><div class="in full">https://vault.prod.nwcd.internal:8200</div></div>
+      <div class="fr"><label>SMTP To:</label><div class="in full">noc@nwcd.net; chris@nwcd.net; oncall-network@nwcd.net</div></div>
+    </div>
+    <div class="grip">◢</div>
+  </div>
+  <ul class="note">
+    <li><span class="g">FormBorderStyle.Sizable</span>, geometry persisted to WindowState — same pattern as EnvironmentDialog</li>
+    <li><span class="g">Dock/TableLayout rows</span> grow with dialog &amp; reflow at large fonts (full-width fields above)</li>
+    <li><span class="c">Search filter</span> hides non-matching rows across all six tabs (VS Code pattern)</li>
+  </ul>
+</div>
+</div>
+
+</body></html>

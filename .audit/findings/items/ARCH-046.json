@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-046",
+ "title": "LocalCmdCommand is a 1,270-line god-class mixing four subsystems",
+ "category": "ARCH",
+ "severity": "low",
+ "effort": "M",
+ "area": "scripting-commands-a",
+ "lens": "perf",
+ "existing_state": "Services/Scripting/Commands/LocalCmdCommand.cs packs roughly 45 members spanning four distinct subsystems into one file: three execution modes (ExecuteForeground at 148, ExecuteBackground at 284, ExecuteInteractive at 362), a shell command-line construction layer (BuildProcessArgs/BuildInteractiveArgs/quoting/PowerShell encoding, lines 524-1044), a transcript-audit pipeline for interactive sessions (PrepareInteractiveAuditCapture through CleanupInteractiveAuditCapture, 673-986), and a process-wide background-process registry held in static dictionaries with an AppDomain.ProcessExit hook (lines 21-23, 1056-1165), plus the IProcessRunner/SystemProcessHandle seam classes (1193-1266). The audit pipeline already bends execution semantics to fit in (cmd interactive sessions get rewritten into `( cmd ) 2>&1 | powershell Tee-Object`, changing pipeline/exit-code behavior of the audited command, ~694-697), and any change to quoting or lifetime rules requires reasoning about all three modes at once. This is the largest command in the engine by 3-4x and the most frequently extended (confirm modes, lifetimes, audit, seams).",
+ "recommendation": "Split along the natural seams that already exist as method clusters: a `LocalShellCommandBuilder` (shell resolution + quoting + encoding, the `internal static` builders are already pure functions with tests in mind), a `BackgroundProcessRegistry` (the static tracking + cleanup + ProcessExit hook), and an `InteractiveAuditCapture` service; keep LocalCmdCommand as the thin dispatcher over foreground/background/interactive. No behavior change — file moves plus visibility adjustments (`InternalsVisibleTo` already covers the test project).",
+ "user_benefit": "The most security-sensitive and most-extended command in the engine becomes reviewable in isolation; quoting or lifetime fixes stop requiring a mental model of 1,270 lines, reducing the regression rate in a class that launches arbitrary local processes.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/LocalCmdCommand.cs",
+   "lines": "44, 104, 148, 284, 362",
+   "note": "ExecuteAsync dispatching three execution modes plus confirmation flow"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/LocalCmdCommand.cs",
+   "lines": "524-1044",
+   "note": "shell/arg construction and quoting layer (internal static, already seam-shaped)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/LocalCmdCommand.cs",
+   "lines": "21-23, 1056-1165",
+   "note": "static process registry + AppDomain.ProcessExit cleanup — a process-wide subsystem living inside a command class"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/LocalCmdCommand.cs",
+   "lines": "1193-1266",
+   "note": "IProcessRunner seam and SystemProcessHandle in the same file"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

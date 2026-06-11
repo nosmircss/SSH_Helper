@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-030",
+ "title": "Two independently maintained hand-rolled YAML step splitters — Flow Canvas Test Step correctness depends on them agreeing",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "form1-a",
+ "lens": "perf",
+ "existing_state": "Form1.SplitTopLevelYamlSteps (Form1.cs:7458-7531) is a private re-implementation of FlowCanvasBridge.SplitYamlSteps (Services/FlowCanvasBridge.cs:4655+, internal static, same assembly). Both scan for a literal `steps:` line and split on `- ` at the first step indent, but they have already diverged: the bridge version extracts leading-comment runs into comment nodes and strips inline comments (4674-4688), while Form1's version drops comment lines before the first step and glues between-step comment lines onto the PREVIOUS step's snippet (7517-7524). Form1's copy feeds TryBuildYamlThroughTopLevelStep (7356-7394), which truncates the script for the canvas 'Test Step' feature; the step index it truncates at comes from node maps built from the BRIDGE's splitting of the same text. Any future fix or behavior change to one splitter (e.g. tolerating `steps:  # comment`, which both currently reject via the exact-match at 7468 / 4664, or flow-style steps) that isn't mirrored in the other silently shifts step boundaries, making Test Step run the wrong prefix of the script against a real host. This is the same single-source-of-truth seam class that produced past canvas import/export bugs, and it exists because ~900 lines of canvas bridge plumbing live inside Form1 rather than beside the bridge.",
+ "recommendation": "Delete Form1.SplitTopLevelYamlSteps and have TryBuildYamlThroughTopLevelStep call FlowCanvasBridge.SplitYamlSteps (it is internal static and returns StepSnippetInfo with the verbatim snippets needed for reassembly — reuse Snippet + BlankLinesBefore and re-attach the leading-comment groups it extracts). While there, move TryBuildYamlThroughTopLevelStep/BuildTestStepAllowedRoots into FlowCanvasBridge or a small FlowCanvasTestStepPlanner service so the truncation logic lives next to the splitter it must agree with and becomes unit-testable without WinForms.",
+ "user_benefit": "Guarantees the 'Test Step' truncation slices the script at exactly the boundaries the canvas displayed — eliminating a class of silent wrong-prefix executions against live hosts — and removes a duplicate parser that has to be bug-fixed twice.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "7458-7531",
+   "note": "Hand-rolled SplitTopLevelYamlSteps; exact-match `steps:` at 7468; comment lines appended to previous step at 7517-7524"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/FlowCanvasBridge.cs",
+   "lines": "4655-4690",
+   "note": "FlowCanvasBridge.SplitYamlSteps — the canonical splitter the canvas node indexing is built from, with different comment handling"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "7356-7394",
+   "note": "TryBuildYamlThroughTopLevelStep consumes Form1's splitter to truncate the script Test Step executes"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/FlowCanvasBridge.cs",
+   "lines": "389-425",
+   "note": "TextToGraph builds node↔step indexing from its own SplitYamlSteps — the contract Form1's truncation must match"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

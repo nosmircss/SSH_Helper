@@ -1,0 +1,83 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:11px/1.45 "Cascadia Code",Consolas,monospace}
+.cols{display:flex;gap:14px}.col{flex:1;min-width:0}
+.cap{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+.cap b{color:#c9d4e3}
+.win{border:1px solid #1c2330;border-radius:6px;background:#0e131b;overflow:hidden;margin-bottom:8px}
+.tb{display:flex;gap:6px;align-items:center;padding:5px 7px;background:#11161f;border-bottom:1px solid #1c2330;font-size:10px;color:#8294a8;flex-wrap:wrap}
+.tb span{padding:1px 4px}
+.filter{display:flex;align-items:center;gap:5px;border:1px solid #4cc9f0;border-radius:3px;padding:1px 6px;color:#4cc9f0;background:#0b0e13}
+.filter i{font-style:normal;color:#c9d4e3}.filter i::after{content:"";border-left:1px solid #4cc9f0;margin-left:1px;animation:b 1s steps(1) infinite}
+@keyframes b{50%{border-color:transparent}}
+table{width:100%;border-collapse:collapse;font-size:10px}
+th{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#8294a8;text-align:left;padding:3px 7px;border-bottom:1px solid #1c2330;font-weight:400;white-space:nowrap}
+td{padding:3px 7px;border-bottom:1px solid #141a26;white-space:nowrap}
+tr.sel td{background:#15263a;color:#e6f0fb}
+.ok{color:#2bd97c}.fail{color:#ff5c5c}.mut{color:#8294a8}
+.badge{font-size:9px;border-radius:3px;padding:0 5px;margin-left:5px}
+.bad{color:#ff5c5c;border:1px solid #ff5c5c66;background:#ff5c5c14}
+.good{color:#2bd97c;border:1px solid #2bd97c55;background:#2bd97c12}
+.note{font-size:10px;margin:0 0 10px;padding-left:9px;border-left:2px solid #ff5c5c}
+.note.g{border-color:#2bd97c}.note .r{color:#ff5c5c}.note .gr{color:#2bd97c}.note .c{color:#4cc9f0}
+.dlg{border:1px solid #2a3550;border-radius:6px;background:#131927;box-shadow:0 8px 24px #00000088;margin:0 8px 8px;font-size:10.5px}
+.dlg h4{margin:0;padding:6px 9px;font-size:10px;border-bottom:1px solid #1c2330;color:#c9d4e3;font-weight:600}
+.dlg .bd{padding:8px 10px}
+.dlg ul{margin:5px 0 0;padding-left:16px}.dlg li{margin:1px 0}
+.btns{display:flex;gap:7px;justify-content:flex-end;padding:7px 9px;border-top:1px solid #1c2330}
+.btn{border:1px solid #2a3550;border-radius:3px;padding:2px 11px;font-size:10px;color:#c9d4e3;background:#1a2233}
+.btn.danger{background:#ff5c5c22;border-color:#ff5c5c;color:#ff8181}
+.toast{display:flex;gap:9px;align-items:center;margin:0 8px 9px;padding:5px 10px;border:1px solid #ffb45466;border-radius:4px;background:#ffb45412;font-size:10.5px}
+.toast b{color:#ffb454;font-weight:600}.toast .undo{margin-left:auto;color:#4cc9f0;text-decoration:underline}
+.sorted{color:#4cc9f0}
+</style></head><body>
+
+<div class="cols">
+
+<div class="col">
+<p class="cap">Before — <b>current JobListDialog</b></p>
+<div class="win">
+ <div class="tb"><span>New</span><span>Edit</span><span>Run Now</span><span>Enable/Disable</span><span>Delete</span><span>Export File</span><span class="badge bad">no filter box</span></div>
+ <table>
+  <tr><th>Name &#9650;<span class="badge bad">&#8635; 5s rebuild &rarr; forced A&ndash;Z</span></th><th>Next Run</th><th>Last Result</th></tr>
+  <tr class="sel"><td>Backup-Core1</td><td>06-11 02:00</td><td class="ok">OK</td></tr>
+  <tr><td>Backup-Core2</td><td>06-11 02:05</td><td class="ok">OK</td></tr>
+  <tr><td>Cert-Check-Core</td><td>06-15 06:00</td><td class="fail">Fail</td></tr>
+  <tr><td>Log-Rotate-Edge</td><td>06-10 23:30</td><td class="ok">OK</td></tr>
+  <tr><td class="mut">&hellip; 24 more rows, scan by eye</td><td></td><td></td></tr>
+ </table>
+ <div style="height:8px"></div>
+ <div class="dlg">
+  <h4>Confirm Delete</h4>
+  <div class="bd">Delete job 'Backup-Core1'?</div>
+  <div class="btns"><span class="btn">OK</span><span class="btn">Cancel</span></div>
+ </div>
+</div>
+<p class="note">One click on OK <span class="r">silently destroys 41 run-history records and the stored Credential Manager password</span> &mdash; the dialog never mentions either, and there is <span class="r">no undo</span>. Single-select also strands the plural-aware export code.</p>
+</div>
+
+<div class="col">
+<p class="cap">After — <b>proposed</b></p>
+<div class="win">
+ <div class="tb"><span>New</span><span>Edit</span><span>Run Now</span><span>Delete</span><div class="filter">&#128269; <i>core</i></div><span class="badge good">3 / 28 jobs</span></div>
+ <table>
+  <tr><th>Name</th><th class="sorted">Next Run &#9650;<span class="badge good">persists across refresh</span></th><th>Last Result</th></tr>
+  <tr class="sel"><td>Backup-Core1</td><td>06-11 02:00</td><td class="ok">OK</td></tr>
+  <tr class="sel"><td>Backup-Core2</td><td>06-11 02:05</td><td class="ok">OK</td></tr>
+  <tr class="sel"><td>Cert-Check-Core</td><td>06-15 06:00</td><td class="fail">Fail</td></tr>
+ </table>
+ <div style="height:8px"></div>
+ <div class="dlg">
+  <h4>Delete 3 jobs?</h4>
+  <div class="bd">Backup-Core1, Backup-Core2, Cert-Check-Core<br>
+  <span class="fail">This also permanently deletes:</span>
+  <ul><li>87 run-history records</li><li>2 stored credentials (Windows Credential Manager)</li></ul></div>
+  <div class="btns"><span class="btn danger">Delete 3 Jobs</span><span class="btn">Cancel</span></div>
+ </div>
+ <div class="toast"><b>3 jobs deleted</b><span class="mut">history purge deferred 30 s</span><span class="undo">Undo</span></div>
+</div>
+<p class="note g"><span class="c">Multi-select</span> unlocks the already-built bulk export/enable/delete paths; <span class="gr">consequences are spelled out before the click</span>, and the snapshot-restore pattern from preset deletion provides the Undo window.</p>
+</div>
+
+</div>
+</body></html>

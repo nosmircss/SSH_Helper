@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-045",
+ "title": "The Host_IP column contract is hardcoded in 4 production call sites with inconsistent case sensitivity, bypassing the existing CsvManager.HostColumnName constant",
+ "category": "ARCH",
+ "severity": "low",
+ "effort": "S",
+ "area": "ui-utilities",
+ "lens": "perf",
+ "existing_state": "CsvManager.HostColumnName (Services/CsvManager.cs:11) is the declared single source of truth for the enforced host column, and HostGridUtilities uses it consistently with OrdinalIgnoreCase comparisons (Utilities/HostGridUtilities.cs:308, 321-322, 334-336). But the literal \"Host_IP\" is re-hardcoded in production code at Utilities/JobEditorValidator.cs:107, Form1.cs:2664, Form1.cs:4329, and Services/JobExecutionService.cs:494. The JobEditorValidator instance is also the only case-SENSITIVE lookup: ValidateHosts uses host.TryGetValue(\"Host_IP\", ...) directly (JobEditorValidator.cs:107) even though the very same file defines a case-insensitive TryGetRowValue helper that it uses for the username/password columns (JobEditorValidator.cs:243-259). So the job editor's host validation applies a stricter key-matching rule than the grid code that produces and consumes those same row dictionaries — a row keyed 'host_ip' satisfies the grid utilities but fails (or sneaks past) this validator depending on direction.",
+ "recommendation": "Mechanical cleanup: replace the four production literals with CsvManager.HostColumnName, and change JobEditorValidator.ValidateHosts:107 to use its own TryGetRowValue helper so Host_IP matching is case-insensitive like everywhere else. A grep for '\"Host_IP\"' (excluding tests) should come back empty when done.",
+ "user_benefit": "Removes a latent validation inconsistency in the job editor and makes the host-column contract genuinely single-sourced, so the convention documented in CLAUDE.md ('Host_IP is the only column enforced in code') stays true as the scheduler and validators grow.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/JobEditorValidator.cs",
+   "lines": "99-118",
+   "note": "ValidateHosts: hardcoded literal with case-sensitive TryGetValue at :107"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/JobEditorValidator.cs",
+   "lines": "243-259",
+   "note": "Case-insensitive TryGetRowValue exists in the same file but is not used for Host_IP"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/CsvManager.cs",
+   "lines": "11",
+   "note": "The existing HostColumnName constant"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/HostGridUtilities.cs",
+   "lines": "308, 321-322, 334-336",
+   "note": "Correct pattern: constant + OrdinalIgnoreCase"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "2664, 4329",
+   "note": "Two more production literals (plus Services/JobExecutionService.cs:494)"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

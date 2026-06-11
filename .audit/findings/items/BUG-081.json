@@ -1,0 +1,26 @@
+{
+ "id": "BUG-081",
+ "title": "Scintilla native DLL extraction trusts any existing file forever — one interrupted first run permanently breaks the editor",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "cross-startup",
+ "lens": "reliability",
+ "existing_state": "ExtractEmbeddedResource early-returns whenever the destination file exists (Utilities/ScintillaNativeBootstrap.cs:113-118) and writes with a non-atomic FileMode.Create stream (:127-128). If the process is killed or crashes mid-extraction on first launch (or two instances race — the writer uses FileShare.Read, so a second process can also load a half-written DLL), a truncated Scintilla.dll or Lexilla.dll is left under %LocalAppData%\\SSH_Helper\\scintilla-native\\<version>\\win-x64, and every subsequent launch reuses it verbatim: the existence check is the only validation. The result is a persistent, opaque native-load failure in the command editor on every run, fixable only by manually deleting a cache directory the user has never heard of. (The version-segmented path only busts the cache on a ScintillaNET package upgrade.)",
+ "recommendation": "Make the extraction atomic and self-healing: write to a temp file in the same directory and File.Move/Replace it into place, and validate existing files before reuse (cheapest: compare file length against the embedded resource stream length; re-extract on mismatch). Ten lines in ExtractEmbeddedResource.",
+ "user_benefit": "An interrupted or concurrent first launch can no longer leave the script editor permanently broken with no user-visible remedy.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\ScintillaNativeBootstrap.cs",
+   "lines": "113-129",
+   "note": "File.Exists early-return (no size/integrity check) + non-atomic FileMode.Create write with FileShare.Read"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\ScintillaNativeBootstrap.cs",
+   "lines": "56-87",
+   "note": "extraction path is reused for the lifetime of the installed ScintillaNET version"
+  }
+ ]
+}

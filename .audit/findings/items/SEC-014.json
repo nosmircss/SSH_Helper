@@ -1,0 +1,31 @@
+{
+ "id": "SEC-014",
+ "title": "WebView2 hosts accept commands (run SSH, rewrite scripts, open dialogs) from any page — no origin validation or navigation restrictions",
+ "category": "SEC",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-bridge",
+ "lens": "bugs",
+ "existing_state": "Both WebView2 hosts dispatch inbound web messages without checking the sender's origin: FlowCanvasForm.OnWebMessageReceived parses and routes directly (UI/FlowCanvasForm.cs:200-212), and the routed messages include run/run-request (executes the preset over SSH via Form1 wiring), apply-yaml/execute-canvas (rewrites the script editor), and browse-path (opens native file pickers) — FlowCanvasForm.cs:229-294. Neither form validates CoreWebView2WebMessageReceivedEventArgs.Source against the expected https://flowcanvas.local origin, and neither subscribes to NavigationStarting or NewWindowRequested (no handlers anywhere in UI/), so any navigation away from the bundled app — a link/window.open introduced in the React bundle, or future linkified run output — leaves an arbitrary page able to PostWebMessage and drive SSH execution against the loaded host fleet. The dist folder is also mapped with CoreWebView2HostResourceAccessKind.Allow (FlowCanvasForm.cs:173-176; UI/RunOutputWindowForm.cs:120), broader than the DenyCors default Microsoft recommends for local app assets.",
+ "recommendation": "Standard WebView2 hardening, ~20 lines: (1) in both OnWebMessageReceived handlers, return unless e.Source starts with 'https://flowcanvas.local/'; (2) subscribe NavigationStarting and cancel any URI outside that origin; (3) subscribe NewWindowRequested and set Handled=true (open external links via Process.Start if ever needed); (4) downgrade the host mapping to DenyCors unless cross-origin fetches are actually used. Apply identically to FlowCanvasForm and RunOutputWindowForm.",
+ "user_benefit": "This app holds SSH credentials for entire fleets; the message channel is effectively remote-execution. Pinning it to the bundled origin closes the gap permanently instead of relying on the React bundle never containing an external navigation path.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\FlowCanvasForm.cs",
+   "lines": "200-212, 229-294",
+   "note": "No e.Source validation; routed messages include run/apply-yaml/browse-path"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\FlowCanvasForm.cs",
+   "lines": "135-179",
+   "note": "Allow virtual-host mapping; no NavigationStarting/NewWindowRequested handlers anywhere in the file"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\RunOutputWindowForm.cs",
+   "lines": "104-134",
+   "note": "Same pattern in the detached run-output window"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

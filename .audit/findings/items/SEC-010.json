@@ -1,0 +1,31 @@
+{
+ "id": "SEC-010",
+ "title": "TLS can be silently disabled and SMTP credentials sent in cleartext, with no runtime warning",
+ "category": "SEC",
+ "severity": "medium",
+ "effort": "M",
+ "area": "security-posture",
+ "lens": "cross",
+ "existing_state": "Three transport paths can drop or skip TLS protection with no visible warning. (1) Vault: SkipTlsVerification installs DangerousAcceptAnyServerCertificateValidator, accepting any certificate (Services/Vault/VaultService.cs:1094-1098) — and Vault tokens travel over that connection. (2) The http script command: verify_tls: false installs the same any-cert validator (Services/Scripting/Commands/HttpCommand.cs:327-330); the only signal is a Debug-level line. (3) SMTP notifications: SmtpClient is created with EnableSsl = profile.UseStartTls (Services/Notifications/SmtpDispatcher.cs:86-90), so if UseStartTls is unset the SMTP username/password (pulled from Credential Manager) and the message body are sent over an unencrypted connection; there is no implicit-TLS (port 465) support and System.Net.Mail offers no STARTTLS-required/downgrade protection. None of these states raise a persistent warning badge in the UI.",
+ "recommendation": "Surface a clear, persistent warning whenever TLS verification is disabled (a red badge on the Vault profile / Settings, and a runtime Warning-level output line — not Debug — for verify_tls:false). For SMTP, default UseStartTls on, warn when a username/password is configured but transport encryption is off, and add implicit-TLS (465) support. Where feasible, prefer fixing certificate trust (custom CA) over blanket skip.",
+ "user_benefit": "Operators can unknowingly ship Vault tokens, API bearer tokens, or SMTP credentials across the network in the clear; making the insecure state loud (or secure-by-default) prevents accidental credential exposure during routine automation.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+   "lines": "1094-1098",
+   "note": "SkipTlsVerification accepts any server certificate"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Notifications\\SmtpDispatcher.cs",
+   "lines": "86-95",
+   "note": "EnableSsl=UseStartTls only; creds sent cleartext if disabled, no 465 implicit-TLS"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\HttpCommand.cs",
+   "lines": "327-330",
+   "note": "verify_tls:false installs DangerousAcceptAnyServerCertificateValidator"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

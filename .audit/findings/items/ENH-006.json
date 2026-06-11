@@ -1,0 +1,31 @@
+{
+ "id": "ENH-006",
+ "title": "sftp command is password-only — no key auth, no Vault, despite both existing elsewhere in the app",
+ "category": "ENH",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-commands-b",
+ "lens": "ux",
+ "existing_state": "SftpCommand hard-fails with 'Sftp requires password (or password in current context)' when no plaintext password is available (Services/Scripting/Commands/SftpCommand.cs:59-60) and connects via SSH.NET's password-only SftpClient ctor (:66-72). SftpOptions has no key_file, passphrase, or vault fields at all (Services/Scripting/Models/ScriptStep.cs:1224-1275). Meanwhile the main pooled shell session that 'send' uses logs in with an identity file via SshPrivateKey when the host has one (Services/SshConnectionPool.cs:464-469), and the app has CredentialMode.Vault plus a vault script command and per-host vault_path columns. So a script whose 'send' steps work fine against a key-auth or Vault-credentialed fleet cannot use sftp against the same hosts. The command is also single-file only — UploadFile/DownloadFile of one path (:79-95), no wildcard or directory transfer, and no progress output during a long transfer (only a final byte count, :85, :94).",
+ "recommendation": "Resolve sftp credentials through the same per-host resolution the pooled session uses (identity file + passphrase, Vault-sourced password, then plaintext fallback) instead of demanding a literal password; extend SftpOptions with key_file/key_passphrase overrides for explicit cases. While in the file, add wildcard/directory support (SSH.NET ListDirectory + per-file loop) and emit periodic progress via the UploadFile/DownloadFile callback so a 500 MB firmware push across 200 devices isn't a silent two-minute stall per host.",
+ "user_benefit": "Fleets that follow basic SSH hygiene (key auth, vaulted secrets) can actually use file transfer in scripts; today sftp forces them to keep plaintext passwords in the host grid just for this one command.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SftpCommand.cs",
+   "lines": "59-60, 66-72, 79-95",
+   "note": "password required, password-only SftpClient ctor, single-file transfer with no progress"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Models\\ScriptStep.cs",
+   "lines": "1224-1275",
+   "note": "SftpOptions: action/local_path/remote_path/host/port/username/password/overwrite/timeout/into — nothing else"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs",
+   "lines": "464-469",
+   "note": "main SSH stack already logs in with SshPrivateKey(identityFile, passphrase)"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

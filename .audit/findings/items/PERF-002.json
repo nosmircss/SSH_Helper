@@ -1,0 +1,46 @@
+{
+ "id": "PERF-002",
+ "title": "Multi-host runs are effectively sequential: plain Execute has no parallelism, the folder dialog resets Parallel hosts to 1 every run, and batch barriers stall on slow hosts",
+ "category": "PERF",
+ "severity": "high",
+ "effort": "M",
+ "area": "ssh-execution",
+ "lens": "perf",
+ "existing_state": "Three compounding gaps. (1) The plain Execute path iterates hosts strictly one at a time: both ExecuteAsync overloads do a foreach over hosts with a single awaited Task.Run(() => ExecuteSingleHost(...)) per host (Services/SshExecutionService.cs:389-401 and 434-451), and ExecuteScriptAsync does the same per-host await at 584-597; ExecutePresetAsync (466-486) routes everything to these loops, so a normal toolbar Execute against a 100-row grid pays connect + auth + prompt-detect + command time serially — roughly 100 x 8s, about 13 minutes for something parallelism 10 would finish in ~1.5 minutes. (2) The only parallel path, folder runs, never remembers its setting: FolderExecutionDialog's Parallel hosts textbox is hard-initialized to 1 (FolderExecutionDialog.cs:180-186), the dialog is constructed fresh each run (Form1.cs:12286, shown at 12283-12301), and FolderExecutionOptions is built only from the dialog controls with default ParallelHostCount=1 (FolderExecutionDialog.cs:337-348, Models/FolderExecutionOptions.cs:27) — users must re-type the parallel count every single run. (3) Even when set, ExecuteFolderAsync groups hosts into fixed batches via index GroupBy (SshExecutionService.cs:684-689) and awaits Task.WhenAll per batch (888-890): the next batch cannot start until every host in the current one finishes, so one unreachable host costs the full 30s connection timeout (Services/SshTimeoutOptions.cs defaults; hung commands cost the 60s command timeout) while the other N-1 slots idle — scattered dead hosts add one full timeout per affected batch. Per-host output isolation already works (ExecuteSingleHost builds its own StringBuilder at 1196) and the folder path proves live OutputReceived interleaving plus per-host aggregation, so the serialization protects nothing.",
+ "recommendation": "Extract a shared sliding-window scheduler (SemaphoreSlim(parallelHostCount) plus one task per host, or Parallel.ForEachAsync with MaxDegreeOfParallelism, results ordered by original grid index for history aggregation) and use it both in ExecuteAsync/ExecuteScriptAsync and in place of ExecuteFolderAsync's batch + WhenAll barrier; move the completedHosts counter to Interlocked per-task completion (the per-operation progress reporting at 859-870 already works that way, and stop-on-first-error plus cancellation checks already live inside the per-host lambda). Persist the last-used FolderExecutionOptions (ParallelHostCount, StopOnFirstError, SuppressPresetNames) in AppConfiguration and prime the dialog from it; surface a parallel-hosts option on the plain Execute path via the existing >1-host execution options dialog (Utilities/ExecutionDialogPolicy.cs already gates it on multi-host), defaulting to 1 to preserve current behavior.",
+ "user_benefit": "Fleet sweeps — the app's core use case — finish in minutes instead of hours, the parallelism setting sticks between runs instead of silently resetting to sequential, and slow or dead hosts no longer stall healthy ones in the same batch.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "389-401, 434-451, 584-597",
+   "note": "per-host foreach with one awaited Task.Run at a time in all three non-folder entry points"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "684-691, 888-890",
+   "note": "folder run is the only parallel path, and it uses fixed batches + Task.WhenAll barriers"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FolderExecutionDialog.cs",
+   "lines": "180-186, 337-348",
+   "note": "Parallel hosts textbox hardcoded to 1; options built only from controls, never primed from config or the previous run"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "12283-12301",
+   "note": "dialog constructed fresh per run, no option persistence"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshTimeoutOptions.cs",
+   "lines": "1-73",
+   "note": "default 30s connection / 60s command timeouts that a single bad host imposes on its whole batch"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ExecutionCoordinator.cs",
+   "lines": "38-46",
+   "note": "Form1's Execute button funnels into ExecutePresetAsync, i.e. the sequential loops"
+  }
+ ],
+ "mockup_idea": "Execution-options dialog with a persisted 'Parallel hosts' numeric slider on plain Execute, plus a timeline bar comparing '100 hosts sequential ~13 min' vs 'parallel x10 ~1.5 min'.",
+ "merged_from": 3
+}

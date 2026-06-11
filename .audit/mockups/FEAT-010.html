@@ -1,0 +1,98 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace}
+.cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+.cap b{color:#4cc9f0;font-weight:600}
+.win{border:1px solid #1c2330;border-radius:6px;background:#0d1118;overflow:hidden}
+.tb{display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1c2330;background:#10141c;font-size:10px;color:#8294a8}
+.dot{width:7px;height:7px;border-radius:50%;background:#1c2330}
+.cols{display:flex;min-height:0}
+.tree{width:150px;border-right:1px solid #1c2330;padding:6px 0;flex-shrink:0}
+.tree div{padding:2px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fold{color:#8294a8}
+.fold span{color:#4cc9f0;margin-right:4px}
+.leaf{padding-left:24px!important;color:#c9d4e3}
+.sel{background:#13202b;color:#4cc9f0;border-left:2px solid #4cc9f0}
+.mut{color:#8294a8}
+pre{margin:0;padding:8px 10px;font:10px/1.5 "Cascadia Code",Consolas,monospace;overflow:auto;flex:1}
+.c{color:#8294a8;font-style:italic}.k{color:#4cc9f0}.s{color:#ffb454}.w{color:#2bd97c}
+.meta{width:182px;border-left:1px solid #1c2330;padding:8px 10px;flex-shrink:0;font-size:10px}
+.meta h4{margin:0 0 2px;font-size:11px;color:#c9d4e3}
+.meta .lbl{color:#8294a8;font-size:9px;text-transform:uppercase;letter-spacing:.08em;margin:8px 0 2px}
+.chip{display:inline-block;border:1px solid #2bd97c55;color:#2bd97c;border-radius:3px;padding:0 5px;font-size:9px;margin-top:2px}
+.chipa{border-color:#ffb45455;color:#ffb454}
+.ft{display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid #1c2330;background:#10141c;font-size:10px}
+.dd{border:1px solid #1c2330;background:#0b0e13;border-radius:3px;padding:2px 8px;color:#c9d4e3}
+.btn{margin-left:auto;background:#2bd97c;color:#06140c;border-radius:3px;padding:3px 12px;font-weight:600}
+.btn2{color:#8294a8;border:1px solid #1c2330;border-radius:3px;padding:3px 10px}
+.cur{display:inline-block;width:6px;height:11px;background:#c9d4e3;vertical-align:-2px;animation:b 1s steps(1) infinite}
+@keyframes b{50%{opacity:0}}
+.note{font-size:10px;color:#8294a8;margin:5px 0 14px}
+.note em{color:#ff5c5c;font-style:normal}
+.menu{position:absolute;right:14px;top:30px;background:#10141c;border:1px solid #1c2330;border-radius:4px;padding:3px 0;box-shadow:0 4px 14px #0009;font-size:10px;width:148px}
+.menu div{padding:3px 10px;color:#8294a8}
+.menu .new{color:#4cc9f0;background:#13202b}
+</style></head><body>
+
+<p class="cap">Before — first run today</p>
+<div class="win" style="position:relative">
+ <div class="tb"><span class="dot"></span><span class="dot"></span>SSH Helper — Presets</div>
+ <div class="cols" style="height:96px">
+  <div class="tree">
+   <div class="fold"><span>▾</span>Presets</div>
+   <div class="leaf sel">Custom</div>
+   <div class="leaf">Get external-addre…</div>
+  </div>
+  <pre>get system status<span class="cur"></span></pre>
+  <div class="menu"><div>Rename Preset</div><div>Delete Preset</div><div style="border-top:1px solid #1c2330;margin:3px 0;padding:0"></div><div>&amp;Import Preset…</div><div class="mut" style="font-style:italic">(no sample access)</div></div>
+ </div>
+</div>
+<p class="note">The entire first-run library: <em>two unlabeled FortiGate one-liners</em>. The 31 CI-validated YAML samples in <span style="color:#c9d4e3">ScriptSamples/</span> never ship — not in releases, not in the app. Nothing hints the 40-command scripting engine exists.</p>
+
+<p class="cap">After — <b>“New Preset from Sample…”</b> gallery (preset-tree context menu, next to Import Preset)</p>
+<div class="win">
+ <div class="tb"><span class="dot"></span><span class="dot"></span>New Preset from Sample</div>
+ <div class="cols">
+  <div class="tree">
+   <div class="fold"><span>▸</span>Bash <span class="mut">(3)</span></div>
+   <div class="fold"><span>▸</span>CheckPoint <span class="mut">(1)</span></div>
+   <div class="fold"><span>▸</span>Cisco <span class="mut">(6)</span></div>
+   <div class="fold"><span>▸</span>FortiGate <span class="mut">(6)</span></div>
+   <div class="fold"><span>▾</span>Generic <span class="mut">(12)</span></div>
+   <div class="leaf">api_lookup</div>
+   <div class="leaf">csv_export</div>
+   <div class="leaf">data_extraction</div>
+   <div class="leaf sel">health_check_retry</div>
+   <div class="leaf">webhook_alerting</div>
+   <div class="fold"><span>▸</span>Libraries <span class="mut">(1)</span></div>
+  </div>
+  <pre><span class="c"># Demonstrates: while loop, wait, retry pattern</span>
+<span class="k">name</span>: Service Health Check with Retry
+<span class="k">vars</span>:
+  <span class="k">service_url</span>: <span class="s">"http://localhost:8080/health"</span>
+  <span class="k">max_retries</span>: 5
+<span class="k">steps</span>:
+  - <span class="w">log</span>: <span class="s">"Starting health check for ${Host_IP}"</span>
+  - <span class="w">set</span>: { <span class="k">expression</span>: retry = 0 }
+  - <span class="w">while</span>:
+      <span class="k">condition</span>: retry &lt; max_retries and healthy is empty
+      <span class="k">do</span>:
+        - <span class="w">send</span>:
+            <span class="k">command</span>: curl -s -w <span class="s">"%{http_code}"</span> ${service_url}
+            <span class="k">capture</span>: http_code</pre>
+  <div class="meta">
+   <h4>Service Health Check with Retry</h4>
+   <div class="mut">generic/health_check_retry.yaml</div>
+   <span class="chip">✓ CI-validated</span>
+   <div class="lbl">Description</div>
+   Checks service health with configurable retries and wait intervals.
+   <div class="lbl">Demonstrates</div>
+   while · if · send · wait · set arithmetic · log levels
+   <div class="lbl">Required CSV columns</div>
+   <span class="chip chipa">Host_IP</span>
+  </div>
+ </div>
+ <div class="ft">Create preset in folder: <span class="dd">Samples (Generic) ▾</span><span class="btn">Create Preset</span><span class="btn2">Cancel</span></div>
+</div>
+<p class="note">Read-only preview of the embedded sample (same embedding pattern as the FlowCanvas dist); Create drops the YAML into a new preset via the normal save path. The same catalog later backs the Flow Canvas “Open a sample” roadmap item.</p>
+</body></html>

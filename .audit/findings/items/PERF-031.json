@@ -1,0 +1,31 @@
+{
+ "id": "PERF-031",
+ "title": "Flow Canvas timeline grows unbounded, snapshots full unsanitized variables per step, and patches by mapping the whole array",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-state",
+ "lens": "perf",
+ "existing_state": "Every step that enters 'running' appends a TimelineEntry carrying a FULL snapshot of all current variables (FlowCanvas/src/stores/messageBridge.ts:250-271), with no cap and none of the sanitization the iteration log applies (iterationSlice.ts:12-32 strips heavy _outputwindow/_output keys and truncates strings at 2000 chars; the host-tunable iterationHistoryCap at iterationSlice.ts:8 has no timeline equivalent). Each new generation of variable values arrives as fresh objects from the JSON message, so timeline entries genuinely retain them: a loop over 100 hosts with multi-KB ${_output} values retains every generation until the next run or canvas close. Mechanically it is also quadratic: addTimelineEntry spreads the whole entries array per append (timelineSlice.ts:35-42) and updateTimelineEntry maps the entire array on every step completion (timelineSlice.ts:44-50). Entries accumulate whether or not the Timeline panel is open.",
+ "recommendation": "In messageBridge.ts:253-262, run the variables snapshot through the same sanitizer iterationSlice uses (export sanitizeVars or a shared util) before storing. Add a cap to timelineEntries (reuse iterationHistoryCap or a sibling setting; drop oldest). Replace the full-array map in updateTimelineEntry with a reverse indexOf for the newest open entry for that nodeId and replace by index; skip snapshot capture entirely while the Timeline panel has never been opened to make it free by default.",
+ "user_benefit": "Long, loop-heavy multi-host runs stop bloating WebView2 memory by tens-to-hundreds of MB and stop adding per-step array-copy cost; the canvas stays responsive across a full workday session.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/messageBridge.ts",
+   "lines": "250-271",
+   "note": "full variables snapshot per 'running' event, unsanitized"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/timelineSlice.ts",
+   "lines": "35-50",
+   "note": "unbounded append (array spread) + whole-array map per completion"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/iterationSlice.ts",
+   "lines": "8, 12-32",
+   "note": "the sanitizer + cap that exist for the iteration log but not the timeline"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

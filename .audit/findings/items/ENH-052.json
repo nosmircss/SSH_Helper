@@ -1,0 +1,31 @@
+{
+ "id": "ENH-052",
+ "title": "Vault tab lags its Notifications twin: default profile can't be cleared and Test Connection results are unthemed",
+ "category": "ENH",
+ "severity": "low",
+ "effort": "S",
+ "area": "dialogs-general",
+ "lens": "ux",
+ "existing_state": "The Vault and Notifications tabs are the same profile-manager pattern, but the implementations drifted. Unchecking 'Set as default profile' on a Vault profile is silently ignored — ChkVaultDefault_CheckedChanged early-returns whenever the box is unchecked (SettingsDialog.cs:806-816) — whereas the Notifications twin supports clearing the default (1412-1422). And Vault's Test Connection reports success/failure via raw MessageBox.Show (1069, 1073) instead of the injected _promptService used by every other prompt in the file (e.g. 2445, 2457), so the result popup is unthemed in dark mode and invisible to the test seam the dialog was deliberately built around (ISettingsDialogPromptService ctor dependency, 204).",
+ "recommendation": "Port the Notifications behavior over: copy the clear-on-uncheck branch from ChkNotificationDefault_CheckedChanged (1418-1421) into ChkVaultDefault_CheckedChanged, and swap the two MessageBox.Show calls in BtnVaultTestConnection_Click for _promptService.Show. Both are line-level changes with existing in-file reference implementations.",
+ "user_benefit": "Vault users get the same control Notifications users already have (no phantom default they can't unset), and dark-mode users stop getting a jarring white system popup from the one button they press while debugging Vault connectivity.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "806-816",
+   "note": "Uncheck of Vault default is ignored (early return on !Checked)"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "1412-1422",
+   "note": "Notifications twin supports clearing the default — reference implementation"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "1041-1080",
+   "note": "Test Connection uses raw MessageBox.Show (1069, 1073) bypassing _promptService/DialogTheme"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

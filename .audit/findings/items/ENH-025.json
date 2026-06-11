@@ -1,0 +1,26 @@
+{
+ "id": "ENH-025",
+ "title": "Themed message dialogs lost MessageBox's Ctrl+C copy — error text can no longer be copied anywhere in the app",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "ui-utilities",
+ "lens": "ux",
+ "existing_state": "DialogTheme.ShowCore builds a plain Form with a Label and buttons (UI/DialogTheme.cs:631-750) and Confirm does the same (:535-586); neither has KeyPreview or any key handling, and Labels are not selectable. The stock MessageBox these replaced supports Ctrl+C natively (copies title + message + buttons to the clipboard). With 136 production call sites across the app now routed through DialogTheme, every error surface — SSH failures, Vault errors, config load problems, job validation messages — is an unselectable, uncopyable label. A user who wants to paste an error into a search, ticket, or chat has to retype it or screenshot it.",
+ "recommendation": "In ShowCore and Confirm set dlg.KeyPreview = true and handle Ctrl+C by writing the MessageBox-style block (title, message, button captions) to the clipboard, mirroring stock behavior. Optionally add a subtle 'Copy' glyph button in the title row for discoverability. One change in DialogTheme covers all 136 call sites.",
+ "user_benefit": "Restores an expected, muscle-memory capability of every Windows message box; directly useful when reporting SSH/Vault errors from fleet runs.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\DialogTheme.cs",
+   "lines": "631-750",
+   "note": "ShowCore: no KeyPreview/KeyDown, message is a Label"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\DialogTheme.cs",
+   "lines": "535-586",
+   "note": "Confirm: same — no key handling"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

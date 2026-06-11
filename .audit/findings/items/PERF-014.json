@@ -1,0 +1,46 @@
+{
+ "id": "PERF-014",
+ "title": "Preset/favorite drag-and-drop and Favorites filtering do full config.json disk round-trips (including GZip of the entire host fleet) on the UI thread",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "form1-a",
+ "lens": "perf",
+ "existing_state": "Seven hot handlers call _configService.Load() instead of GetCurrent(): ReorderFolders (Form1.cs:4946), ReorderPresetsInFolder (4954), InsertIntoFolderOrder (4973), InsertIntoPresetOrder (5010), RenamePresetInFolderOrder (5085), RefreshFavoritesList (5197), and ReorderFavoriteItems (5477) — only the constructor's Load at 349 is legitimate. ConfigurationService.Load() (Services/ConfigurationService.cs:46-103) re-reads config.json from disk, JSON-parses the whole file (all presets), and GZip-decompresses + deserializes the entire SavedState blob — which contains every host row of the fleet (ApplicationState.Hosts, Models/AppConfiguration.cs:348-358). The reorder handlers then call Save() (108-145), which copies a .bak, re-GZips the fleet, re-serializes the entire config with Formatting.Indented, and rewrites the file — all synchronously on the UI thread, once per drop during a drag-reorder session. RefreshFavoritesList additionally runs on every 150ms search-debounce tick while the Favorites tab is active (Form1.cs:9002-9010 -> 5197), so typing in the preset filter re-reads and re-inflates the whole config per tick. As a secondary hazard, Load() replaces _cachedConfig (ConfigurationService.cs:63) — the very instance that PresetManager (Services/PresetManager.cs:32-35, mutate-then-Save at 1024-1041) and Form1 itself (e.g. 3946) mutate via GetCurrent() — so any in-memory mutation not yet saved is silently discarded by the next reorder/refresh.",
+ "recommendation": "Replace these Load() calls with _configService.GetCurrent() (the cache is always warm after the constructor's Load), or better, route the mutations through the existing ConfigurationService.Update(config => ...) API so read-modify-write is one code path and the cached instance is never swapped out from under other components. Reserve Load() for startup and explicit reload-from-disk actions.",
+ "user_benefit": "Removes a per-drop disk read+gunzip+rewrite of the whole config (noticeable hitches when the fleet/preset set is large or the config dir is AV-scanned), and closes a lost-update window where unsaved in-memory config changes are silently thrown away by an unrelated tree reorder.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "4946, 4954, 4973, 5010, 5085, 5197, 5477",
+   "note": "Load() in drag/reorder/favorites-refresh handlers"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+   "lines": "46-103",
+   "note": "Load() = File.ReadAllText + full parse + gunzip of the fleet state + _cachedConfig replacement at line 63"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+   "lines": "108-145",
+   "note": "Save() = .bak copy + re-GZip SavedState + indented full serialize + WriteAllText, synchronous"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/AppConfiguration.cs",
+   "lines": "348-358",
+   "note": "ApplicationState.Hosts holds the full fleet rows inside SavedState"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "9002-9010",
+   "note": "150ms search debounce -> RefreshFavoritesList -> Load() per tick on the Favorites tab"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/PresetManager.cs",
+   "lines": "32-35, 1024-1041",
+   "note": "PresetManager mutates the GetCurrent() instance — aliasing hazard when Load() swaps the cache"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

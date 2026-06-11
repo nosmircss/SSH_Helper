@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-003",
+ "title": "Host grid has no filter/search — only way to find a host among hundreds is scrolling",
+ "category": "FEAT",
+ "severity": "high",
+ "effort": "M",
+ "area": "form1-a",
+ "lens": "ux",
+ "existing_state": "The host grid (dgv_variables) has no search or filter capability of any kind. The app's only Find feature (Ctrl+F) is hard-wired to the output pane: Form1.cs:14490-14492 anchors FindDialog to txtOutput and Form1.cs:14516 navigates matches via txtOutput.SelectionStart. Meanwhile the preset tree DOES have a debounced search box with 'Filter presets...' placeholder (Form1.cs:8967-8982, predicates at 9080-9099), so the app already has the pattern — it just was never applied to hosts. With 200 devices, locating one host or checking a subset (e.g. all rows whose 'site' column is 'DC2') means manual scrolling and clicking checkboxes one by one; the bulk-selection affordances are limited to Select All / Deselect All / Invert (Form1.cs:6523-6546).",
+ "recommendation": "Add a filter bar above the host grid mirroring the existing preset search panel: a text box (with optional column-scope dropdown defaulting to 'All columns'), live row hiding via DataGridViewRow.Visible, a match counter, and a 'Check matching' / 'Uncheck matching' action so a filter can drive run-target selection. Reuse the InitializePresetSearchFilter debounce-timer pattern (Form1.cs:8967+). Two integration points need care: the hand-rolled scrollbar math must recompute on visibility changes (UpdateDataGridViewScrollbars, Form1.cs:890-966), and SetAllCheckboxes/select-all should operate on visible rows while a filter is active.",
+ "user_benefit": "For a fleet operator this is the single biggest daily friction: 'run this on all branch routers' becomes type-filter + Check matching instead of scrolling 200 rows ticking boxes. Also brings the grid up to parity with the app's own preset tree.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "14488-14531",
+   "note": "Find dialog is output-pane-only (anchored to txtOutput, match navigation uses txtOutput.SelectionStart)"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8967-8982",
+   "note": "Preset tree already has a debounced search/filter panel — pattern exists, hosts grid lacks it"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "6523-6546",
+   "note": "Only bulk host-selection tools are Select All / Deselect All / Invert — no criteria-based selection"
+  }
+ ],
+ "mockup_idea": "Before/after of the Hosts panel: before = plain grid with 200 rows; after = slim bar above the header with a search field ('Filter hosts...'), column dropdown, '17 of 212' match badge, and two small buttons 'Check matching' / 'Clear'. Show grid reduced to the 17 matching rows with checkboxes ticked.",
+ "merged_from": 1
+}

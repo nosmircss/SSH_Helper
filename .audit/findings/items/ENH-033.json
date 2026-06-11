@@ -1,0 +1,41 @@
+{
+ "id": "ENH-033",
+ "title": "String comparison semantics are inconsistent and uncontrollable across conditions and functions, and sort() has no numeric mode (1, 10, 2)",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-functions",
+ "lens": "ux",
+ "existing_state": "sort() always sorts with StringComparer.OrdinalIgnoreCase (Services/Scripting/JsonUtilities.cs:467-480); a list of extracted port numbers or latencies sorts as [\"1\",\"10\",\"2\"], and there is no numeric mode and no sort_by(list, x => expr) lambda variant. Case handling is inconsistent across the whole expression layer with no override anywhere: condition operators `contains`/`startswith`/`endswith` use OrdinalIgnoreCase (ExpressionEvaluator.cs:130, 139, 148), equality is case-insensitive with a 0.0001 numeric epsilon (AreEqual, ExpressionEvaluator.cs:399-416), and `in`/`not in` call ValueResolver.CollectionContains without passing a mode (112, 121) even though CollectionContains already accepts an `ordinal` mode and ResolveComparisonComparer exists precisely for this (ValueResolver.cs:370-394). Function-side, contains/startswith/endswith/index_of are hardcoded OrdinalIgnoreCase (StringFunctions.cs:48, 58, 68, 294) while legacy replace() is hardcoded case-SENSITIVE Ordinal (JsonUtilities.cs:394) and legacy indexof() for lists is ignore-case (JsonUtilities.cs:550). Only distinct() and push_unique() expose an optional comparer argument (JsonUtilities.cs:512, 524). There is no case-sensitive comparison syntax at all — relevant when matching case-significant device output like interface flags (Up vs UP), tokens, base64 secrets, or mixed-case hostnames, which silently match when they shouldn't.",
+ "recommendation": "Extend sort() with a mode argument ('numeric' parses values as doubles and sorts numerically; 'ordinal'/'ignore_case' reuse ValueResolver.ResolveComparisonComparer) and add sort_by(list, x => expr[, mode]) to CollectionFunctions following the existing SplitCollectionAndLambda pattern. Apply the comparer-argument convention distinct() already established to contains/startswith/endswith/index_of/replace as an optional trailing arg, keeping current defaults for backward compatibility. In the condition grammar, expose case-sensitive operator variants with minimal growth (e.g. an operator suffix like `==s`/`contains_cs` or a trailing `(case)` modifier) routed to StringComparison.Ordinal, and thread the existing `ordinal` mode into the CollectionContains calls at ExpressionEvaluator.cs:112/121. Document the default-insensitive semantics per function/operator in SCRIPTING.md — today they are entirely implicit.",
+ "user_benefit": "Sorting extracted numeric data correctly and matching case-significant device output are everyday needs; today users hit silent wrong ordering and silent wrong matches with no escape hatch except regex contortions, and the default behavior is undiscoverable.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\JsonUtilities.cs",
+   "lines": "467-480",
+   "note": "sort: always OrdinalIgnoreCase string sort; only asc/desc arg"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs",
+   "lines": "41-69, 294",
+   "note": "contains/startswith/endswith/index_of hardcoded ignore-case"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\JsonUtilities.cs",
+   "lines": "385-396, 505-529",
+   "note": "replace is hardcoded case-sensitive Ordinal; distinct/push_unique already show the optional-comparer pattern to generalize"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionEvaluator.cs",
+   "lines": "112, 121, 130, 139, 148, 399-416",
+   "note": "all condition comparisons hardcoded OrdinalIgnoreCase; CollectionContains called without mode"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ValueResolver.cs",
+   "lines": "370-394",
+   "note": "ordinal comparer plumbing already exists but is unreachable from conditions"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

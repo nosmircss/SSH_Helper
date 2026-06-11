@@ -1,0 +1,36 @@
+{
+ "id": "UX-043",
+ "title": "Operational knobs (scheduler concurrency, job retention defaults, update repo, MRU size) are config-file-only — no Settings UI",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "persistence-config",
+ "lens": "ux",
+ "existing_state": "Several live, consumed settings exist only as JSON fields with no editor anywhere in the UI: MaxConcurrentJobs (Models/AppConfiguration.cs:140, consumed by JobExecutionService.cs:140), DefaultMaxHistoryRuns / DefaultHistoryRetentionDays / MaxJobOutputCharsPerHost (AppConfiguration.cs:146-158, consumed by SchedulerHistoryPolicyResolver.cs:17-19), MaxRecentFiles (AppConfiguration.cs:128, enforced at Form1.cs:9113), and GitHubOwner/GitHubRepo for the update source (AppConfiguration.cs:447-452, used at Form1.cs:375-376). A grep of SettingsDialog.cs finds none of them. Changing scheduler parallelism — a knob a 200-device operator genuinely needs — requires hand-editing config.json while the app is closed, in the same single file that holds all presets and environments (one typo triggers the corrupt-config path).",
+ "recommendation": "Add a small 'Scheduler' group to SettingsDialog (concurrent jobs, default max runs per job, default retention days, max output per host) and an 'Advanced' group (recent-files count; update owner/repo behind an 'advanced' expander since forks/private mirrors are the use case). All are simple NumericUpDown/TextBox bindings into the existing config Update() flow — the persistence plumbing already exists.",
+ "user_benefit": "Power users get safe, discoverable control over scheduler throughput and retention instead of risky hand-edits of the app's single most valuable file; most users will discover these capabilities exist at all.",
+ "evidence": [
+  {
+   "file": "Models/AppConfiguration.cs",
+   "lines": "128-158",
+   "note": "MaxRecentFiles + four scheduler knobs, DTO-only"
+  },
+  {
+   "file": "Models/AppConfiguration.cs",
+   "lines": "447-452",
+   "note": "GitHubOwner/GitHubRepo configurable but UI-less"
+  },
+  {
+   "file": "Services/JobExecutionService.cs",
+   "lines": "140",
+   "note": "MaxConcurrentJobs actively consumed"
+  },
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "",
+   "note": "grep for all listed knobs returns no matches in the dialog"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

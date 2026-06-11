@@ -1,0 +1,41 @@
+{
+ "id": "UX-008",
+ "title": "Interactive terminal keyboard/clipboard gaps: F1-F12 never reach the host, Ctrl+Shift+C sends SIGINT, paste is right-click-only and multi-line paste executes instantly",
+ "category": "UX",
+ "severity": "high",
+ "effort": "S",
+ "area": "terminal",
+ "lens": "ux",
+ "existing_state": "The terminal's key handler maps only Enter/Tab/Backspace/Escape/arrows/Home/End/PageUp/Down/Insert/Delete to Rebex FunctionKeys (Forms/InteractiveTerminalForm.cs:303-320); F1-F12 fall through `_ => null` and are silently dropped (:322-323), so full-screen TUI apps that depend on the F-bar (htop, mc, FortiGate menus) are unusable. The Ctrl+letter branch (:290-301) matches e.Control without excluding Shift and sends only ConsoleModifiers.Control — so the de-facto terminal copy shortcut Ctrl+Shift+C transmits a raw Ctrl+C (SIGINT) to the remote host, potentially killing whatever is running, and Ctrl+Shift+V sends Ctrl+V. There is no keyboard copy/paste at all: copy is select-to-copy on mouse-up only (UI/InteractiveTerminalViewportControl.cs:298-317), paste is right-click only (InteractiveTerminalForm.cs:379-385 → PasteClipboardToHost :449-467), Shift+Insert is forwarded to the host as an Insert keystroke (:317, 326-335), and a multi-line clipboard is normalized CRLF→LF (:481-486) and sent in one Send(text) call (Services/Terminal/InteractiveTerminalService.cs:1790-1803) — every line executes immediately on the remote device with no confirmation or bracketed-paste safety.",
+ "recommendation": "In InteractiveTerminalForm_KeyDown: (1) add Keys.F1..F12 → Rebex FunctionKey.F1..F12 to the switch; (2) before the Ctrl+letter branch, intercept Ctrl+Shift+C / Ctrl+Insert (copy selection) and Ctrl+Shift+V / Shift+Insert (PasteClipboardToHost) so they never leak to the host; (3) in PasteClipboardToHost, when the normalized text contains a newline, show a small themed confirm (line count + first-line preview, 'Paste 14 lines?', don't-ask-again option) mirroring Windows Terminal's multi-line paste warning. Optionally honor bracketed paste mode when the remote application has enabled it.",
+ "user_benefit": "Function-key-driven remote apps become usable, the most common terminal muscle-memory shortcut stops accidentally interrupting running commands on production hosts, and blind-executing a 30-line clipboard against a router becomes impossible.",
+ "evidence": [
+  {
+   "file": "Forms/InteractiveTerminalForm.cs",
+   "lines": "290-301",
+   "note": "Ctrl+letter branch ignores Shift; Ctrl+Shift+C is sent as Ctrl+C (SIGINT) to the host"
+  },
+  {
+   "file": "Forms/InteractiveTerminalForm.cs",
+   "lines": "303-323",
+   "note": "FunctionKey switch lacks F1-F12; unmatched keys are dropped"
+  },
+  {
+   "file": "Forms/InteractiveTerminalForm.cs",
+   "lines": "379-385, 449-467, 481-486",
+   "note": "Paste is right-click only; multi-line paste executes immediately, no confirmation"
+  },
+  {
+   "file": "UI/InteractiveTerminalViewportControl.cs",
+   "lines": "298-317",
+   "note": "Copy only via mouse-up select-to-copy; no keyboard path"
+  },
+  {
+   "file": "Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "1790-1803",
+   "note": "TextInput handler sends the full pasted text as a single stream.Send — every embedded newline executes"
+  }
+ ],
+ "mockup_idea": "Small modal over the terminal: 'Paste 14 lines to 192.168.1.20? First line: conf t' with [Paste] [Paste as one line] [Cancel] and a 'Don't warn again' checkbox.",
+ "merged_from": 2
+}

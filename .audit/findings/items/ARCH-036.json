@@ -1,0 +1,26 @@
+{
+ "id": "ARCH-036",
+ "title": "Debug correlation is a two-scheme, four-map stack split across Form1 and the bridge, with a dead legacy layer",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-bridge",
+ "lens": "perf",
+ "existing_state": "Correlating executor step events to canvas nodes involves four parallel dictionaries in Form1 (_nodeToStepPathMap, _stepPathToNodeIdMap, _nodeToStepIndexMap, _stepIndexToNodeIdMap) rebuilt together at run start (Form1.cs:12324-12341) from either a cached map or a fresh bridge graph regeneration. Resolution (TryResolveCanvasNodeId, Form1.cs:13757-13809) layers three fallbacks: stepPath lookup, a reverse-map consistency re-check (13777), then a legacy top-level step-INDEX scheme (13788-13808). The index-scheme builders live privately in Form1 (BuildStepIndexToNodeMap 13699-13711, BuildNodeToStepIndexMap 13728-13738) while FlowCanvasBridge exposes a public BuildNodeIdToStepIndexMap (FlowCanvasBridge.cs:5235) and ToGraph(Script) (1028) with zero callers repo-wide (verified by grep — only TextToGraph is used). Two coexisting identity schemes plus four hand-synchronized maps is exactly the seam where this app has already shipped defects: the _stepPath-gap bug class (dead path highlight + missing per-block output after structural edits) lives entirely in this correlation layer, and any future change must keep all four maps and both schemes coherent or events get silently dropped (fail-quiet logging only, 13790-13803).",
+ "recommendation": "Collapse to a single immutable CanvasExecutionMap type built once by the bridge per apply/run (nodeId <-> stepPath, both directions, plus an IsCurrent(nodeId) check), hold one reference in Form1, and delete the step-index scheme: remove the dead FlowCanvasBridge.ToGraph and BuildNodeIdToStepIndexMap, the private Form1 index-map builders, and the index fallback in TryResolveCanvasNodeId (it can only ever resolve top-level steps and masks stepPath regressions that should surface in tests instead).",
+ "user_benefit": "The canvas highlight/output pipeline gets one source of truth instead of four; the recurring 'neon path dies / output missing' bug class loses its breeding ground, and step events that fail to map fail loudly in tests rather than silently in the field.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "12324-12341, 13699-13738, 13757-13809",
+   "note": "Four maps rebuilt at run start; three-layer resolution with legacy step-index fallback; fail-quiet drops"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/FlowCanvasBridge.cs",
+   "lines": "1028, 5235",
+   "note": "ToGraph(Script) and BuildNodeIdToStepIndexMap are public with zero callers (repo-wide grep); Form1 reimplements the index map privately"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

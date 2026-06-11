@@ -1,0 +1,31 @@
+{
+ "id": "ENH-037",
+ "title": "dns command supports only A/AAAA/PTR via the OS resolver — no TXT/MX/CNAME/SRV and no custom server",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-a",
+ "lens": "ux",
+ "existing_state": "DnsCommand whitelists exactly A, AAAA, and PTR (Services/Scripting/Commands/DnsCommand.cs:118-123) and resolves through System.Net.Dns (`GetHostAddressesAsync`/`GetHostEntryAsync`, DnsCommand.cs:143-154), which can only use the machine's configured resolver. The allowed-key table is `host, type, timeout, into, on_error` (Services/Scripting/ScriptParser.cs:131) — no `server:` key. For a network-operations tool this rules out the two most common verification tasks: checking TXT/MX/CNAME/SRV/NS records, and asking a SPECIFIC DNS server (e.g., 'has the record change propagated to each site's resolver?'). Any unsupported type fails the step with 'Dns type ... is not supported' (DnsCommand.cs:45-48).",
+ "recommendation": "Swap the System.Net.Dns backend behind the existing IDnsResolver seam (DnsCommand.cs:137-141) for a real DNS client (the DnsClient NuGet package is the standard choice) and extend IsSupportedType to TXT/MX/CNAME/SRV/NS/SOA. Add an optional `server:` option (IP or host of the resolver to query, defaulting to system resolvers) to DnsOptions and the parser key table at ScriptParser.cs:131. Keep the existing capture shape (`into` list + `into_count`) and render MX/SRV records as 'priority host' strings for backward-compatible list handling.",
+ "user_benefit": "DNS verification scripts (propagation checks across site resolvers, MX/TXT audits before mail or ACME changes) can run inside SSH_Helper presets instead of pushing engineers back out to nslookup/dig in a separate terminal.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\DnsCommand.cs",
+   "lines": "118-123",
+   "note": "type whitelist: A, AAAA, PTR only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\DnsCommand.cs",
+   "lines": "143-154",
+   "note": "SystemDnsResolver wraps System.Net.Dns — system resolver only, no server selection"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs",
+   "lines": "131",
+   "note": "no server key in the dns option set"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

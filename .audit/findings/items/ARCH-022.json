@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-022",
+ "title": "Four parallel implementations of 'read a Vault secret' with divergent parsing, error semantics, and cancellation behavior",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "integrations",
+ "lens": "perf",
+ "existing_state": "Four call sites independently re-implement profile resolution + path parsing + error policy on top of VaultService: (1) VaultCredentialProvider.ParseVaultPath for the vault_path column (Services/Vault/VaultCredentialProvider.cs:78-124); (2) hand-rolled parsing inside ScriptContext.ResolveVaultExpression for inline {{vault:...}} (Services/Scripting/ScriptContext.cs:715-744); (3) VaultCommand for the vault: step (Services/Scripting/Commands/VaultCommand.cs:22-57); (4) VaultFunctions for vault()/vault_list() (Services/Scripting/Functions/VaultFunctions.cs:16-69). The duplication has already produced user-visible inconsistency: the inline expression sets _last_error and resolves to \"\" (ScriptContext.cs:751-755); the step fails the run or returns Suppressed + _last_error (VaultCommand.cs:50-56); the functions swallow VaultException entirely and return null without setting anything (VaultFunctions.cs:38-41, 65-68) — so the same script cannot distinguish 'key missing' from 'Vault sealed' depending on which of the three spellings it used, and a Vault outage seen through vault() is indistinguishable from a missing key. Surfaces (1), (2) and (4) also each independently chose sync-over-async (.GetAwaiter().GetResult() at VaultCredentialProvider.cs:48-49, ScriptContext.cs:748, VaultFunctions.cs:36 and :63) and pass no CancellationToken, so a cancelled script still blocks inside an in-flight inline vault read, while (3) is properly async with cancellation (VaultCommand.cs:70).",
+ "recommendation": "Extract one internal VaultAccess helper owning: the [profile@]path[#key[,key2]] parser, the profile-resolution rule (explicit > environment override > default), and a single error policy (always set _last_error with the VaultException message; vault() returns null while inline substitution returns empty — both now distinguishable from 'key not found' via _last_error; never silently swallow). Route all four call sites through it, and thread the ScriptContext cancellation token into the inline-expression and function paths (or at minimum funnel their blocking through one adapter) so any future async/retry/caching/audit-logging fix lands in exactly one place instead of four.",
+ "user_benefit": "Vault failures become diagnosable from scripts regardless of whether they use {{vault:...}}, a vault: step, or vault() — today a script can proceed to push an empty credential to a whole fleet with no recorded reason — and every future Vault behavior change is made once instead of being forgotten on one of four diverging copies.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptContext.cs",
+   "lines": "707-756",
+   "note": "second parser + _last_error-and-empty-string policy + uncancellable GetResult at :748"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Functions/VaultFunctions.cs",
+   "lines": "34-41, 61-68",
+   "note": "third policy: silent null, no _last_error, GetResult without cancellation"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/VaultCommand.cs",
+   "lines": "22-57, 70",
+   "note": "fourth policy: fail/Suppressed + _last_error; the only properly async, cancellable surface"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Vault/VaultCredentialProvider.cs",
+   "lines": "37-63, 78-124",
+   "note": "first parser (supports #userKey,passKey unlike the others) + exception-swallowing policy"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

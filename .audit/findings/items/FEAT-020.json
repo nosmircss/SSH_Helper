@@ -1,0 +1,26 @@
+{
+ "id": "FEAT-020",
+ "title": "Network function library is thin for a network-device tool: no CIDR math, MAC normalization, or IP arithmetic",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-functions",
+ "lens": "ux",
+ "existing_state": "NetworkFunctions registers exactly five functions: is_valid_ip, ip_version, ip_in_cidr, url_host, url_port (Services/Scripting/Functions/NetworkFunctions.cs:14-21). ip_in_cidr already contains correct v4/v6 prefix-mask logic (lines 36-77), but none of it is exposed for derivation: there is no cidr_network/cidr_broadcast/cidr_netmask/cidr_size, no ip_add/ip_to_int for iterating addresses, no MAC address validation or normalization (Cisco aabb.ccdd.eeff vs IEEE aa:bb:cc:dd:ee:ff vs dashed — comparing MAC/ARP tables across vendors requires normalizing formats), and no hostname/FQDN validation. For an app whose core use case is running commands against fleets of routers/switches, users currently hand-roll these with regex_replace/split chains.",
+ "recommendation": "Extend NetworkFunctions (keeping the pure/no-I/O contract stated at line 10): cidr_network(cidr), cidr_broadcast(cidr), cidr_netmask(prefix), cidr_size(cidr) reusing the existing byte/mask code from IpInCidr; ip_add(ip, n) and ip_to_int/int_to_ip via IPAddress byte math; mac_normalize(mac[, format]) accepting colon/dash/dot/bare hex input and emitting a chosen format, plus is_valid_mac(mac); is_valid_hostname(name). Each is a small pure function with the established Resolve/SplitTopLevelCommas plumbing already in the file.",
+ "user_benefit": "These are the functions a network engineer reaches for daily — compute a gateway from an interface CIDR, normalize a MAC from 'show mac address-table' before comparing against an inventory column, iterate a management subnet. Ansible's ipaddr filter set is the professional benchmark here.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\NetworkFunctions.cs",
+   "lines": "14-21",
+   "note": "Complete registration list — five functions"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\NetworkFunctions.cs",
+   "lines": "36-77",
+   "note": "v4/v6 prefix masking already implemented inside IpInCidr, ready to factor into derivation helpers"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ENH-050 — table output mockup</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+  h1{font-size:13px;font-weight:600;margin:0 0 2px;color:#c9d4e3}
+  .sub{color:#8294a8;font-size:11px;margin:0 0 10px}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 4px}
+  .cap b{font-weight:600}
+  .cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+  section{border:1px solid #1c2330;border-radius:6px;padding:8px 10px;margin-bottom:12px;background:#0d1118}
+  pre{margin:0;font:inherit;line-height:1.45;white-space:pre}
+  .yaml{color:#8294a8;border-bottom:1px dashed #1c2330;padding-bottom:6px;margin-bottom:6px}
+  .yaml .k{color:#4cc9f0}.yaml .new{color:#2bd97c}
+  .tbl{overflow-x:auto;padding-bottom:4px}
+  .hd{color:#8294a8}
+  .cut{color:#ff5c5c;text-decoration:underline wavy #ff5c5c;text-underline-offset:3px}
+  .blob{color:#ffb454}
+  .ell{color:#4cc9f0;font-weight:700}
+  .note{font-size:11px;color:#8294a8;margin-top:6px}
+  .note .r{color:#ff5c5c}.note .a{color:#ffb454}.note .g{color:#2bd97c}.note .c{color:#4cc9f0}
+</style>
+</head>
+<body>
+<h1>ENH-050 — table: honest truncation, width cap, sort + limit</h1>
+<p class="sub">Fleet ping report over 47 hosts, rendered by the YAML <span style="color:#4cc9f0">table</span> command.</p>
+
+<section>
+<p class="cap"><b class="bad">Before</b> — silent cut + one bad cell stretches the whole table (scroll &rarr;)</p>
+<pre class="yaml">- <span class="k">table</span>:
+    <span class="k">data</span>: results
+    <span class="k">columns</span>: [host, {field: ip, width: 12}, latency_ms, status]</pre>
+<div class="tbl"><pre><span class="hd">host         ip            latency_ms  status
+----         --            ----------  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------</span>
+edge-fw-01   <span class="cut">192.168.100.</span>          12  ok
+core-sw-02   <span class="cut">192.168.100.</span>           8  ok
+db-prod-03   10.20.30.40         2310  <span class="blob">Connection refused after 3 retries, last error: System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it at Renci.SshNet.Session.Connect()</span>
+web-prod-04  172.16.8.21           45  ok
+edge-rtr-09  <span class="cut">192.168.100.</span>         880  Auth failed
+&hellip; 42 more rows in original order &hellip;</pre></div>
+<p class="note"><span class="r">192.168.100.</span> &mdash; was .250 / .251 / .254; bare Substring, nothing marks the loss.&ensp;<span class="a">status</span> &mdash; auto width = longest cell, so one 200-char error stretches every row.</p>
+</section>
+
+<section>
+<p class="cap"><b class="good">After</b> — max_width caps + &#8230; marks the cut, sorted &amp; trimmed to top offenders</p>
+<pre class="yaml">- <span class="k">table</span>:
+    <span class="k">data</span>: results
+    <span class="k">columns</span>: [host, ip, latency_ms, {field: status, <span class="new">max_width: 40</span>}]
+    <span class="new">sort_by</span>: latency_ms&ensp;&ensp;<span class="new">desc</span>: true&ensp;&ensp;<span class="new">limit</span>: 5</pre>
+<div class="tbl"><pre><span class="hd">host         ip               latency_ms  status
+----         --               ----------  ----------------------------------------</span>
+db-prod-03   10.20.30.40            2310  Connection refused after 3 retries, las<span class="ell">&#8230;</span>
+edge-rtr-09  192.168.100.254         880  Auth failed: keyboard-interactive not s<span class="ell">&#8230;</span>
+web-prod-04  172.16.8.21              45  ok
+edge-fw-01   192.168.100.250          12  ok
+core-sw-02   192.168.100.251           8  ok</pre></div>
+<p class="note"><span class="c">&#8230;</span> reserves one char so a cut is always visible.&ensp;<span class="g">sort_by + desc + limit</span> &mdash; &ldquo;5 slowest of 47 hosts&rdquo; with no foreach/set contraption; IPs auto-size to fit (under the cap).</p>
+</section>
+</body>
+</html>

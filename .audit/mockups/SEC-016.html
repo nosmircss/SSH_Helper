@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>SEC-016 — secret props cleartext in Properties panel</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px/1.45 "Cascadia Code",Consolas,monospace}
+  .note{color:#8294a8;font-size:11px;margin:0 0 10px}
+  .note b{color:#c9d4e3;font-weight:600}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 6px 2px}
+  .cap.bad{color:#ff5c5c}.cap.good{color:#2bd97c}
+  .panel{background:#0e1219;border:1px solid #1c2330;border-radius:8px;padding:10px}
+  .phead{display:flex;align-items:center;gap:6px;border-bottom:1px solid #1c2330;padding-bottom:7px;margin-bottom:8px}
+  .badge{background:rgba(76,201,240,.14);color:#4cc9f0;border:1px solid rgba(76,201,240,.35);border-radius:4px;font-size:9px;padding:1px 5px;letter-spacing:.08em}
+  .phead .t{font-size:11px}
+  .phead .sub{margin-left:auto;font-size:9px;color:#8294a8}
+  .f{margin-bottom:7px}
+  .f label{display:block;font-size:9px;color:#8294a8;margin-bottom:2px;letter-spacing:.06em}
+  .in{display:flex;align-items:center;gap:4px}
+  .in input,.in .sel{flex:1;min-width:0;background:#0b0e13;border:1px solid #1c2330;border-radius:4px;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace;padding:4px 6px;outline:none}
+  input.leak{border-color:rgba(255,92,92,.6);color:#ffb4b4}
+  input.safe{border-color:rgba(43,217,124,.4)}
+  .eye{background:#121826;border:1px solid #1c2330;border-radius:4px;color:#8294a8;cursor:pointer;padding:3px 6px;line-height:0;flex:none}
+  .eye:hover{color:#4cc9f0;border-color:rgba(76,201,240,.4)}
+  .tag{font-size:9px;margin-top:2px}
+  .tag.bad{color:#ff5c5c}.tag.good{color:#2bd97c}.tag.warn{color:#ffb454}
+  .search{display:flex;align-items:center;gap:6px;background:#0e1219;border:1px solid #1c2330;border-radius:6px;padding:6px 8px;margin-top:10px;font-size:10px}
+  .search .k{color:#8294a8;white-space:nowrap}
+  .search .q{background:#0b0e13;border:1px solid #1c2330;border-radius:4px;padding:2px 6px;color:#c9d4e3}
+  .hit{color:#ff5c5c}.miss{color:#2bd97c}
+  .card{background:#0e1219;border:1px solid rgba(76,201,240,.35);border-radius:8px;padding:7px 9px;margin-top:10px;box-shadow:0 0 0 1px rgba(76,201,240,.08);font-size:10px}
+  .card .ct{color:#4cc9f0;margin-bottom:4px}
+  .card .row{display:flex;gap:6px}
+  .card .row .k{color:#8294a8;min-width:70px}
+  .foot{margin-top:12px;font-size:10px;color:#8294a8;border-top:1px solid #1c2330;padding-top:8px}
+  .foot code{color:#4cc9f0}
+</style></head><body>
+
+<p class="note"><b>HTTP block selected &rarr; Properties rail.</b> The collapsed canvas card
+already bullet-masks <b>password</b>/<b>token</b> &mdash; the panel and Ctrl+F search don't honor that.</p>
+
+<div class="cols">
+
+  <div>
+    <p class="cap bad">Before &mdash; cleartext + searchable</p>
+    <div class="panel">
+      <div class="phead"><span class="badge">HTTP</span><span class="t">Properties</span><span class="sub">network</span></div>
+      <div class="f"><label>URL</label><div class="in"><input value="https://10.20.30.41/api/v2/monitor/system" readonly></div></div>
+      <div class="f"><label>Auth</label><div class="in"><div class="sel">basic &#9662;</div></div></div>
+      <div class="f"><label>Username</label><div class="in"><input value="svc-backup" readonly></div></div>
+      <div class="f"><label>Password</label>
+        <div class="in"><input class="leak" value="S3cur3!fgt#2024" readonly></div>
+        <div class="tag bad">&#9650; plain type="text" &mdash; visible on any screen share</div></div>
+    </div>
+    <div class="search"><span class="k">Ctrl+F</span><span class="q">fgt#2024</span>
+      <span class="hit">1 match &mdash; password value is in the search haystack</span></div>
+  </div>
+
+  <div>
+    <p class="cap good">After &mdash; masked + reveal toggle</p>
+    <div class="panel">
+      <div class="phead"><span class="badge">HTTP</span><span class="t">Properties</span><span class="sub">network</span></div>
+      <div class="f"><label>URL</label><div class="in"><input value="https://10.20.30.41/api/v2/monitor/system" readonly></div></div>
+      <div class="f"><label>Auth</label><div class="in"><div class="sel">basic &#9662;</div></div></div>
+      <div class="f"><label>Username</label><div class="in"><input value="svc-backup" readonly></div></div>
+      <div class="f"><label>Password</label>
+        <div class="in"><input id="pw" class="safe" type="password" value="S3cur3!fgt#2024" readonly>
+          <button class="eye" onclick="tg('pw',this)" title="Reveal">
+            <svg width="12" height="12" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+          </button></div>
+        <div class="tag good">masked by default; eye reveals &mdash; try it</div></div>
+      <div class="f"><label>Bearer Token</label>
+        <div class="in"><input id="tk" class="safe" type="password" value="ghp_x9TR41bQz7" readonly>
+          <button class="eye" onclick="tg('tk',this)" title="Reveal">
+            <svg width="12" height="12" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+          </button></div></div>
+    </div>
+    <div class="search"><span class="k">Ctrl+F</span><span class="q">fgt#2024</span>
+      <span class="miss">0 matches &mdash; secret values excluded ("password" as a key still finds the block)</span></div>
+  </div>
+
+</div>
+
+<div class="card">
+  <div class="ct">HTTP &middot; canvas card today (collapsed)</div>
+  <div class="row"><span class="k">URL</span><span>https://10.20.30.41/api/v2/&hellip;</span></div>
+  <div class="row"><span class="k">Password</span><span>&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span></div>
+  <div class="tag warn">masking promise the panel should match</div>
+</div>
+
+<div class="foot">
+  Keys come from the existing <code>SECRET_KEYS</code> set in <code>blockSummary.ts</code>
+  (<code>password</code>, <code>token</code>) so the rail, the canvas card, and search stay aligned.
+  Applies to the http and sftp blocks.
+</div>
+
+<script>
+function tg(id,btn){var i=document.getElementById(id);i.type=i.type==='password'?'text':'password';
+btn.style.color=i.type==='text'?'#4cc9f0':''}
+</script>
+</body></html>

@@ -1,0 +1,26 @@
+{
+ "id": "ENH-031",
+ "title": "SMTP notifications cannot use implicit-TLS servers (port 465) — EnableSsl only does STARTTLS",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "integrations",
+ "lens": "ux",
+ "existing_state": "SmtpDispatcher is built on System.Net.Mail.SmtpClient with EnableSsl = profile.UseStartTls (Services/Notifications/SmtpDispatcher.cs:86-90). SmtpClient's EnableSsl implements only STARTTLS upgrade on a plaintext connection; it cannot speak SMTPS/implicit TLS, so any relay that requires port 465 (common for hardened enterprise relays and most consumer providers' legacy submission ports) fails with an opaque handshake/timeout error in NotificationResult. SmtpClient is also formally deprecated by Microsoft with MailKit as the recommended replacement. The Settings UI offers only a 'UseStartTls' checkbox and a port spinner defaulting to 587 (SettingsDialog.cs:1314), with no security-mode choice and nothing warning the user that 465 won't work.",
+ "recommendation": "Replace SmtpDispatcher's transport with MailKit's SmtpClient (single NuGet package, no native deps), mapping a new profile enum SmtpSecurity { None, StartTls, ImplicitTls } onto MailKit's SecureSocketOptions; keep UseStartTls deserialization as a back-compat alias mapping to StartTls. Expose the mode as a dropdown in the Notifications tab next to the port field (auto-suggest 587 for STARTTLS, 465 for implicit). The dispatcher is already virtual and isolated behind NotificationService, so the swap is contained to one file plus the model/UI fields.",
+ "user_benefit": "Email notifications work against the full range of corporate and cloud mail relays, not just STARTTLS-on-587 ones — and the failure mode for the wrong port becomes a clear configuration choice instead of a cryptic timeout.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Notifications\\SmtpDispatcher.cs",
+   "lines": "86-95",
+   "note": "SmtpClient with EnableSsl=UseStartTls — STARTTLS only, no implicit TLS path"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "1314",
+   "note": "port spinner defaults to 587; only a StartTls checkbox, no security-mode selection"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,31 @@
+{
+ "id": "ENH-040",
+ "title": "Diagnostics are a dead end: no error list, gutter markers, error count, or click-to-jump",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "editor",
+ "lens": "ux",
+ "existing_state": "Inline validation produces precise line/column diagnostics, but the only renderings are squiggle indicators (ApplyDiagnosticsVisuals, UI/ScintillaScriptEditorControl.cs:2192-2222) and a hover tooltip if you happen to dwell on the exact line/column (Editor_DwellStart, UI/ScintillaScriptEditorControl.cs:823-831). There is no margin/gutter marker, no error/warning count anywhere (the script footer panel shows only caret line/column via lblLinePosition, Form1.Designer.cs:921), no 'next error' navigation, and IScriptEditor only exposes SetDiagnostics/ClearDiagnostics — diagnostics can't even be read back by the host (UI/IScriptEditor.cs:28-29). The manual Validate Script path shows errors as flat text in a MessageBox (Form1.cs:5807-5811) with no way to click through to the offending line. In a long script the user must visually hunt for tiny squiggles, hover each one, and scroll to lines by hand.",
+ "recommendation": "Three layers, cheapest first: (1) add Scintilla margin markers (red/yellow circles) per diagnostic line in ApplyDiagnosticsVisuals — the marker infrastructure is already used for fold chevrons; (2) surface a live count in the existing scriptFooterPanel next to lblLinePosition ('2 errors, 1 warning'), clicking it or pressing F8 jumps the caret to the next diagnostic (expose GetDiagnostics + GoToDiagnostic on IScriptEditor); (3) optionally make the Validate Script result list clickable instead of a MessageBox. Layers 1-2 alone close most of the gap.",
+ "user_benefit": "Fixing a broken script becomes 'press F8, fix, repeat' instead of squinting for squiggles across hundreds of lines. Combined with the missing go-to-line, this is why script debugging currently pushes users out of the app.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs",
+   "lines": "2192-2222",
+   "note": "ApplyDiagnosticsVisuals renders indicator squiggles only — no markers, no aggregation"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\IScriptEditor.cs",
+   "lines": "28-29",
+   "note": "Interface only allows injecting/clearing diagnostics, no read-back or navigation"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "5807-5811",
+   "note": "Validation errors presented as MessageBox text, no click-to-jump"
+  }
+ ],
+ "mockup_idea": "After-state sketch of the script editor: red dot markers in the left gutter on lines 14 and 87, a footer chip reading '2 errors · 1 warning' beside 'Ln 23, Col 5', and a tooltip-style callout showing F8 having jumped the caret to line 14 with the squiggled token selected.",
+ "merged_from": 1
+}

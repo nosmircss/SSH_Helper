@@ -1,0 +1,41 @@
+{
+ "id": "BUG-016",
+ "title": "Host grid paste mangles rows: LF-only clipboards collapse into one cell and dropped blank lines shift credentials onto the wrong hosts",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "ui-utilities",
+ "lens": "data-integrity",
+ "existing_state": "Both paste implementations corrupt row alignment. HostGridUtilities.PasteClipboardText splits clipboard text with StringSplitOptions.RemoveEmptyEntries (Utilities/HostGridUtilities.cs:234-236): copying a single column from Excel that contains blank cells produces empty lines in the TSV; those are silently removed, so every value after a gap pastes one row higher than it belongs. In the job editor's hosts grid (the consumer, JobEditorDialog.cs:1834) this means pasting a username/password/vault_path column next to existing Host_IP rows silently assigns credentials to the wrong hosts — a scheduled job then runs against hosts with mismatched credentials with no warning. Form1's main hosts grid has its own paste with the identical flaw plus one more: it splits ONLY on \"\\r\\n\" with RemoveEmptyEntries (Form1.cs:9612), so clipboard text with bare-LF line endings (VS Code, browsers, Linux terminals, WSL, many password managers) contains no \\r\\n at all and an entire multi-line host list is dumped into a single cell with embedded newlines. The grid is the credential source for executions (GetHostConnections reads these cells, Form1.cs:13313-13359) and SaveCurrentCsv persists the corrupted layout. Secondary defects: BuildClipboardText's all-selected branch also skips empty rows on copy (HostGridUtilities.cs:186-189), so even an in-app copy/paste round-trip shifts rows; and PasteClipboardText sets grid.AllowUserToAddRows = false at :238 and restores it at :265 with no try/finally, so an exception mid-paste permanently removes the new-row affordance.",
+ "recommendation": "In both paste implementations, split on any line-ending convention (`text.Split(new[] { \"\\r\\n\", \"\\n\", \"\\r\" }, StringSplitOptions.None)`), preserve interior empty lines as empty cells so row alignment is kept, and only trim a single trailing empty entry (clipboard TSV conventionally ends with a newline). Wrap the AllowUserToAddRows toggle in try/finally in HostGridUtilities.PasteClipboardText, and remove (or restrict to trailing) the isEmpty skip in BuildClipboardText's all-selected branch so copy/paste round-trips are position-faithful.",
+ "user_benefit": "Prevents the worst kind of fleet-tool error: SSH credentials and per-host variables silently landing on the wrong host rows after an ordinary spreadsheet paste — and makes pasting from any non-Windows source work at all.",
+ "mockup_idea": "Two side-by-side grids: source spreadsheet column (passwords with one blank cell mid-list) vs the pasted result, with a red arrow showing every password below the gap landing one host row too high; 'after fix' panel shows the blank preserved and rows aligned.",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\HostGridUtilities.cs",
+   "lines": "224-273",
+   "note": "RemoveEmptyEntries at :236; AllowUserToAddRows toggled at :238/:265 without try/finally"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\HostGridUtilities.cs",
+   "lines": "165-190",
+   "note": "All-selected copy skips empty rows (isEmpty guard), shifting round-trips"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "9604-9624",
+   "note": "Main hosts grid duplicate paste path: RemoveEmptyEntries and \\r\\n-only split at :9612"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13313-13359",
+   "note": "Grid rows feed credentials directly into execution"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs",
+   "lines": "1827-1834",
+   "note": "Consumer: scheduled-job hosts grid copy/paste"
+  }
+ ]
+}

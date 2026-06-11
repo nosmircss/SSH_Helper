@@ -1,0 +1,31 @@
+{
+ "id": "UX-009",
+ "title": "Terminal connection loss or errors close the window silently — no message, no reconnect",
+ "category": "UX",
+ "severity": "high",
+ "effort": "M",
+ "area": "terminal",
+ "lens": "ux",
+ "existing_state": "When the SSH connection drops, the Rebex Disconnected/ActionRequested(DisconnectRequest) handlers just call RequestCloseSafe(form) (Services/Terminal/InteractiveTerminalService.cs:1687-1704) — the window vanishes with zero explanation. Worse, every error message the service tries to show ('[interactive-error] {ex.Message}' at InteractiveTerminalService.cs:1037, 1940, 2123, 2246, routed through AppendOutputSafe at 3281-3305) lands in InteractiveTerminalForm.AppendOutput, which is a documented no-op (Forms/InteractiveTerminalForm.cs:168-172: 'intentionally kept as a no-op'). So a pump failure, auth hiccup mid-session, or network blip all present identically: the terminal just disappears. There is no reconnect affordance anywhere in the terminal subsystem.",
+ "recommendation": "On disconnect or pump error in window mode, stop closing the form: switch it to the already-existing detached read-only mode (EnableDetachedReadOnlyMode, Forms/InteractiveTerminalForm.cs:194-214) preserving the final screen, and add a thin status strip at the bottom showing 'Connection lost: <reason>' (route the [interactive-error] strings there instead of the no-op AppendOutput). For separate-mode sessions add a [Reconnect] button that re-runs ConnectAndLogin + startup negotiation and resumes the pump; shared-mode can show 'Session ended — close window' since the pooled session owns reconnection. Keep auto-close only for the unattended capture (show_window:false) path.",
+ "user_benefit": "Operators on flaky management networks stop losing their place and wondering whether the app crashed; they see why the session ended and can reconnect in place instead of re-running the whole script.",
+ "evidence": [
+  {
+   "file": "Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "1687-1704",
+   "note": "Disconnected/DisconnectRequest handlers immediately RequestCloseSafe(form) with no user-visible message"
+  },
+  {
+   "file": "Forms/InteractiveTerminalForm.cs",
+   "lines": "168-172",
+   "note": "AppendOutput is an intentional no-op — all [interactive-error] text is discarded"
+  },
+  {
+   "file": "Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "1037, 1940, 2123, 2246, 3281-3305",
+   "note": "Four error emission sites all funnel into the no-op via AppendOutputSafe"
+  }
+ ],
+ "mockup_idea": "Terminal window with the last screen content intact, dimmed slightly, plus a red status bar docked at the bottom: 'Connection lost: server closed the connection (disconnected)' with [Reconnect] and [Close] buttons.",
+ "merged_from": 1
+}

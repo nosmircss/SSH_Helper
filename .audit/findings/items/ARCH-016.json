@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-016",
+ "title": "Job save is split across two dialogs and persists the Credential Manager secret before the job itself, with no rollback",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-jobs-history",
+ "lens": "perf",
+ "existing_state": "Saving a job is a two-form transaction with the steps in the wrong order. JobEditorDialog.ValidateAndSave writes the stored credential to Windows Credential Manager first (JobEditorDialog.cs:2060-2064 -> TryPersistStoredCredentials :1964-2010, keyed by CredentialTargets.JobPasswordTarget(_editingJob.Id)), then merely returns the edited JobDefinition via Result (:2135-2137). The actual job persistence happens later in the CALLER: JobListDialog.OnNewClick (:1041-1052) and EditSelectedJob (:1354-1365) call _jobStorage.Save inside a try/catch that just shows a 'Failed to save job' message box. If Save throws, a New job leaves an orphaned secret in CredMan for a job id that never existed, and an Edit leaves a rotated password attached to the OLD job definition — the next scheduled run silently uses the new password with stale settings (or the user believes the rotation failed entirely and retries differently). The team has already hit this bug class once: the Duplicate path got the correct ordering with rollback (SaveDuplicatedJob, JobListDialog.cs:1295-1308 saves the job first, then copies the credential, and deletes the job on credential failure) — but the fix was applied only there, not to New/Edit, precisely because the save responsibility is scattered across two forms.",
+ "recommendation": "Centralize the job+secret save in one place with the same ordering Duplicate already uses: have JobEditorDialog stop writing to CredMan and instead expose the pending username/password (e.g., a PendingStoredCredential on the dialog alongside Result); JobListDialog (or a small JobSaveCoordinator service) then does _jobStorage.Save first, persists the secret second, and rolls the job back (or surfaces a precise partial-failure message) if the secret write fails — mirroring SaveDuplicatedJob:1295-1308.",
+ "user_benefit": "Job definitions and their stored passwords can no longer get out of sync on a failed save, preventing orphaned secrets in Credential Manager and scheduled runs that silently authenticate with mismatched credentials after a partial failure.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobEditorDialog.cs",
+   "lines": "2060-2064, 1964-2010, 2135-2137",
+   "note": "secret persisted to CredMan before the dialog even returns; job itself is not saved here"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobListDialog.cs",
+   "lines": "1041-1052, 1354-1365",
+   "note": "caller saves the job afterwards; on exception only a message box — secret already written, no rollback"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobListDialog.cs",
+   "lines": "1295-1332",
+   "note": "Duplicate path proves the bug class: it saves job first, then credential, and deletes the job on credential failure"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

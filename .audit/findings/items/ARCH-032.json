@@ -1,0 +1,56 @@
+{
+ "id": "ARCH-032",
+ "title": "Script-command metadata has no single source — parser, executor, editor, and canvas-bridge tables are hand-synced and have already drifted in all three layers",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "XL",
+ "area": "scripting-core",
+ "lens": "perf",
+ "existing_state": "Adding or changing a script command requires touching, by hand: the StepType enum, KnownStepKeys (Services/Scripting/ScriptParser.cs:24-69), CommandOptionKeys (106-149), EnumLikeOptionValuesByCommand (290-328), the parse case, the per-case ValidateSteps branch plus its child-block recursion, the executor dictionary (Services/Scripting/ScriptExecutor.cs:128-173) and AssignStepPaths' container-shape mirroring (581-638); then the editor layer's five parallel tables — CommandDescriptions (Services/Editor/ScriptAutocompleteProvider.cs:116-161), TopLevelKeyDescriptions (163-178), RequiredOptionKeysByCommand (180-217), BuiltInSymbols/BuiltInSymbolDescriptions (92-104, 219-231, duplicated a third time as a switch in Form1.TryGetBuiltInEditorVariable, Form1.cs:729-742), EditorTextUtilities.NestedStepOptionKeys (EditorTextUtilities.cs:21-39) and the highlighter's NestedTableColumnOptionKeys; and finally six hand-written canvas-bridge tables — BlockTypeToCommandKey, BlockPropAliasesByType, BooleanOptionKeys, IntegerOptionKeys, ListOptionKeys, DictionaryOptionKeys, RequiredOptionKeysByCommand, PreferredOptionOrderOverridesByCommand (Services/FlowCanvasBridge.cs:94-267, consumed during option normalization at 3598-3729 where an unlisted key silently falls through to plain string emission). Drift is verified in all three layers today: localcmd's `shell` vocabulary exists in three mutually inconsistent places (editor catalog [\"powershell\",\"custom\"] at ScriptParser.cs:311; the validation error message \"powershell, cmd, custom\" at :4985; the actual validator accepting powershell/powershell.exe/cmd/cmd.exe/full paths/custom at :5249-5263) with autocomplete consuming the stale catalog (ScriptAutocompleteProvider.cs:280-289); the parser knows 14 top-level keys including 'preconnect' (:81) but TopLevelKeyDescriptions has 13 — preconnect completes with no description; and \"max_seconds\" appears twice in the bridge's IntegerOptionKeys (FlowCanvasBridge.cs:174, 182). Two of the hand-sync points fail silently when missed (a container missing its ValidateSteps recursion skips all nested validation; one missing in AssignStepPaths breaks Flow Canvas correlation — both documented prior incidents). The bridge ALREADY queries ScriptParser for option-key catalogs (GetExportOptionKeysByCommand → ScriptParser.GetKnownStepOptionKeysByCommand at 303-315), proving the parser-as-source pattern works — type, required, alias, enum, and description metadata just never moved there.",
+ "recommendation": "Introduce one per-command descriptor registered next to the parser (name, short description, option keys with type bool/int/list/dict/string + required flag + enum vocabulary, container child-block accessor, handler factory) and derive everything from it: KnownStepKeys/CommandOptionKeys/EnumLikeOptionValuesByCommand, the executor dictionary, generic child-block recursion for ValidateSteps and AssignStepPaths, the editor's description/required/nesting tables (and Form1's tooltip switch), and the bridge's type/required sets (keeping only genuinely presentational data like PreferredOptionOrderOverrides bridge-side). Do it incrementally: phase 1 (cheap, fixes live drift) generates EnumLikeOptionValuesByCommand from the same data the IsValid* validators use and fixes the preconnect/max_seconds gaps; phase 2 unifies child-block traversal so new containers can't silently skip nested validation/step paths; phase 3 folds in dispatch, editor lists, and bridge types. Add parity unit tests (every command has a description, type metadata, NestedStepOptionKeys coverage) so future drift becomes a build failure instead of a silent UX/export hole.",
+ "user_benefit": "New commands and options stop shipping with inconsistent editor suggestions, error messages, validators, and canvas export behavior; the two known silent-failure classes (skipped nested validation, broken canvas step paths) and the mistyped-YAML/missing-required-diagnostic export class become structurally impossible instead of memory-checklist items.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptParser.cs",
+   "lines": "311, 4985, 5249-5263",
+   "note": "Three inconsistent definitions of localcmd shell vocabulary — parser-layer drift"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptParser.cs",
+   "lines": "24-69, 106-149, 290-328",
+   "note": "KnownStepKeys, CommandOptionKeys, EnumLikeOptionValuesByCommand hand-maintained tables"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptExecutor.cs",
+   "lines": "128-173, 581-638",
+   "note": "Executor dictionary and AssignStepPaths container shapes — parallel registration points with documented silent-failure history"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptAutocompleteProvider.cs",
+   "lines": "92-104, 116-231, 280-289",
+   "note": "Five hand-maintained editor tables; preconnect missing from TopLevelKeyDescriptions; autocomplete consumes the stale enum catalog"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/EditorTextUtilities.cs",
+   "lines": "21-39",
+   "note": "NestedStepOptionKeys hand-list drives Smart Enter nesting for container commands"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "729-742",
+   "note": "third copy of the built-in symbol list as a switch in the hover resolver"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/FlowCanvasBridge.cs",
+   "lines": "94-267, 3598-3729",
+   "note": "Six hand-maintained bridge tables (duplicate max_seconds at 174/182); unlisted keys silently fall through to string emission"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/FlowCanvasBridge.cs",
+   "lines": "303-315",
+   "note": "Bridge already sources known/declared option keys from ScriptParser — precedent for moving the rest of the metadata there"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 3
+}

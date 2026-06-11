@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-011",
+ "title": "Job editor never shows what a Preset/Folder job will actually run, and offers no Run Now / test from the editor",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "M",
+ "area": "dialogs-jobs-history",
+ "lens": "ux",
+ "existing_state": "For jobs targeting a saved preset or folder, the Content tab is dead space: the Scintilla editor is only ever populated with the job's own CustomPresetCommands (JobEditorDialog.cs:1581) and for non-custom targets it just goes read-only with the hint 'Saved preset and folder jobs ignore this tab' (UpdateCustomPresetEditorState, JobEditorDialog.cs:661-668). A user authoring or reviewing a job sees only the preset's NAME in a combo (General tab) — to verify what commands will run at 3 AM against 200 devices they must close the editor, open the preset elsewhere, and come back. The dialog already resolves the target preset object for timeout guidance (GetInheritedCommandTimeoutInfo, JobEditorDialog.cs:1533-1550), so the content is at hand. There is also no way to trigger or dry-run the job from the editor (no Test/Run affordance anywhere in JobEditorDialog.cs); Run Now exists only back in the JobListDialog toolbar (JobListDialog.cs:1061-1076) after saving and re-selecting.",
+ "recommendation": "Two additions to JobEditorDialog: (1) when target type is Preset or Folder, populate the Content tab's existing read-only Scintilla editor with the resolved preset content (for folders, concatenate per-preset with header comments) and change the help label to 'Read-only preview of target preset content as of now'; PresetManager.Get/GetPresetsInFolder are already injected. (2) Add a 'Save & Run Now' button next to Save that sets a flag the JobListDialog caller can act on after _jobStorage.Save (it already owns the _runNowInvoker delegate), so a new job can be smoke-tested in one step.",
+ "user_benefit": "Eliminates the close-editor/open-preset/reopen-editor round trip when vetting what a scheduled job will execute, and lets a freshly authored job be tested immediately — the single most common 'did I wire this up right?' moment.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs",
+   "lines": "661-668, 1581",
+   "note": "Content editor read-only + ignored for Preset/Folder targets; only ever loaded from job.CustomPresetCommands"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs",
+   "lines": "1533-1550",
+   "note": "Editor already resolves the target preset via _presetManager for timeout guidance — content is one call away"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs",
+   "lines": "1033-1054, 1061-1076",
+   "note": "Save flow returns to JobListDialog which owns _runNowInvoker — natural seam for Save & Run Now"
+  }
+ ],
+ "mockup_idea": "Content tab mockup for a Preset-target job: amber banner 'Read-only preview of preset \"backup-configs\" (live copy — edits happen in the main preset editor)', YAML shown syntax-highlighted below, and the dialog footer showing [Save & Run Now] [Save] [Cancel].",
+ "merged_from": 1
+}

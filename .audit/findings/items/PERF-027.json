@@ -1,0 +1,41 @@
+{
+ "id": "PERF-027",
+ "title": "Terminal pump busy-polls and rebuilds full screen snapshots on a timer even when the session is completely idle",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "terminal",
+ "lens": "perf",
+ "existing_state": "Every open interactive terminal spins a dedicated loop for its whole lifetime: PumpFullAsync (Services/Terminal/InteractiveTerminalService.cs:2108-2270) takes ioLock, calls the blocking scripting.Process(2ms), reads cursor/history state, then sleeps only 2ms (active) or 8ms (idle) — roughly 100-250 wakeups per second per window. Rendering is purely timer-driven: renderDue (2219-2236) fires every 120ms at idle / 20ms when active with no did-data-actually-arrive gate, so BuildScreenSnapshot (3333-3469) walks every cell (screen.GetCell per cell, 4,320 cells at the default 120x36, several times that maximized) and allocates fresh char[] + two int[] arrays (~43KB+) per snapshot — only for the hash check at 2252 to discard it as identical. The headless capture pump is hotter still (2ms process + 4ms delay, 2052-2053) and runs for the entire max_seconds of a capture step. The Rebex DataReceived handlers (707, 1297, 1706) already know exactly when bytes arrive, but that signal never reaches the render scheduler.",
+ "recommendation": "Set a dirty flag from the DataReceived handlers (or from scripting.Process's returned TerminalState) and gate BuildScreenSnapshot on dirty || viewportChanged instead of wall-clock intervals. Add idle backoff to the loop delay (e.g., escalate 8ms -> 50-100ms after a few cycles with no data, no pending input, and no scroll), resetting to fast cadence the moment input is enqueued or data arrives. This removes the constant per-window CPU burn without changing perceived latency.",
+ "user_benefit": "Idle terminal windows stop consuming a steady slice of CPU for hours; laptops stay cool and capture steps that watch a command for minutes no longer cost a hot polling thread each.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "2128-2132",
+   "note": "processTimeoutMs=2, activeDelayMs=2, idleDelayMs=8, activeRenderIntervalMs=20, idleRenderIntervalMs=120"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "2219-2236",
+   "note": "renderDue is purely interval-based; activity only toggles 20ms vs 120ms, never suppresses the rebuild"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "3333-3469",
+   "note": "BuildScreenSnapshot: per-cell GetCell loop + 3 array allocations per snapshot"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "2252-2255",
+   "note": "identical snapshots are discarded by hash after being fully built"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "2052-2103",
+   "note": "headless capture pump: 2ms Process + 4ms delay loop for the entire capture duration"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

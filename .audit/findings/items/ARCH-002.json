@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-002",
+ "title": "Transient per-run RunningState is persisted by rewriting all of jobs.json through Save(), unsynchronized and non-atomically",
+ "category": "ARCH",
+ "severity": "critical",
+ "effort": "M",
+ "area": "jobs-scheduling",
+ "lens": "perf",
+ "existing_state": "Every job run rewrites the entire jobs definitions file two to three times via the same code path users' edits go through. TryStartJob sets job.RunningState and calls _jobStorage.Save(job) (Services/JobExecutionService.cs:768-774), CompleteJob clears it and calls Save again (JobExecutionService.cs:827-832), and HandlePostExecution can call Save a third time for one-time jobs (JobExecutionService.cs:877-888). JobStorageService.Save (Services/JobStorageService.cs:113-139) is the definition-editing path: it stamps job.ModifiedUtc = DateTime.UtcNow (line 134) — so every scheduled run silently overwrites the user's real last-modified timestamp — raises JobsChanged (line 138) — triggering full UI refreshes — and calls PersistToDisk (lines 227-244), which copies jobs.json over jobs.json.bak (line 232, so the backup is rotated to a mid-run snapshot seconds after any user edit) and then writes with plain File.WriteAllText (line 243). There is no lock anywhere in JobStorageService: with MaxConcurrentJobs (default 3) plus unbounded Run Now executions (JobExecutionService.cs:236, no semaphore), two ThreadPool threads can be inside PersistToDisk at once — File.WriteAllText then throws a sharing violation, which propagates out of TryStartJob/CompleteJob and silently kills that run's start or leaves a stale RunningState (falsely reported as 'Application crashed during execution' at next startup, JobExecutionService.cs:153-168). The non-atomic write also violates the project's own JsonFileWriter.WriteJsonAtomic convention (Utilities/JsonFileWriter.cs:21), which the sibling JobHistoryService follows at every write site (Services/JobHistoryService.cs:227, 280, 425, 472, 597). A crash mid-write truncates jobs.json; Load then backs it up to .corrupt and starts with an EMPTY job list (JobStorageService.cs:89-98).",
+ "recommendation": "Separate runtime state from the definition store. (1) Stop routing RunningState through Save(): add an internal PersistRunningState(jobId) path (or a small sidecar file like running-state.json keyed by job ID) that does not stamp ModifiedUtc and does not raise JobsChanged; crash recovery in Initialize() reads the sidecar instead. (2) In JobStorageService, serialize all writes behind a private lock object and replace File.WriteAllText with JsonFileWriter.WriteJsonAtomic(path, json, createBackup: true) — this also removes the hand-rolled .bak copy. (3) Only rotate .bak on definition-changing saves so the backup keeps its value as an undo point for user edits.",
+ "user_benefit": "Your jobs file — the single store for every scheduled job — stops being rewritten dozens of times an hour by the scheduler itself, can no longer be truncated by a crash or clobbered by two concurrent runs, and 'last modified' starts meaning when you actually edited the job.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobExecutionService.cs",
+   "lines": "768-774, 827-832, 877-888",
+   "note": "RunningState set/cleared via full _jobStorage.Save(job) on every run, from ThreadPool threads"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobStorageService.cs",
+   "lines": "134, 138, 227-244",
+   "note": "Save stamps ModifiedUtc and fires JobsChanged for runtime-state writes; PersistToDisk has no lock, plain File.WriteAllText, .bak rotated every write"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobStorageService.cs",
+   "lines": "89-98",
+   "note": "Corrupt jobs.json falls back to an empty job list"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobHistoryService.cs",
+   "lines": "227, 425, 472",
+   "note": "Sibling history service follows the JsonFileWriter.WriteJsonAtomic convention that jobs.json violates"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

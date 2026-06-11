@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ENH-004 — Resilient CSV import</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .cap{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{font-weight:600}
+  .pane{border:1px solid #1c2330;border-radius:6px;padding:10px;background:#0d1118;margin-bottom:14px}
+  .file{color:#8294a8;font-size:11px;margin-bottom:8px}
+  .file code{color:#c9d4e3}
+  /* BEFORE: themed message box */
+  .dlg{width:430px;margin:4px auto;border:1px solid #2a3344;border-radius:5px;background:#141a24;box-shadow:0 8px 24px rgba(0,0,0,.55)}
+  .dlg-t{display:flex;justify-content:space-between;padding:6px 10px;border-bottom:1px solid #1c2330;color:#8294a8;font-size:11px}
+  .dlg-b{display:flex;gap:10px;padding:14px 12px;align-items:flex-start}
+  .xicon{flex:none;width:22px;height:22px;border-radius:50%;border:2px solid #ff5c5c;color:#ff5c5c;text-align:center;line-height:21px;font-weight:700}
+  .dlg-m{line-height:1.5}
+  .dlg-f{text-align:right;padding:8px 12px 12px}
+  .btn{display:inline-block;border:1px solid #2a3344;border-radius:4px;background:#1a2230;color:#c9d4e3;padding:4px 18px;font-size:11px}
+  .note{color:#8294a8;font-size:11px;margin-top:8px;line-height:1.5}
+  .note .bad{color:#ff5c5c}
+  /* AFTER: import summary banner + grid */
+  .banner{border:1px solid #1f4a5c;border-left:3px solid #4cc9f0;border-radius:5px;background:#0e1822;padding:8px 10px;line-height:1.6}
+  .ok{color:#2bd97c}.cy{color:#4cc9f0}.warn{color:#ffb454}
+  .pill{border:1px solid #2a3344;border-radius:3px;background:#161d29;padding:0 5px;font-size:11px}
+  .acts{margin-top:7px}
+  .btn.go{border-color:#2bd97c;color:#2bd97c}
+  table{border-collapse:collapse;width:100%;margin-top:9px;font-size:11px}
+  th,td{border:1px solid #1c2330;padding:3px 7px;text-align:left;white-space:nowrap}
+  th{background:#131a26;color:#8294a8;font-weight:600}
+  th.new{color:#4cc9f0}
+  td{color:#c9d4e3}
+  .dim{color:#8294a8}
+</style>
+</head>
+<body>
+
+<p class="cap"><b>Before</b> — duplicate Excel header kills the whole import</p>
+<div class="pane">
+  <div class="file">File &gt; Open CSV… <code>branch-devices.csv</code> (exported from Excel by the facilities team)</div>
+  <div class="dlg">
+    <div class="dlg-t"><span>Error</span><span>✕</span></div>
+    <div class="dlg-b">
+      <div class="xicon">!</div>
+      <div class="dlg-m">Failed to load CSV: A column named 'Location' already belongs to this DataTable.</div>
+    </div>
+    <div class="dlg-f"><span class="btn">OK</span></div>
+  </div>
+  <div class="note">Raw framework exception, grid left empty. And when a file <i>does</i> load:
+    first header <span class="bad">silently replaced</span> with Host_IP, spaces in headers
+    <span class="bad">silently rewritten</span> to _ (breaking <code>{{column}}</code> vars), long rows
+    <span class="bad">silently truncated</span>. No notice for any of it.</div>
+</div>
+
+<p class="cap"><b>After</b> — duplicates deduped, one transparent import summary</p>
+<div class="pane">
+  <div class="file">File &gt; Open CSV… <code>branch-devices.csv</code> (semicolon-delimited, Windows-1252 — auto-detected)</div>
+  <div class="banner">
+    <span class="ok">✔ 212 hosts, 6 columns</span> imported &nbsp;·&nbsp;
+    duplicate header renamed <span class="pill">Location → <span class="cy">Location_2</span></span> &nbsp;·&nbsp;
+    <span class="pill">vault path → <span class="cy">vault_path</span></span> &nbsp;·&nbsp; 3 rows wider than header, extras dropped<br>
+    <span class="warn">⚠ First column “device” was mapped to Host_IP — check the values below are the hosts you intend to target.</span>
+    <div class="acts"><span class="btn go">Continue</span> &nbsp;<span class="btn">Cancel</span></div>
+  </div>
+  <table>
+    <tr><th class="new">Host_IP <span class="dim">(was “device”)</span></th><th>Location</th><th>port</th><th>username</th><th class="new">Location_2</th><th class="new">vault_path</th></tr>
+    <tr><td>fw-edge-01.corp</td><td>Spokane DC</td><td>22</td><td>netops</td><td>rack B4</td><td>secret/net/fw-edge-01</td></tr>
+    <tr><td>10.40.12.5</td><td>Boise BR-2</td><td>2222</td><td>netops</td><td>rack A1</td><td>secret/net/sw-boise</td></tr>
+    <tr><td>sw-core-114</td><td>Spokane DC</td><td>22</td><td>admin</td><td>rack B6</td><td class="dim">—</td></tr>
+    <tr><td class="dim" colspan="6">… 209 more</td></tr>
+  </table>
+</div>
+
+</body>
+</html>

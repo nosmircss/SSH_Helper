@@ -1,0 +1,41 @@
+{
+ "id": "BUG-053",
+ "title": "Opening or resizing a shared-session terminal window permanently rewrites the pooled shell's geometry",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "terminal",
+ "lens": "reliability",
+ "existing_state": "In `session: shared` mode the window is bound to the pooled script session's live terminal (`sharedSession.SharedTerminal`, Services/Terminal/InteractiveTerminalService.cs:285 and 294-295; SshShellSession.cs:115 exposes `_scripting.Terminal`). `InteractiveTerminalForm.OnShown` immediately fires `EmitTerminalSizeChanged` (Forms/InteractiveTerminalForm.cs:216-221), which computes columns/rows from the window's pixel client size (339-364), and the handler calls `terminal.SetScreenSize(...)` on that pooled terminal (InteractiveTerminalService.cs:1843-1859). The pooled session was created at 120x36 (Services/SshTerminalOptionsFactory.cs:13-14), so merely opening the window — and certainly any user resize — changes the remote PTY geometry, and nothing restores it after the window closes: `SyncAfterInteractive` only sends \\r and re-reads to the prompt (Services/SshShellSession.cs:344-365). Every subsequent `send`/`expect` step in the same script then runs against the altered width, changing line wrapping and pager trigger points — which is exactly what the prompt/pager regexes and `TerminalOutputProcessor` line handling key off.",
+ "recommendation": "Capture the pooled terminal's columns/rows before handing it to `RunWindowLoopAsync` in `RunSharedAsync`, and restore them (inside the same `ioLock`) right before `SyncAfterInteractive()` in the close path. Alternatively, in shared mode render at the session's existing geometry and ignore window-driven `TerminalSizeChanged` (letterbox the viewport) so the script session is never perturbed.",
+ "user_benefit": "Stops a class of 'script worked until I peeked at it' failures: today a quick shared-mode look at a session can change output wrapping for the rest of the run, breaking expect patterns and pager handling in ways that look like random flakiness.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "285, 294-295",
+   "note": "shared mode binds the window to the pooled session's SharedTerminal"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs",
+   "lines": "216-221, 339-364",
+   "note": "OnShown emits TerminalSizeChanged computed from window pixels"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "1843-1859",
+   "note": "handler calls SetScreenSize on the pooled terminal; nothing saves/restores"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs",
+   "lines": "344-365",
+   "note": "SyncAfterInteractive realigns the prompt only — no geometry restore"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshTerminalOptionsFactory.cs",
+   "lines": "13-14",
+   "note": "pooled session default geometry 120x36"
+  }
+ ]
+}

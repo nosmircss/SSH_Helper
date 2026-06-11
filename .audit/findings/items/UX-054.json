@@ -1,0 +1,26 @@
+{
+ "id": "UX-054",
+ "title": "local_cmd confirmation dialog ignores font settings, is unthemed in light mode, and clips its widest button",
+ "category": "UX",
+ "severity": "low",
+ "effort": "S",
+ "area": "ui-utilities",
+ "lens": "ux",
+ "existing_state": "LocalCmdConfirmationForm — the safety gate shown when a YAML script wants to run a local command — is hand-laid-out in absolute pixels (UI/LocalCmdConfirmationDialog.cs:24-123) and never calls DialogTheme.SetDialogFont, so it ignores the user's configured dialog font that every other dialog honors. 'Run Same Command' is squeezed into a fixed 140px button (:96-98) and will clip at larger fonts/DPI. Theming is dark-only and gated on its own brightness heuristic (mainForm.BackColor.GetBrightness() < 0.2f, :125-126): in light mode the form gets no DialogTheme treatment at all (raised 3D buttons amid an app of flat styled ones), duplicating the detection logic DialogTheme already centralizes in ResolveDarkMode.",
+ "recommendation": "Apply DialogTheme.SetDialogFont(this, DialogTheme-resolved font) and call StyleButton/ApplyTo unconditionally with the resolved darkMode (DialogTheme.ResolveDarkMode(owner)) instead of the local heuristic. Switch the button row to a right-anchored FlowLayoutPanel with AutoSize buttons so 'Run Same Command' never clips. This is the dialog a user reads before approving arbitrary local command execution — it should look trustworthy.",
+ "user_benefit": "The one dialog asking the user to approve local command execution stops looking like an unfinished afterthought and stays readable at the user's chosen font size.",
+ "evidence": [
+  {
+   "file": "UI/LocalCmdConfirmationDialog.cs",
+   "lines": "24-123",
+   "note": "absolute pixel layout, no SetDialogFont, 140px 'Run Same Command'"
+  },
+  {
+   "file": "UI/LocalCmdConfirmationDialog.cs",
+   "lines": "125-134",
+   "note": "own brightness heuristic; light mode receives zero theming"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

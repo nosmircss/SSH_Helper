@@ -1,0 +1,26 @@
+{
+ "id": "ENH-005",
+ "title": "No global exception handling: any unhandled error is a stock crash with no log and no state flush",
+ "category": "ENH",
+ "severity": "high",
+ "effort": "S",
+ "area": "cross-startup",
+ "lens": "ux",
+ "existing_state": "Program.Main (Program.cs:13-60) wires nothing for Application.ThreadException, AppDomain.CurrentDomain.UnhandledException, or Application.SetUnhandledExceptionMode — a repo-wide search returns zero hits. Application.Run(new Form1()) at Program.cs:59 runs a 15k-line form plus async event handlers (e.g. async void Form1_Shown, Form1.cs:414) where any escaped exception kills the process with the generic .NET crash dialog: no error log is written anywhere, unsaved host-grid edits and window state are lost (state is only persisted on the orderly close path), and the user has nothing to report. Even startup-path throws (ScintillaNativeBootstrap.ConfigureSatelliteDirectory at Program.cs:58 can throw InvalidOperationException when extraction roots are unwritable) crash before any window exists.",
+ "recommendation": "In Program.Main, before Application.Run: set Application.SetUnhandledExceptionMode(CatchException), subscribe Application.ThreadException and AppDomain.CurrentDomain.UnhandledException, and route both to a handler that (1) appends the full exception to %LocalAppData%\\SSH_Helper\\logs\\crash-{date}.log via AppDataPaths, (2) shows a themed dialog with the message, an 'Open log' link, and Continue/Exit choices, and (3) asks Form1 to attempt a best-effort config/state save. Also wrap the pre-UI bootstrap (Program.cs:58) in try/catch with a friendly MessageBox mirroring the existing portable-storage gate at Program.cs:48-56.",
+ "user_benefit": "For a tool that holds an edited host grid, live SSH sessions, and a job scheduler, one stray exception currently means silent data loss and an undiagnosable crash. A handler converts that into a logged, recoverable event the owner can actually debug from a user report.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Program.cs",
+   "lines": "13-60",
+   "note": "Entire entry point: no exception wiring; ConfigureSatelliteDirectory (line 58) can throw pre-UI"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "414-443",
+   "note": "async void Form1_Shown — escaped exceptions here bypass any try/catch and crash the app"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

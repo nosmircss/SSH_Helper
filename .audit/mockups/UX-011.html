@@ -1,0 +1,90 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace}
+.hd{font-size:12px;margin:0 0 10px}.hd b{color:#4cc9f0}
+.row{display:grid;grid-template-columns:200px 200px 1fr;gap:14px}
+.cap{font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap i{font-style:normal}.b4 i{color:#ff5c5c}.af i{color:#2bd97c}
+.menu{background:oklch(18% .03 275);border:1px solid oklch(34% .04 275);border-radius:6px;padding:4px 0;width:192px;box-shadow:0 8px 24px rgba(0,0,0,.55)}
+.mi{display:flex;align-items:center;gap:7px;padding:5px 11px;color:#c9d4e3}
+.mi .ic{width:17px;text-align:center;font-size:12px}
+.sep{height:1px;background:oklch(34% .04 275);margin:4px 8px}
+.del{color:#ff5c5c}
+.new{background:rgba(76,201,240,.10);box-shadow:inset 2px 0 0 #4cc9f0}
+.kbd{margin-left:auto;color:#8294a8;font-size:9px;border:1px solid #1c2330;border-radius:3px;padding:0 4px}
+.pill{font-size:8px;font-weight:700;color:#0b0e13;background:#4cc9f0;border-radius:3px;padding:1px 4px;margin-left:6px}
+.note{font-size:9px;color:#8294a8;margin-top:7px;line-height:1.5;max-width:200px}
+.cv{background:#0d1019;background-image:radial-gradient(circle,#1c2330 1px,transparent 1px);background-size:14px 14px;border:1px solid #1c2330;border-radius:8px;padding:10px 0;display:flex;flex-direction:column;align-items:center}
+.wire{width:2px;height:13px;background:#56657a}
+.wire.dash{background:repeating-linear-gradient(#56657a 0 3px,transparent 3px 6px)}
+.blk{position:relative;width:188px;background:#151926;border:1px solid var(--bc);border-radius:8px;padding:5px 9px;box-shadow:0 0 7px var(--gl)}
+.bt{font-size:9px;letter-spacing:.6px;color:var(--bc)}
+.blk code{display:block;font-size:10px;color:#aab8cc;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dis{border-style:dashed;--bc:#3a4154;--gl:transparent}
+.dis .in{opacity:.45}
+.badge{position:absolute;top:-7px;right:8px;font-size:8px;font-weight:700;letter-spacing:.8px;background:#ffb454;color:#0b0e13;border-radius:3px;padding:1px 5px}
+.skip{font-size:9px;color:#ffb454;margin:3px 0 0}
+.ft{font-size:9.5px;color:#8294a8;margin-top:11px;border-top:1px solid #1c2330;padding-top:7px;line-height:1.5}
+.ft b{color:#2bd97c;font-weight:400}
+</style></head><body>
+
+<p class="hd"><b>UX-011</b> &nbsp;Disable Block works end-to-end — only the menu entry is missing</p>
+
+<div class="row">
+<div>
+  <p class="cap b4"><i>&#9679;</i> Before — block right-click</p>
+  <div class="menu">
+    <div class="mi"><span class="ic">&#128308;</span>Toggle Breakpoint</div>
+    <div class="mi"><span class="ic">&#128172;</span>Add Comment (#)</div>
+    <div class="mi"><span class="ic">&#128204;</span>Add Sticky</div>
+    <div class="sep"></div>
+    <div class="mi"><span class="ic">&#8862;</span>Expand All Blocks</div>
+    <div class="mi"><span class="ic">&#8863;</span>Collapse All Blocks</div>
+    <div class="sep"></div>
+    <div class="mi del"><span class="ic">&#128465;</span>Delete Block</div>
+  </div>
+  <p class="note">Only way to skip a step today: delete it, or edit the YAML outside the canvas.</p>
+</div>
+
+<div>
+  <p class="cap af"><i>&#9679;</i> After — one item added</p>
+  <div class="menu">
+    <div class="mi"><span class="ic">&#128308;</span>Toggle Breakpoint</div>
+    <div class="mi"><span class="ic">&#128172;</span>Add Comment (#)</div>
+    <div class="mi"><span class="ic">&#128204;</span>Add Sticky</div>
+    <div class="sep"></div>
+    <div class="mi"><span class="ic">&#8862;</span>Expand All Blocks</div>
+    <div class="mi"><span class="ic">&#8863;</span>Collapse All Blocks</div>
+    <div class="sep"></div>
+    <div class="mi new"><span class="ic">&#9940;</span>Disable Block<span class="kbd">Ctrl+/</span><span class="pill">NEW</span></div>
+    <div class="mi del"><span class="ic">&#128465;</span>Delete Block</div>
+  </div>
+  <p class="note">Label flips to &ldquo;Enable Block&rdquo; via the existing isDisabled() selector; hidden for the Start node.</p>
+</div>
+
+<div>
+  <p class="cap af"><i>&#9679;</i> Result — step skipped mid-flow</p>
+  <div class="cv">
+    <div class="blk" style="--bc:#5b8fd9;--gl:rgba(91,143,217,.25)">
+      <div class="bt">SEND COMMAND</div>
+      <code>config system dns &middot; 10.10.4.21</code>
+    </div>
+    <div class="wire"></div>
+    <div class="blk dis">
+      <span class="badge">DISABLED</span>
+      <div class="in"><div class="bt">SEND COMMAND</div>
+      <code>execute reboot</code></div>
+    </div>
+    <div class="wire dash"></div>
+    <div class="blk" style="--bc:#8a8f9e;--gl:rgba(138,143,158,.2)">
+      <div class="bt">WAIT</div>
+      <code>delay: 30s</code>
+    </div>
+    <p class="skip">&#9654; run skips the dimmed block; flow continues</p>
+  </div>
+</div>
+</div>
+
+<p class="ft">Pipeline already shipped: <b>toggleDisabled()</b> updates the visual, messages C#, autosaves layout; the run payload carries <b>disabledBlocks</b> and state restores on preset load. This dimmed look + badge render today &mdash; users just can&rsquo;t trigger it.</p>
+
+</body></html>

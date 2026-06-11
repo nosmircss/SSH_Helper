@@ -1,0 +1,36 @@
+{
+ "id": "PERF-030",
+ "title": "Run Output console re-splits and re-renders the entire 5000-line buffer on every 50ms chunk, on both the append and render sides",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-ui",
+ "lens": "perf",
+ "existing_state": "runOutput is one monolithic string in the main canvas store: appendRunOutput concatenates the chunk then splits the ENTIRE buffer on newlines and re-joins it (up to 5000 lines / hundreds of KB) to enforce the cap on every message (FlowCanvas/src/stores/slices/executionSlice.ts:119-127). The host throttles output to 50ms batches and forwards each flush via SendRunOutputAppend (Form1.cs:118, 332, 13977-13985), so verbose multi-host runs fire this ~20x/second — and execution-started auto-switches the dock to the Run tab so the console is mounted during runs (stores/messageBridge.ts:215-222, 333-341). On the render side RunOutputView re-derives all lines per update (full split + per-line trailing-CR replace, RunOutputView.tsx:46) and re-renders the complete list — up to 5000 divs with index keys, each re-running the classifyRunOutputLine regex when Color is on and the highlight() substring scan when Find is open, with no virtualization (panels/RunOutputView.tsx:127-135, 164-177); matchCount additionally rescans the whole lowercased buffer per chunk (32-39). Because runOutput lives in the main canvas store, each append also wakes every canvas subscriber (edges, blocks — compounding the selector-scan finding). The detached run-output window (?panel=runoutput) runs the identical component full-time.",
+ "recommendation": "Store the console as a line array (ring buffer): split only the incoming chunk, append, and drop from the head — O(chunk) instead of O(buffer); carry the trailing partial line separately. Render via a memoized per-line Row component (line text + color mode + query as props) so unchanged lines skip reconciliation, classify each line once at append time, and add simple windowed rendering (fixed-height monospace rows make manual virtualization ~50 lines of code — no library needed). Compute matchCount incrementally or only while the find bar is open and the query changes. Consider moving runOutput into a small separate vanilla zustand store so 20Hz console churn never wakes canvas subscribers.",
+ "user_benefit": "Verbose runs against a fleet stream into the Run Output tab (and detached window) without making the whole canvas WebView chug at exactly the moment the user is watching live wires and block states.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/executionSlice.ts",
+   "lines": "119-127",
+   "note": "appendRunOutput splits the full buffer per chunk to enforce MAX_RUN_OUTPUT_LINES=5000"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/panels/RunOutputView.tsx",
+   "lines": "32-39, 46, 127-135, 164-177",
+   "note": "full-buffer matchCount scan, full re-split, full 5000-row map with per-line regex classify + highlight, index keys, no virtualization"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "118, 332, 13977-13985",
+   "note": "host batches output every 50ms (UiOutputThrottleMs) then SendRunOutputAppend per flush — up to 20 chunks/sec reach React"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/messageBridge.ts",
+   "lines": "215-222, 333-341",
+   "note": "execution-started auto-switches the dock to the Run tab, so the console is mounted during runs"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

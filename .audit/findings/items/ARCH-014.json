@@ -1,0 +1,46 @@
+{
+ "id": "ARCH-014",
+ "title": "on_error handling has no single enforcement point — continue-paths in readfile/writefile return plain Ok, which erases _last_error and hides the error from the canvas",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-b",
+ "lens": "perf",
+ "existing_state": "CommandResult.ApplyOnError (Services/Scripting/Commands/IScriptCommand.cs:136-141) is the intended single mapping: on_error:continue -> Suppressed (sets SuppressedError=true). But each command hand-rolls the check, and several diverge. ReadFileCommand returns plain CommandResult.Ok(message) on continue for extension-config errors (ReadFileCommand.cs:62-63), extension-mismatch (84-85), blocked-path validation (95-96), and missing file (113-114). WriteFileCommand does the same for path-validation (WriteFileCommand.cs:54-61) yet correctly returns Suppressed for IO exceptions in the very same file (148-149, 158-159). PlaySoundCommand silently defaults to continue when on_error is omitted — unique among all commands (PlaySoundCommand.cs:127-134). Notify and Vault honor a second, options-level on_error in addition to the step-level one (NotifyCommand.cs:89). The consequence is concrete: ScriptExecutor sets _last_error only when SuppressedError is true and actively REMOVES _last_error on a plain-Ok success (ScriptExecutor.cs:412-419), so a continued readfile/writefile validation failure both fails to record its error AND erases any prior error trail a script was inspecting. SuppressedError also flows onto StepCompleted events (ScriptExecutor.cs:408) and into the Flow Canvas step payload (Form1.cs:13647), so these steps render as clean successes in the canvas instead of suppressed-error state.",
+ "recommendation": "Make CommandResult.ApplyOnError the only continue/stop mapping: replace every `if (IsContinueOnError(step)) return CommandResult.Ok(...)` site in ReadFileCommand and WriteFileCommand with `return CommandResult.ApplyOnError(step, msg)` (or Suppressed directly), and delete the per-command IsContinueOnError helpers (WriteFileCommand.cs:165-168 duplicates step.IsOnErrorContinue). Decide whether playsound's default-continue is intended; if yes, express it via a declarative flag on the command registration (e.g., DefaultOnErrorContinue) rather than a buried private method, so the contract is discoverable. Add one unit test per command asserting SuppressedError=true on continued failures — the existing test suite already asserts this pattern for other commands, so the gap is cheap to close.",
+ "user_benefit": "Scripts that use on_error: continue plus ${_last_error} checks (the documented error-handling pattern) get correct results from readfile/writefile, and the Flow Canvas stops showing real (suppressed) failures as green successes.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/IScriptCommand.cs",
+   "lines": "136-141",
+   "note": "ApplyOnError: the intended single source — continue maps to Suppressed"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ReadFileCommand.cs",
+   "lines": "62-63, 84-85, 95-96, 113-114",
+   "note": "four continue-paths return plain Ok, never marking SuppressedError"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/WriteFileCommand.cs",
+   "lines": "54-61, 148-149, 158-159, 165-168",
+   "note": "Ok on path-validation vs Suppressed on IO exceptions in the same file; private IsContinueOnError duplicate"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptExecutor.cs",
+   "lines": "408-419",
+   "note": "_last_error set only for SuppressedError; RemoveVariable('_last_error') on plain Ok erases the trail"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/PlaySoundCommand.cs",
+   "lines": "127-134",
+   "note": "unique silent default-continue when on_error omitted"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/NotifyCommand.cs",
+   "lines": "89",
+   "note": "second options-level on_error surface, diverging from the step-level contract"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

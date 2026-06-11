@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ARCH-033 — function registry metadata</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+  .cols{display:flex;gap:12px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px 2px}
+  .cap b{font-weight:600}
+  .cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+  .pane{background:#0e1219;border:1px solid #1c2330;border-radius:6px;overflow:hidden;margin-bottom:8px}
+  .bar{background:#11161f;border-bottom:1px solid #1c2330;padding:4px 8px;font-size:10px;color:#8294a8}
+  pre{margin:0;padding:8px 10px;line-height:1.55;white-space:pre;overflow-x:auto}
+  .ln{color:#3a4659;user-select:none}
+  .k{color:#4cc9f0}.s{color:#2bd97c}.v{color:#ffb454}.c{color:#586a80}
+  .squig{text-decoration:underline wavy #ff5c5c;text-decoration-skip-ink:none;text-underline-offset:3px}
+  .tip{position:relative;margin:-2px 10px 8px 96px;background:#141a24;border:1px solid #3a2630;border-left:3px solid #ff5c5c;
+       border-radius:4px;padding:6px 9px;font-size:11px;max-width:430px}
+  .tip .sig{color:#4cc9f0}
+  .tip .err{color:#ff5c5c}
+  .ac{margin:0 10px 10px 96px;background:#141a24;border:1px solid #1c2330;border-radius:4px;max-width:430px;font-size:11px}
+  .ac div{padding:3px 9px;display:flex;gap:8px}
+  .ac div+div{border-top:1px solid #161d29}
+  .ac .sel{background:#16202e}
+  .ac .fn{color:#4cc9f0;white-space:nowrap}
+  .ac .d{color:#8294a8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .out .ok{color:#2bd97c}
+  .out .host{color:#8294a8}
+  .gap{background:#2a1620;border-radius:2px;padding:0 2px;color:#ff5c5c}
+  .note{font-size:11px;color:#8294a8;margin:2px 2px 0;line-height:1.5}
+  .note .bad{color:#ff5c5c}.note .good{color:#2bd97c}
+  .foot{margin-top:10px;border-top:1px solid #1c2330;padding-top:8px;font-size:11px;color:#8294a8;line-height:1.5}
+  .foot b{color:#c9d4e3;font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="cols">
+
+  <div class="col">
+    <p class="cap"><b class="bad">Before</b> — silent null, empty password reaches the fleet</p>
+    <div class="pane">
+      <div class="bar">rotate-admin-pass.yaml</div>
+      <pre><span class="ln">1</span>  <span class="k">steps</span>:
+<span class="ln">2</span>    - <span class="k">name</span>: <span class="s">Rotate admin password</span>
+<span class="ln">3</span>      <span class="k">set</span>: <span class="v">pw = vault(secret/db)</span>      <span class="c"># 1 arg, no warning</span>
+<span class="ln">4</span>    - <span class="k">send</span>: <span class="s">config set admin-pass {{pw}}</span></pre>
+    </div>
+    <div class="pane out">
+      <div class="bar">Run Output — 3 hosts</div>
+      <pre><span class="host">[10.20.4.11] edge-fw-01 &gt;</span> config set admin-pass <span class="gap"> </span>
+<span class="host">[10.20.4.12] edge-fw-02 &gt;</span> config set admin-pass <span class="gap"> </span>
+<span class="host">[10.20.4.13] core-sw-01 &gt;</span> config set admin-pass <span class="gap"> </span>
+<span class="ok">✓ Completed — 3/3 hosts, 0 errors</span></pre>
+    </div>
+    <p class="note"><span class="bad">vault()</span> with a missing key arg returns <span class="bad">null</span> → {{pw}} expands to nothing. The run reports success. Other functions fail differently: regex_match → "", count() → silent fallback.</p>
+  </div>
+
+  <div class="col">
+    <p class="cap"><b class="good">After</b> — registry metadata: validation + signature help</p>
+    <div class="pane">
+      <div class="bar">rotate-admin-pass.yaml</div>
+      <pre><span class="ln">1</span>  <span class="k">steps</span>:
+<span class="ln">2</span>    - <span class="k">name</span>: <span class="s">Rotate admin password</span>
+<span class="ln">3</span>      <span class="k">set</span>: <span class="v">pw = <span class="squig">vault(secret/db)</span></span>
+<span class="ln">4</span>    - <span class="k">send</span>: <span class="s">config set admin-pass {{pw}}</span></pre>
+      <div class="tip"><span class="err">⚠</span> <span class="sig">vault(path, key[, profile])</span><br><span class="err">expects 2–3 arguments, got 1</span></div>
+    </div>
+    <div class="pane">
+      <div class="bar">Autocomplete — typing "va…" in expression</div>
+      <div class="ac">
+        <div class="sel"><span class="fn">vault(path, key[, profile])</span><span class="d">read secret from Vault</span></div>
+        <div><span class="fn">vault_list(prefix[, profile])</span><span class="d">list keys under a path</span></div>
+        <div><span class="fn">vault_clear_cache()</span><span class="d">drop cached secrets</span></div>
+        <div><span class="fn">regex_match(input, pattern)</span><span class="d">first match or ""</span></div>
+      </div>
+    </div>
+    <p class="note">Same wrong call now squiggles at edit time, and a runtime arity violation logs one uniform warning instead of the per-function null / "" / fallback lottery.</p>
+  </div>
+
+</div>
+
+<div class="foot"><b>The change:</b> Register() takes a small FunctionDescriptor (name, arity, params, summary) next to the delegate — handlers untouched. One source of truth then feeds dispatch warnings, parser validation, Scintilla autocomplete, and the SCRIPTING.md tables.</div>
+
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+ "id": "BUG-046",
+ "title": "Division and modulo by zero silently return 0, propagating bad numbers into downstream decisions",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-core",
+ "lens": "correctness",
+ "existing_state": "In ExpressionParser, `/` and `%` with a zero right-hand side emit a Warning line and substitute `0.0` rather than failing: `if (rhs == 0) { _context.EmitOutput(\"Warning: Division by zero, returning 0\"...); left = 0.0; }` (ExpressionParser.cs:234-243 for `/`, 249-257 for `%`). Since denominators in this tool are frequently derived from command output (e.g. `set: pct = ${used} / ${total} * 100` where a host returns total=0), the expression yields 0 instead of erroring, and that 0 then commonly drives an `if`/threshold (`if pct > 90`) — so a host with no data is silently classified as 0% healthy and the wrong action is taken. The warning is buried in normal output and the step still reports success.",
+ "recommendation": "Make divide/modulo-by-zero fail the enclosing step (throw a FormatException from ExpressionParser, which ExecuteStepCoreAsync already funnels into CommandResult.ApplyOnError), or at minimum return a sentinel that conditions treat as undefined rather than the false-but-valid value 0. If a silent default is kept for back-compat, gate it behind an explicit script option.",
+ "user_benefit": "Arithmetic on missing/zero host data fails visibly instead of quietly producing 0 and steering threshold logic into the wrong branch.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionParser.cs",
+   "lines": "230-258",
+   "note": "div and mod by zero both return 0.0 with only a warning"
+  }
+ ]
+}

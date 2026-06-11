@@ -1,0 +1,26 @@
+{
+ "id": "BUG-038",
+ "title": "Release pipeline never runs the .NET test suite or FlowCanvas unit tests, and no CI runs on push/PR at all",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "models-samples-build",
+ "lens": "build-ci",
+ "existing_state": "The repo has exactly one workflow, .github/workflows/build-release.yml. Its triggers are tags 'v*' and manual dispatch only — the push-to-master and pull_request triggers are commented out (build-release.yml:3-10). The three jobs are: flowcanvas-browser-tests (Playwright e2e only, line 41-43), build (two dotnet publish calls, lines 83-87), and release (lines 95-138). `dotnet test` appears nowhere, so the entire SSH_Helper.Tests xUnit suite — including the suites that validate every ScriptSamples YAML (CanonicalCommandMapSyntaxTests) and the FlowCanvas bridge parity tests — never executes in CI. The FlowCanvas vitest unit suite (`npm test`) is likewise never run; only e2e is. Net effect: every commit lands on master unverified, and release binaries are published from code whose unit/integration tests may be red.",
+ "recommendation": "Add a test job to the workflow (or a separate ci.yml) that runs `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj` on windows-2022 (use `-p:SkipFlowCanvasBuild=true` to avoid the Node build, and apply the known UI-test parallel-hang mitigation: exclude the UI namespace or run with --blame-hang-timeout) plus `npm test` in FlowCanvas/, then make `build` depend on it. Re-enable the push/PR triggers for the test jobs (keep publish/release tag-gated as today).",
+ "user_benefit": "The project maintains a substantial test suite that currently protects nothing in CI; wiring it in means regressions are caught before they land on master or ship in a tagged release.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml",
+   "lines": "3-10",
+   "note": "push branches and pull_request triggers commented out; only v* tags + workflow_dispatch"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml",
+   "lines": "16-93",
+   "note": "Jobs run Playwright e2e and dotnet publish only — no dotnet test, no vitest anywhere"
+  }
+ ]
+}

@@ -1,0 +1,26 @@
+{
+ "id": "ENH-017",
+ "title": "Password column cells display secrets in plaintext on screen",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "form1-a",
+ "lens": "ux",
+ "existing_state": "Only the toolbar password box is masked (InitializePasswordMasking, Form1.cs:1599-1606 sets tsbPassword.TextBox.UseSystemPasswordChar). The grid's 'password' column — an explicitly recognized special column (Form1.cs:139) — renders values as plain text. Passwords are visible whenever the user types them (until the next environment load migrates them to Credential Manager per Form1.cs:2292-2303), and permanently visible when Credential Manager is unavailable or the CSV was just opened from disk. On a NOC workstation or during screen sharing, every per-host password in a loaded CSV is readable on screen.",
+ "recommendation": "Mask the 'password' column display: in a CellFormatting handler on dgv_variables, replace non-empty values in the password column with bullet characters (display-only — underlying value untouched, so CSV save and execution are unaffected); let the editing control show the real value while a cell is in edit mode (the grid already commits on cell leave, Form1.cs:4310-4313). Optionally add a small eye-toggle in the column header context menu to reveal values deliberately. Keep the custom-paint path in mind: the grid uses CellPainting for checkboxes/headers (Form1.cs:4087-4205) but plain text cells render normally, so CellFormatting suffices.",
+ "user_benefit": "Standard behavior for every credential-handling tool (mRemoteNG, SecureCRT, KeePass): secrets are not readable by shoulder-surfers or in screenshots/recordings of a multi-host run session.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "1599-1606",
+   "note": "Only the toolbar password textbox gets UseSystemPasswordChar — nothing masks the grid column"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "134-141",
+   "note": "'password' is a first-class special column, so the app knows exactly which column to mask"
+  }
+ ],
+ "mockup_idea": "Before/after of the host grid with a 'password*' column: before shows 'Sup3rS3cret!' in each row; after shows '••••••••' with one row in edit mode showing the real value and a header context menu item 'Reveal passwords' visible.",
+ "merged_from": 1
+}

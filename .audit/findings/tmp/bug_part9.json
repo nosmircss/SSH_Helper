@@ -1,0 +1,132 @@
+[
+ {
+  "id": "BUG-076",
+  "title": "F5 and Ctrl+Enter bypass the Flow Canvas toolbar's run gates — untouched presets get their YAML rewritten and marked dirty, and mid-run F5 corrupts live step correlation",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "flowcanvas-ui",
+  "lens": "correctness",
+  "existing_state": "The toolbar Run/Test Step buttons send `graphChanged: isDirty` and are disabled while `isRunning || exportStatus.hasErrors || !targetHost` (FlowCanvas/src/panels/Toolbar.tsx:65-83, 104, 118). The keyboard equivalents check only `exportStatus.hasErrors`: F5 (hooks/useKeyboardShortcuts.ts:132-146) and Ctrl+Enter (111-130) post execute-canvas with no graphChanged flag, no targetHost check, and no isRunning check. The host defaults a missing graphChanged to TRUE (Form1.cs:6932 — `?? true`) and on true overwrites the Scintilla editor with re-serialized YAML (`txtCommand.Text = exportResult.Yaml`, Form1.cs:6963-6969), defeating the mechanism whose explicit purpose (comments at Form1.cs:6928-6931) is to preserve the user's original formatting/blank lines when nothing was modified — so pressing F5 on a freshly imported, untouched preset reformats the YAML, fires TextChanged, and flags phantom unsaved changes that persist if the user saves. Worse, pressing F5 during a run still executes ApplyFlowCanvasGraph before the `_executionCoordinator.IsRunning` abort (Form1.cs:6682, 12270-12274), rebuilding the four node<->stepPath correlation maps (Form1.cs:6971-6974) the in-flight run's step highlighting depends on, and re-persisting canvas layout mid-run (Form1.cs:7000). The missing targetHost gate is absorbed host-side as an error message (Form1.cs:12689-12702) but makes F5 behave differently from the visibly-disabled Run button.",
+  "recommendation": "In useKeyboardShortcuts.ts, make F5 and Ctrl+Enter call the exact same logic as the toolbar handlers (extract handleRun/handleTestStep into a shared store action or util): early-return when `isRunning` (read from the store), skip dispatch for run when there is no targetHost, and include `graphChanged: store.isDirty` in both messageBus.send payloads, matching Toolbar.tsx. Optionally surface a brief toast for the no-targetHost case so F5 feedback matches the disabled-button tooltip.",
+  "user_benefit": "Pressing F5 to re-run no longer silently reformats hand-written preset YAML, creates phantom unsaved-changes prompts, or desyncs live execution highlighting when pressed mid-run — and the keyboard shortcut behaves identically to the Run button instead of appearing to work in states where the button is disabled.",
+  "mockup_idea": "",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\hooks\\useKeyboardShortcuts.ts", "lines": "111-146", "note": "F5/Ctrl+Enter send execute-canvas with no graphChanged, no isRunning gate, no targetHost gate"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\Toolbar.tsx", "lines": "65-83, 104, 118", "note": "toolbar sends graphChanged: isDirty and disables Run on running/errors/no-host"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "6928-6932, 6963-6974", "note": "absent graphChanged defaults to true -> txtCommand overwritten with regenerated YAML and correlation maps rebuilt, against the documented formatting-preservation intent"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "6682, 12270-12274", "note": "ApplyFlowCanvasGraph runs before the IsRunning abort in ExecutePresetOnRowsAsync — mid-run F5 rebuilds maps and re-persists layout"}
+  ]
+ },
+ {
+  "id": "BUG-077",
+  "title": "Flow Canvas timeline grows unbounded with a full, unsanitized variable snapshot per step execution — long loop runs degrade and can freeze the canvas",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "flowcanvas-state",
+  "lens": "performance",
+  "existing_state": "Every `execution-update` with state 'running' appends a timeline entry carrying a complete copy of all script variables (stores/messageBridge.ts:250-262). `addTimelineEntry` has no cap and rebuilds the entire array on every append (stores/slices/timelineSlice.ts:35-42 — O(N) copy per event, O(N squared) over a run), and entries are only cleared at the start of the next run (messageBridge.ts:216-217). Unlike the iteration log — which strips the heavy `_outputwindow`/`_output` keys, truncates values at 2000 chars, and evicts beyond a user-tunable 500-record cap (stores/slices/iterationSlice.ts:12-32, 222-231) — timeline snapshots are raw: variables holding accumulated command output are cloned in full into every entry. A foreach over a large host list executing a few steps per iteration produces thousands of entries, each duplicating the entire (possibly multi-megabyte) variable map on the WebView2 UI thread mid-run. Secondary defect in the same slice: `updateTimelineEntry` patches every open entry matching the nodeId (timelineSlice.ts:44-50), not the most recent one.",
+  "recommendation": "Reuse iterationSlice's sanitizer for the snapshot stored on each entry, and add a hard cap (e.g. 1000 entries, evict oldest) in `addTimelineEntry` — or capture variables only on a sampled/last-N basis. Switch `updateTimelineEntry` to patch the latest open entry for the node.",
+  "user_benefit": "Loop-heavy fleet runs are this tool's core use case; today the canvas gets progressively slower during exactly those runs and can become unresponsive, with the cost invisible until it happens.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\messageBridge.ts", "lines": "250-262", "note": "full variables map cloned into a new timeline entry on every running event"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\timelineSlice.ts", "lines": "35-50", "note": "no cap, full-array copy per append, all-open-entries patch"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\iterationSlice.ts", "lines": "12-32, 222-231", "note": "the sanitization + eviction pattern that already exists but is not applied to the timeline"}
+  ]
+ },
+ {
+  "id": "BUG-078",
+  "title": "Multi-block parallel arms export only their first block — the rest are dropped behind a non-blocking warning",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "M",
+  "area": "flowcanvas-bridge",
+  "lens": "data-integrity",
+  "existing_state": "The canvas lets users chain several blocks inside a parallel arm, but TryGenerateContainerFromGraph emits only `branchChain[0]` per arm, adding a Warning diagnostic 'Parallel branch contains multiple sequential nodes; exporting the first node only' (FlowCanvasBridge.cs:2257-2281). Warnings don't fail the export (Success = no errors), so Apply/Run proceeds and txtCommand is overwritten with YAML missing blocks 2+ of every arm (Form1.cs:6966-6969). The dropped blocks remain visible on the canvas until the next reload from YAML, at which point they vanish — delayed, easy-to-miss data loss of canvas-authored work.",
+  "recommendation": "Either (a) escalate this diagnostic to Error so the apply is blocked (consistent with the missing-then/missing-do errors at FlowCanvasBridge.cs:2036-2043, 2083-2090), with a message telling the user the YAML schema runs one step per parallel arm, or (b) make it expressible: auto-wrap a multi-node arm in a nested container step on export. Option (a) is a one-line severity change plus a React-side blocker; (b) needs an executor-compatible wrapping rule.",
+  "user_benefit": "Stops the canvas from accepting a structure it cannot persist and then quietly amputating it on the next save/run.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "2257-2281", "note": "first node only emitted per parallel arm; Warning severity"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "6946-6969", "note": "warnings don't block; editor overwritten with the truncated YAML"}
+  ]
+ },
+ {
+  "id": "BUG-079",
+  "title": "Editing any property of a Flow Canvas container deletes the inline comments inside its branch bodies on export",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "L",
+  "area": "flowcanvas-bridge",
+  "lens": "data-integrity",
+  "existing_state": "When a container regenerates from the graph instead of round-tripping its snippet, inline comments that lived inside its branch bodies (do:/then:/else:/cases:) are not re-emitted — acknowledged in the code comment at FlowCanvasBridge.cs:1304-1314 ('Task 5b ... intentionally deferred'). Regeneration is triggered broadly: `_forceGraphExport` is set on ALL ancestor containers by any prop edit (per the export-graph-regeneration design), plus snippet-missing, graph-authored branches, structural modification, or any canvas-authored descendant comment (FlowCanvasBridge.cs:1309-1314). So changing one field on a foreach silently strips every `# comment` trailing a command inside its body from the saved YAML. Leading/branch comments survive via the comment-node index (FlowCanvasBridge.cs:1154-1225); only branch-body INLINE comments are lost. This overlaps the documented deferred work in docs/superpowers/plans/2026-06-04-flow-canvas-comment-flow.md (Task 5b), so it is a known gap — included here because the trigger (any container prop edit) is a common path and the loss is silent.",
+  "recommendation": "Implement the deferred propagation: TextToGraph already splits inline comments per nested step (TrySplitTrailingComment is reused by CollectNestedComments); carry each nested step's inline comment in its child-node props (or the comments index keyed by the child's _stepPath, which EmitBranch/BuildCommentedYaml already consult for leading comments) and re-append it in TryGenerateSingleNodeYaml's emission. Until then, emit a Warning diagnostic when a regenerating container's snippet contains inline `#` comments that will not survive.",
+  "user_benefit": "Operators annotate dangerous commands inline ('# do NOT run on core switches'); losing those annotations because someone tweaked the loop's iterator is a silent destruction of safety-critical context.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "1299-1324", "note": "regeneration triggers + in-code acknowledgement that branch-body inline comments are not re-emitted"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "1154-1225", "note": "comment index covers leading/inline/branch by node-id or stepPath — the plumbing exists, nested inline emission is the missing piece"}
+  ]
+ },
+ {
+  "id": "BUG-080",
+  "title": "Missing REBEX_LICENSE_KEY secret produces a successful release whose SSH features are broken at runtime",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "models-samples-build",
+  "lens": "build-ci",
+  "existing_state": "The Rebex license is injected at build time only if the env var is non-empty: SSH_Helper.csproj:13 (`<RebexLicenseKey Condition=\"'$(REBEX_LICENSE_KEY)' != ''\">`) gates the AssemblyMetadata attribute at csproj:45-50. The workflow maps the secret at build-release.yml:60 with no validation that it is actually set — GitHub silently supplies an empty string for a missing/renamed secret, and unconfigured-secret states are easy to hit (fork, repo migration, secret rotation). At runtime, Program.cs:17-40 tries assembly metadata, then a rebex.key file beside the exe (absent in single-file releases), then the user's REBEX_LICENSE_KEY env var (absent on end-user machines), and if all miss it simply proceeds without setting Rebex.Licensing.Key (the `if` at Program.cs:37-40 has no else). The result is a green build, a green release, and an exe where connection pooling and the interactive terminal (everything Rebex-backed, per CLAUDE.md) throws a licensing exception on first use.",
+  "recommendation": "Fail fast at build time: add a step in the `build` job that exits non-zero when `$env:REBEX_LICENSE_KEY` is empty, or better, an MSBuild <Error> in SSH_Helper.csproj gated on `'$(Configuration)'=='Release' and '$(RebexLicenseKey)'==''` (with an opt-out property for unlicensed local Release builds). Optionally log a one-time startup warning in Program.cs when no key was resolved so dev builds surface the state immediately instead of at first SSH use.",
+  "user_benefit": "Turns a silent supply-chain failure mode — shipping a release where the app's core SSH features are dead on arrival — into an immediate, obvious CI failure.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.csproj", "lines": "13, 45-50", "note": "License attribute emitted only when env var non-empty; no error otherwise"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Program.cs", "lines": "17-40", "note": "Three-step fallback chain ends in silently proceeding unlicensed"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml", "lines": "59-60", "note": "Secret mapped to env with no presence check before publish"}
+  ]
+ },
+ {
+  "id": "BUG-081",
+  "title": "Scintilla native DLL extraction trusts any existing file forever — one interrupted first run permanently breaks the editor",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "cross-startup",
+  "lens": "reliability",
+  "existing_state": "ExtractEmbeddedResource early-returns whenever the destination file exists (Utilities/ScintillaNativeBootstrap.cs:113-118) and writes with a non-atomic FileMode.Create stream (:127-128). If the process is killed or crashes mid-extraction on first launch (or two instances race — the writer uses FileShare.Read, so a second process can also load a half-written DLL), a truncated Scintilla.dll or Lexilla.dll is left under %LocalAppData%\\SSH_Helper\\scintilla-native\\<version>\\win-x64, and every subsequent launch reuses it verbatim: the existence check is the only validation. The result is a persistent, opaque native-load failure in the command editor on every run, fixable only by manually deleting a cache directory the user has never heard of. (The version-segmented path only busts the cache on a ScintillaNET package upgrade.)",
+  "recommendation": "Make the extraction atomic and self-healing: write to a temp file in the same directory and File.Move/Replace it into place, and validate existing files before reuse (cheapest: compare file length against the embedded resource stream length; re-extract on mismatch). Ten lines in ExtractEmbeddedResource.",
+  "user_benefit": "An interrupted or concurrent first launch can no longer leave the script editor permanently broken with no user-visible remedy.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\ScintillaNativeBootstrap.cs", "lines": "113-129", "note": "File.Exists early-return (no size/integrity check) + non-atomic FileMode.Create write with FileShare.Read"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\ScintillaNativeBootstrap.cs", "lines": "56-87", "note": "extraction path is reused for the lifetime of the installed ScintillaNET version"}
+  ]
+ },
+ {
+  "id": "BUG-082",
+  "title": "range() ignores the parse result of its step argument — an unparseable step zeroes it and returns null, silently skipping loops",
+  "category": "BUG",
+  "severity": "low",
+  "effort": "S",
+  "area": "scripting-functions",
+  "lens": "correctness",
+  "existing_state": "Range initializes step to 1 but then calls `TryResolveInt(parts[2], context, out step)` without checking the return value (Services/Scripting/Functions/CollectionFunctions.cs:151-153). TryResolveInt sets its out parameter to 0 before attempting the parse (CollectionFunctions.cs:291-297), so when the third argument is an unset variable or non-numeric — e.g. `range(0, 10, {{stride}})` with stride undefined — step becomes 0 and the function returns null at line 155 instead of either erroring or keeping the default of 1. A foreach over that result resolves null to an empty list and iterates zero times, so the loop body is silently skipped for the whole run.",
+  "recommendation": "Check the boolean: `if (parts.Count >= 3 && !TryResolveInt(parts[2], context, out step)) return null;` is the minimal honest fix, but better is to treat an unparseable step as an error (consistent with how start/end already return null at lines 148-149 — and ideally all three should fail loudly rather than null out, per BUG-010's philosophy).",
+  "user_benefit": "A loop that quietly runs zero iterations looks identical to a successful no-op run; fixing the ignored return makes a bad step argument behave deterministically instead of depending on which argument failed to parse.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\CollectionFunctions.cs", "lines": "143-172", "note": "step default 1 overwritten to 0 by failed TryResolveInt (151-153), then `step == 0 -> return null` (155)"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\CollectionFunctions.cs", "lines": "291-297", "note": "TryResolveInt sets result = 0 before parsing; return value ignored at call site"}
+  ]
+ }
+]

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>BUG-034 mockup</title>
+<style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.col{border:1px solid #1c2330;border-radius:8px;padding:10px;background:#0d1118;min-width:0}
+.cap{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:0 0 8px}
+.cap em{font-style:normal}
+.cap.bad em{color:#ff5c5c}.cap.good em{color:#2bd97c}
+.blk{display:flex;gap:6px;align-items:baseline;border:1px solid #243049;border-radius:6px;padding:2px 7px;margin:0;background:#131a26;font-size:11px;white-space:nowrap;overflow:hidden}
+.blk b{color:#4cc9f0;font-weight:600}
+.blk .arg{color:#8294a8;overflow:hidden;text-overflow:ellipsis}
+.start{border-color:#1c4d35}.start b{color:#2bd97c}
+.wire{border-left:2px solid #2a3447;height:7px;margin-left:16px}
+.cut{color:#ff5c5c;font-size:10px;margin:3px 0 3px 6px}
+.drop{opacity:.45;border-style:dashed;border-color:#3a2430}
+.tag{font-size:9px;border-radius:3px;padding:0 4px;margin-left:auto;flex:none}
+.warned{color:#ffb454;border:1px solid #574022}
+.silent{color:#ff5c5c;border:1px solid #4d2230}
+.toast{display:flex;gap:7px;border:1px solid #574022;border-left:3px solid #ffb454;border-radius:6px;background:#161208;padding:6px 8px;margin-top:9px;font-size:11px}
+.toast .i{color:#ffb454;flex:none}
+.note{font-size:10px;color:#8294a8;margin-top:7px;line-height:1.45}
+.note .r{color:#ff5c5c}
+.modal{border:1px solid #2a3447;border-radius:8px;background:#10151e;box-shadow:0 8px 24px #0008;overflow:hidden;margin-top:2px}
+.mhead{display:flex;gap:7px;align-items:center;padding:7px 10px;border-bottom:1px solid #1c2330;background:#131a26;font-size:11px}
+.mhead .dot{width:8px;height:8px;border-radius:50%;background:#ff5c5c;flex:none}
+.mbody{padding:8px 10px;font-size:11px;line-height:1.5}
+.mlist{margin:7px 0;border:1px solid #1c2330;border-radius:6px;background:#0d1118;padding:4px 8px}
+.mlist div{display:flex;gap:7px;align-items:baseline;padding:2px 0;white-space:nowrap;overflow:hidden}
+.mlist .x{color:#ff5c5c;flex:none}
+.mlist b{color:#4cc9f0;font-weight:600}
+.mlist .arg{color:#8294a8;overflow:hidden;text-overflow:ellipsis}
+.btns{display:flex;gap:7px;justify-content:flex-end;padding:8px 10px;border-top:1px solid #1c2330}
+.btn{font:11px "Cascadia Code",Consolas,monospace;border-radius:5px;padding:3px 10px;border:1px solid #2a3447;color:#8294a8;background:transparent}
+.btn.danger{border-color:#4d2230;color:#ff5c5c}
+.btn.primary{border-color:#4cc9f0;color:#06222e;background:#4cc9f0;font-weight:600}
+</style></head><body>
+<div class="cols">
+
+<div class="col">
+<p class="cap bad">Before — <em>one toast, four blocks lost</em></p>
+<div class="blk start"><b>▶ start</b><span class="arg">preset: fortigate-backup</span></div>
+<div class="wire"></div>
+<div class="blk"><b>send</b><span class="arg">get system status</span></div>
+<div class="wire"></div>
+<div class="blk"><b>wait_for</b><span class="arg">"FGT-EDGE-01 #"</span></div>
+<div class="cut">✂ ─ ─ wire deleted here ─ ─</div>
+<div class="blk drop"><b>set_var</b><span class="arg">fw = {{output}}</span><span class="tag warned">⚠ warned</span></div>
+<div class="wire" style="opacity:.4"></div>
+<div class="blk drop"><b>if</b><span class="arg">contains(fw, "v7.4")</span><span class="tag silent">dropped, no warning</span></div>
+<div class="wire" style="opacity:.4"></div>
+<div class="blk drop"><b>send</b><span class="arg">exec backup config tftp 10.20.30.5</span><span class="tag silent">dropped, no warning</span></div>
+<div class="wire" style="opacity:.4"></div>
+<div class="blk drop"><b>log</b><span class="arg">"backup ok on {{Host_IP}}"</span><span class="tag silent">dropped, no warning</span></div>
+<div class="toast"><span class="i">⚠</span><span>Block 'set_var' is not connected and was excluded from the export.</span></div>
+<div class="note">The only diagnostic — it names just the chain head. Apply still <span class="r">succeeds</span>, txtCommand is overwritten, and after reload the four steps are <span class="r">unrecoverable</span>.</div>
+</div>
+
+<div class="col">
+<p class="cap good">After — <em>blocking dialog lists every excluded block</em></p>
+<div class="modal">
+<div class="mhead"><span class="dot"></span><span>Apply to YAML — 4 blocks unreachable</span></div>
+<div class="mbody">A deleted wire left these blocks disconnected from Start. Applying now would remove them from the script:
+<div class="mlist">
+<div><span class="x">✕</span><b>set_var</b><span class="arg">fw = {{output}}</span></div>
+<div><span class="x">✕</span><b>if</b><span class="arg">contains(fw, "v7.4")</span></div>
+<div><span class="x">✕</span><b>send</b><span class="arg">exec backup config tftp 10.20.30.5</span></div>
+<div><span class="x">✕</span><b>log</b><span class="arg">"backup ok on {{Host_IP}}"</span></div>
+</div>
+Keep them in the YAML (reconnect later) or confirm removal.</div>
+<div class="btns"><button class="btn">Cancel</button><button class="btn danger">Remove 4 blocks</button><button class="btn primary">Keep in YAML</button></div>
+</div>
+<div class="note">Bridge fix: warn for <b style="color:#2bd97c">every</b> node absent from <code>visited</code> — drop the <code>!incomingCount.ContainsKey(nid)</code> gate (FlowCanvasBridge.cs:1145) and block apply while any snippet-bearing step is orphaned.</div>
+</div>
+
+</div>
+</body></html>

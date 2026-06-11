@@ -1,0 +1,46 @@
+{
+ "id": "ENH-016",
+ "title": "Output find is half-finished: regex/whole-word toggles built but hidden, one-match-at-a-time selection with no highlight-all, and a permanently dark-themed find bar",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "form1-b",
+ "lens": "ux",
+ "existing_state": "The output find (Ctrl+F / F3, Form1.cs:14450-14619) builds matches with a plain IndexOf scan supporting only case sensitivity (BuildMatchList, 14583-14599) and \"highlights\" by setting the TextBox selection on one match at a time (HighlightCurrentMatch, 14601-14610) — no highlight-all (impossible on a plain TextBox), no way to jump between hosts' sections in a 200-host concatenated output: finding every \"%ERROR\" or \"down\" across a fleet run means pressing F3 repeatedly and remembering what you saw. The capability gap is already scaffolded but abandoned: FindDialog constructs whole-word and regex ToggleButtons in the VS Code style but disables and hides them with 'Hide for now - not implemented' (FindDialog.cs:115-131); a find-in-selection button is likewise hidden (147-153). The dialog also hardcodes the VS Code dark palette as static colors (FindDialog.cs:10-19) and is the only root dialog bypassing DialogTheme — in light mode it floats as a dark rectangle over a light output pane. Minor: the advertised Alt+C match-case shortcut only works while the textbox has focus (193-198); form-level OnKeyDown handles only F3/Escape (279-295).",
+ "recommendation": "Finish what's already scaffolded, then layer up. Cheap tier: implement whole-word and regex in BuildMatchList via Regex.Matches (Regex.Escape the term for literal mode, wrap with \\b for whole-word, surface invalid-pattern errors via the existing SetStatus(message, isError) at FindDialog.cs:297-301), then flip the two toggles to Visible/Enabled; add a light palette branch keyed off the app's dark-mode flag (pass _isDarkMode from Form1.ShowFindDialog); move Alt+C/Alt+W/Alt+R handling into form-level OnKeyDown so the tooltips stop lying. Full tier: render all matches at once — either swap txtOutput to a RichTextBox with background highlights (note RecreateOutputTextBoxIfNeeded at Form1.cs:14086-14142 rebuilds the control past 500K chars, so highlight state must be reapplied there) or, lower-risk, add a results strip under the find dialog listing matching lines with line numbers (click to jump), which also doubles as a per-host error index.",
+ "user_benefit": "Scanning fleet output for failures becomes one search instead of an F3 marathon; regex unlocks patterns like '(down|err-disabled)' that network operators actually search for — today they must copy output elsewhere to grep it. Light-mode users get a find bar that belongs to the app.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "14583-14599",
+   "note": "BuildMatchList: IndexOf scan, case toggle only — the single place regex/whole-word would slot in"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "14601-14619",
+   "note": "highlight = TextBox selection of the single current match"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FindDialog.cs",
+   "lines": "115-131, 147-153",
+   "note": "Whole-word, regex, find-in-selection controls built then hidden as not implemented"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FindDialog.cs",
+   "lines": "10-19",
+   "note": "Hardcoded VS Code dark palette regardless of app theme"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FindDialog.cs",
+   "lines": "193-198, 279-295",
+   "note": "Alt+C only handled in textbox KeyDown despite KeyPreview=true form"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "14086-14142",
+   "note": "txtOutput is destroyed/recreated past 500K chars — highlight state must survive this"
+  }
+ ],
+ "mockup_idea": "Find dialog before/after: before = current term box + case checkbox + \"3/41\" counter; after = adds [Aa][W][.*] toggle buttons and a docked results list \"line 1042: GigabitEthernet0/3 is down\" entries, with all matches tinted amber in the output pane.",
+ "merged_from": 2
+}

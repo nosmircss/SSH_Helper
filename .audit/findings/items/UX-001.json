@@ -1,0 +1,41 @@
+{
+ "id": "UX-001",
+ "title": "Corrupt-config recovery never offers the existing good backup — and the next save destroys it",
+ "category": "UX",
+ "severity": "critical",
+ "effort": "S",
+ "area": "persistence-config",
+ "lens": "ux",
+ "existing_state": "Every save copies the previous config.json to config.json.bak (Services/ConfigurationService.cs:116-120), so after a corruption event (e.g., a partial write — the save itself is non-atomic WriteAllText) a last-good backup almost always exists on disk. But the corrupt-load path (ConfigurationService.cs:91-102) only copies the corrupt file to config.json.corrupt (JsonFileWriter.TryBackupCorrupt is a copy, Utilities/JsonFileWriter.cs:103-118), sets ConfigLoadError, and returns factory defaults. Form1 surfaces this as a passive, ownerless OK-only warning (Form1.cs:350-354) shown before ApplyTheme runs at Form1.cs:406 — so DialogTheme.ResolveDarkMode(null) finds no themed form and renders a light dialog for dark-mode users (UI/DialogTheme.cs:621-624, 766-781). The dialog never mentions config.json.bak, offers no restore and no 'open folder' action. Critically, the corrupt content still sits in config.json, so the very next Save() (e.g. the silent startup update check writing LastCheckTime) copies the corrupt file over config.json.bak before writing defaults — permanently destroying the only good copy of the entire preset library, environments, and saved state.",
+ "recommendation": "In ConfigurationService.Load's catch block, attempt to parse config.json.bak before falling back to defaults; if it parses, show a recovery dialog from the constructor: 'Your settings file was corrupted. A good backup from your last session is available (config.json.bak, saved <last-write-time>).' with [Restore backup] (File.Replace .bak over config.json, reload), [Open data folder], and [Continue with defaults]. Rename/copy the corrupt file with a timestamp and guard the .bak from being overwritten while ConfigLoadError is set (skip the .bak copy in Save() until one clean save has happened). Pass the dark-mode flag explicitly (config.DarkMode is already loaded) so the dialog matches the theme. The non-atomic WriteAllText at ConfigurationService.cs:144 is a separate durability fix.",
+ "user_benefit": "config.json holds everything — presets, environments, host snapshots. Today a single corruption event silently converts a fully recoverable incident into permanent loss of all of it, with the user shown only a vague mis-themed warning while the app destroys the recovery asset seconds after launch. A one-prompt restore turns this into a non-event.",
+ "evidence": [
+  {
+   "file": "Services/ConfigurationService.cs",
+   "lines": "91-102",
+   "note": "Corrupt path: backup-to-.corrupt, fixed message, defaults returned; no .bak restore attempt"
+  },
+  {
+   "file": "Services/ConfigurationService.cs",
+   "lines": "116-120",
+   "note": "Next Save copies the still-corrupt config.json over the last-good .bak"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "350-354, 406",
+   "note": "Ownerless OK-only warning in ctor, before ApplyTheme — no actions, wrong theme"
+  },
+  {
+   "file": "Utilities/JsonFileWriter.cs",
+   "lines": "103-118",
+   "note": "TryBackupCorrupt copies (corrupt stays in place as config.json)"
+  },
+  {
+   "file": "UI/DialogTheme.cs",
+   "lines": "621-624, 766-781",
+   "note": "4-arg Show resolves dark mode from open forms; none exist during the ctor, falls back to light"
+  }
+ ],
+ "mockup_idea": "Dialog mockup: warning icon, 'Your settings file was corrupted. A good backup from your last session is available (config.json.bak, saved 2 min ago).' Buttons: [Restore backup] [Open data folder] [Continue with defaults]. Dark-themed variant shown.",
+ "merged_from": 2
+}

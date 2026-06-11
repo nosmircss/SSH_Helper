@@ -1,0 +1,36 @@
+{
+ "id": "ENH-032",
+ "title": "SSH config support is a silent 6-directive subset: parse errors, ignored directives, and !negation all invisible to the user",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "ui-utilities",
+ "lens": "ux",
+ "existing_state": "The Settings UI offers a single bare checkbox 'Use SSH config file (~/.ssh/config)' (SettingsDialog.cs:447) with zero feedback about what was actually loaded. Underneath, SshConfigParser supports exactly six directives — hostname, port, user, identityfile, hostkeyalgorithms, ciphers (Utilities/SshConfigParser.cs:12-15); every other key (ProxyJump, IdentitiesOnly, Include, Match, KexAlgorithms...) is silently dropped at :79-86. Any I/O or parse exception returns an empty config with no error surfaced (:32-41), and SshConfigService likewise swallows reload failures, returning the stale cache (Services/SshConfigService.cs:66-69). Worse, OpenSSH '!' negation patterns are treated as literal hostnames: MatchesPattern (:190-212) regex-escapes the '!', so 'Host * !prod.example.com' matches prod via the '*' and applies options OpenSSH would explicitly exclude — wrong credentials/keys applied with no hint. A network engineer pointing this at a real, battle-grown ~/.ssh/config gets partial, sometimes wrong behavior and no way to see it.",
+ "recommendation": "Two layers: (1) Make the integration observable — have SshConfigParser collect warnings (unsupported directive X at line N, parse error, negation pattern seen) into SshConfigFile, and surface them next to the Settings checkbox ('Loaded: 14 hosts, 3 unsupported directives — details') plus a one-time status line when a run applies config values. (2) Implement '!' negation correctly in MatchesHost (any negated match excludes the entry) and consider Include support, which is parser-local. ProxyJump/jump-host support is a larger engine feature — flag it as out of scope here but list it in the warning so users know it is ignored.",
+ "user_benefit": "Users with existing OpenSSH configs can trust what the app did and did not apply, instead of debugging mysterious auth failures; fixes a case where the app actively applies config to hosts the user excluded.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\SshConfigParser.cs",
+   "lines": "12-15, 79-86",
+   "note": "6-key whitelist; everything else silently dropped"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\SshConfigParser.cs",
+   "lines": "32-41, 190-212",
+   "note": "catch-all returns empty config; '!' regex-escaped so negation is ignored"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConfigService.cs",
+   "lines": "66-69",
+   "note": "reload failure silently returns stale cache"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "447",
+   "note": "bare checkbox, no load status or warnings"
+  }
+ ],
+ "mockup_idea": "Settings General tab: under the 'Use SSH config file' checkbox, a status line 'config: 14 host blocks loaded - 2 warnings' with a 'View' link opening a themed list: 'line 23: ProxyJump not supported (ignored)', 'line 8: negation pattern !prod now honored'.",
+ "merged_from": 1
+}

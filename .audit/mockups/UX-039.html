@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX-039 — Palette type-to-filter</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .row{display:flex;gap:14px;align-items:flex-start}
+  .cap{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#8294a8;margin:0 0 5px 2px}
+  .cap b{color:#4cc9f0;font-weight:600}
+  .rail{width:178px;height:268px;background:#0d1118;border:1px solid #1c2330;border-radius:6px;
+        padding:8px;display:flex;flex-direction:column;gap:9px;overflow:hidden;position:relative;flex:none}
+  .hd{font-size:11px;font-weight:600;color:#8294a8;text-transform:uppercase;letter-spacing:1px;padding:2px 0}
+  .cat{font-size:10px;text-transform:uppercase;letter-spacing:.8px;font-weight:600;margin-bottom:4px}
+  .grp{display:flex;flex-direction:column;gap:3px}
+  .itm{padding:4px 8px;border-radius:4px;font-size:12px;display:flex;align-items:center;gap:6px;border:1px solid;cursor:grab}
+  .ic{width:9px;height:9px;border-radius:2px;flex:none}
+  /* category colors ≈ oklch tokens in FlowCanvas/src/styles/tokens.css */
+  .ssh .cat{color:#4a90d9}.ssh .itm{background:#101a2c;border-color:#2c4564;color:#a8c0e8}.ssh .ic{background:#4a90d9}
+  .cf  .cat{color:#9d8d33}.cf  .itm{background:#1c190d;border-color:#4a4422;color:#cfc394}.cf  .ic{background:#9d8d33}
+  .dt  .cat{color:#b478c8}.dt  .itm{background:#1f1426;border-color:#52395c;color:#d3b9dd}.dt  .ic{background:#b478c8}
+  .nw  .cat{color:#2fa98a}.nw  .itm{background:#0c1d18;border-color:#1f4d40;color:#9fd0c2}.nw  .ic{background:#2fa98a}
+  .io  .cat{color:#c4854e}.io  .itm{background:#211710;border-color:#5a3f27;color:#ddbf9f}.io  .ic{background:#c4854e}
+  .fade{position:absolute;left:1px;right:1px;bottom:1px;height:64px;border-radius:0 0 6px 6px;
+        background:linear-gradient(transparent,#0d1118 85%)}
+  .more{position:absolute;left:0;right:0;bottom:6px;text-align:center;font-size:10px;color:#8294a8}
+  .sb{position:absolute;right:3px;top:34px;width:4px;height:46px;background:#2a3445;border-radius:2px}
+  .filter{display:flex;align-items:center;gap:6px;background:#0b0e13;border:1px solid #4cc9f0;
+          border-radius:4px;padding:5px 8px;color:#c9d4e3;box-shadow:0 0 0 2px rgba(76,201,240,.12)}
+  .filter .mag{color:#8294a8}.filter .caret{color:#4cc9f0}
+  .filter .ph{color:#8294a8}
+  .cnt{font-size:10px;color:#8294a8;margin-top:-3px}.cnt b{color:#2bd97c;font-weight:600}
+  .m{color:#4cc9f0;font-weight:600;text-decoration:underline 1px}
+  .notes{flex:1;min-width:0}
+  .notes h1{font-size:13px;margin:0 0 2px;color:#c9d4e3;font-weight:600}
+  .chips{margin:0 0 8px}
+  .chip{display:inline-block;font-size:9px;letter-spacing:.6px;text-transform:uppercase;border:1px solid;
+        border-radius:3px;padding:1px 6px;margin-right:5px}
+  .sev{color:#ffb454;border-color:#5c4423}.eff{color:#2bd97c;border-color:#1e4a32}
+  .notes ul{margin:0;padding-left:16px;line-height:1.55;color:#c9d4e3}
+  .notes li{margin-bottom:5px}
+  .notes .mut{color:#8294a8}
+  .kbd{border:1px solid #2a3445;border-radius:3px;padding:0 4px;font-size:10px;color:#c9d4e3;background:#11151d}
+</style>
+</head>
+<body>
+<div class="row">
+
+  <div>
+    <p class="cap">Before — static scroll</p>
+    <div class="rail">
+      <div class="hd">Blocks</div>
+      <div class="ssh"><div class="cat">SSH</div><div class="grp">
+        <div class="itm"><span class="ic"></span>Send</div>
+        <div class="itm"><span class="ic"></span>Interactive</div>
+        <div class="itm"><span class="ic"></span>SFTP</div>
+      </div></div>
+      <div class="cf"><div class="cat">Control Flow</div><div class="grp">
+        <div class="itm"><span class="ic"></span>If</div>
+        <div class="itm"><span class="ic"></span>Foreach</div>
+        <div class="itm"><span class="ic"></span>While</div>
+        <div class="itm"><span class="ic"></span>Repeat</div>
+        <div class="itm"><span class="ic"></span>Switch</div>
+        <div class="itm"><span class="ic"></span>Parallel</div>
+        <div class="itm"><span class="ic"></span>Try</div>
+      </div></div>
+      <div class="sb"></div>
+      <div class="fade"></div>
+      <div class="more">&#8595; scroll &mdash; 38 blocks &middot; 7 categories</div>
+    </div>
+  </div>
+
+  <div>
+    <p class="cap">After — typed <b>ex</b> &rarr; 3 matches</p>
+    <div class="rail">
+      <div class="hd">Blocks</div>
+      <div class="filter"><span class="mag">&#8981;</span>ex<span class="caret">&#9613;</span></div>
+      <div class="cnt"><b>3</b> of 38 &middot; Esc clears</div>
+      <div class="cf"><div class="cat">Control Flow</div><div class="grp">
+        <div class="itm"><span class="ic"></span><span><span class="m">Ex</span>it</span></div>
+      </div></div>
+      <div class="dt"><div class="cat">Data</div><div class="grp">
+        <div class="itm"><span class="ic"></span><span><span class="m">Ex</span>tract</span></div>
+      </div></div>
+      <div class="io"><div class="cat">I/O &amp; UI</div><div class="grp">
+        <div class="itm"><span class="ic"></span><span><span class="m">Ex</span>ists</span></div>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h1>UX-039 &middot; Palette type-to-filter</h1>
+    <div class="chips"><span class="chip sev">UX &middot; Medium</span><span class="chip eff">Effort S</span></div>
+    <ul>
+      <li>Today every block add means scanning a fixed 38-item rail across 7 category groups &mdash; same scroll tax for newcomers and power users.</li>
+      <li>Sticky filter narrows by <b>label / type / description</b> (case-insensitive); empty categories hide; <span class="kbd">Esc</span> clears.</li>
+      <li>Type three letters, drag &mdash; e.g. <b>ex</b> &rarr; Exit, Extract, Exists; SSH, Network, Grid, Timing groups vanish.</li>
+      <li class="mut">Purely local state in Palette.tsx &mdash; no store or C# bridge changes. Roadmap favorites/recents can layer on later.</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

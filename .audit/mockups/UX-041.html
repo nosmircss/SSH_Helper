@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>UX-041 — Problems panel: silent when clean, live lint</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{color:#c9d4e3}
+  .grid{display:grid;grid-template-columns:300px 1fr;gap:14px}
+  .canvas{background:#0d1118;border:1px solid #1c2330;border-radius:8px;padding:10px;position:relative}
+  .toolbar{display:flex;gap:6px;margin-bottom:10px}
+  .tbtn{border:1px solid #1c2330;border-radius:5px;padding:3px 8px;color:#8294a8;background:#11161f;font-size:11px}
+  .tbtn.on{color:#4cc9f0;border-color:#4cc9f0;background:#11202b}
+  .note{color:#8294a8;font-size:11px;line-height:1.5}
+  .ghost{border:1px dashed #2a3445;border-radius:6px;padding:14px 10px;text-align:center;color:#5c6b80;margin:8px 0}
+  .timeline{margin-top:10px;border-top:1px solid #1c2330;padding-top:8px}
+  .timeline div{padding:2px 0}
+  .ok{color:#2bd97c}.bad{color:#ff5c5c}.warn{color:#ffb454}.cy{color:#4cc9f0}.mut{color:#8294a8}
+  /* the real panel look */
+  .panel{background:#11161f;border:1px solid #1c2330;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.45);overflow:hidden;font-size:12px}
+  .phead{padding:5px 10px;border-bottom:1px solid #1c2330;font-weight:600}
+  .row{display:flex;gap:8px;padding:6px 10px;align-items:baseline;border-left:3px solid #ff5c5c;background:#141a24;cursor:pointer}
+  .row+.row{border-top:1px solid #161d29}
+  .row.w{border-left-color:#ffb454}
+  .row:hover{background:#182233}
+  .tag{margin-left:auto;font-size:9px;letter-spacing:.08em;border:1px solid #2a3445;border-radius:3px;padding:0 4px;color:#8294a8;white-space:nowrap}
+  .tag.live{color:#4cc9f0;border-color:#28506b}
+  .clean{display:flex;gap:8px;align-items:center;padding:10px}
+  .stack{display:flex;flex-direction:column;gap:10px}
+  .h2{display:flex;gap:14px;align-items:flex-start}
+  .blk{color:#c9d4e3}
+</style></head>
+<body>
+
+<div class="grid">
+  <div>
+    <p class="cap">Before — <b>silent button, evaporating errors</b></p>
+    <div class="canvas">
+      <div class="toolbar"><span class="tbtn">Apply</span><span class="tbtn on">Problems ▾</span><span class="tbtn">Run</span></div>
+      <div class="ghost">panel renders <b>null</b> — click does nothing<br><span class="mut">no “No problems” state to confirm it registered</span></div>
+      <div class="timeline note">
+        <div><span class="ok">Apply ✓</span> &nbsp;→ host returns 2 diagnostics</div>
+        <div><span class="cy">edit any block</span> → <span class="bad">diagnostics wiped</span> <span class="mut">(every mutation, ~13 sites)</span></div>
+        <div class="mut">panel is empty for nearly the whole session;<br>3 broken blocks found one Apply at a time</div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <p class="cap">After — <b>clean-state card + live lint, merged with host results</b></p>
+    <div class="stack">
+      <div class="h2">
+        <div class="panel" style="width:200px">
+          <div class="phead">Problems</div>
+          <div class="clean"><span class="ok">✓</span><span>No problems<br><span class="mut" style="font-size:10px">graph is clean</span></span></div>
+        </div>
+        <div class="note">clean graph: clicking <span class="cy">Problems</span> now shows a small confirmation card instead of nothing</div>
+      </div>
+
+      <div class="panel">
+        <div class="phead">Problems (3)</div>
+        <div class="row" title="Click to select &amp; center this block"><span class="bad">✕</span><span><span class="blk">send #2</span> — command is required</span><span class="tag live">LIVE</span></div>
+        <div class="row" title="Click to select &amp; center this block"><span class="bad">✕</span><span><span class="blk">http “check api”</span> — token is required when auth = bearer</span><span class="tag live">LIVE</span></div>
+        <div class="row w"><span class="warn">⚠</span><span><span class="blk">steps/4</span> (ssh 10.20.30.41) — unknown property “retires”</span><span class="tag">APPLY</span></div>
+      </div>
+      <div class="note"><span class="cy">LIVE</span> rows come from client-side lint (reuses the Properties pane’s required-field rules) — they <b>recompute on every edit</b> and survive mutations. <span class="mut">APPLY</span> rows keep today’s host round-trip behavior. Clicking a row selects &amp; centers the block.</div>
+    </div>
+  </div>
+</div>
+
+</body></html>

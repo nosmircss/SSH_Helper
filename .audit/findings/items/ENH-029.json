@@ -1,0 +1,31 @@
+{
+ "id": "ENH-029",
+ "title": "History retention is count-only — 30 full transcripts can mean unbounded disk with no age or size policy",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "persistence-config",
+ "lens": "ux",
+ "existing_state": "Main execution history retention is purely count-based: EnforceRetention trims the index to MaxHistoryEntries and deletes evicted run files (Services/HistoryStorageService.cs:674-683, invoked from SaveRun at :474). MaxHistoryEntries defaults to 30 (Models/AppConfiguration.cs:73) and the Settings dialog exposes only that single number, clamped 1-500 (SettingsDialog.cs:2550, 2667). Each run payload stores the full combined output plus per-host outputs plus ExecutionDetails including interactive-terminal transcripts, so a 200-host run file can be tens of megabytes; 500 of them is multi-GB with no age-based pruning and no visibility into usage. Notably the scheduler's job history DOES have day-based retention (DefaultHistoryRetentionDays, AppConfiguration.cs:152) — main history is the odd one out.",
+ "recommendation": "Add optional age-based retention (\"delete runs older than N days\", mirroring the existing job-history policy) and an optional total-size cap to EnforceRetention; surface both next to the Max History numeric in SettingsDialog along with a live \"History is using 412 MB (37 runs)\" readout computed from the run folder, with a 'Clean up now' button.",
+ "user_benefit": "A daily 200-host operator either keeps history tiny (losing the audit trail) or lets multi-GB run files accumulate invisibly in %LocalAppData%. Age/size policies plus a usage readout match what the app already does for scheduled-job history.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\HistoryStorageService.cs",
+   "lines": "674-683",
+   "note": "EnforceRetention: count cap only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs",
+   "lines": "73",
+   "note": "MaxHistoryEntries default 30; no age/size knobs for main history"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "2550-2667",
+   "note": "only the count is exposed in settings"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

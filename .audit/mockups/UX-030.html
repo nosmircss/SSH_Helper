@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>UX-030 — Job Import preview</title>
+<style>
+body{background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace;margin:12px}
+.cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+.cap b{color:#ff5c5c}.cap.g b{color:#2bd97c}
+.dlg{border:1px solid #1c2330;border-radius:6px;background:#0d1119;margin-bottom:16px;overflow:hidden}
+.tb{background:#10151f;border-bottom:1px solid #1c2330;padding:4px 8px;color:#8294a8;font-size:10px}
+.bd{padding:8px 10px}
+.hdr{color:#8294a8;margin:0 0 6px}
+.links{margin:0 0 6px;font-size:10px}
+.links a{color:#4cc9f0;text-decoration:underline;cursor:pointer}
+.links span{color:#3a4658;margin:0 5px}
+table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:10.5px}
+th{background:#121826;border:1px solid #1c2330;color:#8294a8;font-weight:600;text-align:left;padding:3px 6px}
+td{border:1px solid #1c2330;padding:3px 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.ci{width:44px;text-align:center}.cn{width:168px}.cs{width:142px}.ct{width:128px}
+.cb{display:inline-block;width:11px;height:11px;border:1px solid #44546b;border-radius:2px;background:#0b0e13;line-height:11px;color:#4cc9f0;font-size:10px;text-align:center}
+.on{border-color:#4cc9f0}
+.ok{color:#2bd97c}.warn{color:#ffb454}.err{color:#ff5c5c}
+.bad td{background:rgba(255,92,92,.08)}
+.edit{border:1px solid #4cc9f0;background:#0b0e13;border-radius:2px;padding:1px 4px;color:#c9d4e3;display:inline-block;max-width:140px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.dd{border:1px solid #2a3445;background:#121826;border-radius:2px;padding:1px 5px;display:inline-block}
+.dd i{color:#8294a8;font-style:normal;margin-left:4px}
+.ft{display:flex;align-items:center;gap:8px;margin-top:7px}
+.sum{color:#8294a8;flex:1}
+.btn{border:1px solid #2a3445;background:#121826;border-radius:3px;padding:2px 12px;color:#c9d4e3}
+.pri{border-color:#4cc9f0;color:#4cc9f0}
+.note{font-size:9.5px;color:#8294a8;margin:5px 0 0}
+.note b{font-weight:600}
+.tip{border:1px solid #2a3445;background:#121826;border-radius:3px;padding:2px 6px;font-size:9.5px;color:#8294a8;display:inline-block;margin-top:5px}
+</style></head><body>
+
+<p class="cap">Before — current Import Jobs dialog: <b>everything checked, nothing editable</b></p>
+<div class="dlg">
+ <div class="tb">Import Jobs</div>
+ <div class="bd">
+  <p class="hdr">The following jobs will be imported:</p>
+  <table>
+   <tr><th class="ci">Import</th><th class="cn">Name</th><th class="cs">Schedule</th><th class="ct">Target</th><th>Status</th></tr>
+   <tr><td class="ci"><span class="cb on">✓</span></td><td>Nightly Backup Sweep</td><td>Recurring (0 2 * * *)</td><td>[Folder] Backups</td><td class="ok">OK</td></tr>
+   <tr><td class="ci"><span class="cb on">✓</span></td><td>fw-config-pull (2)</td><td>Recurring (*/30 * * * *)</td><td>fw-config-pull</td><td class="warn">Renamed (original: fw-config-pull)</td></tr>
+   <tr><td class="ci"><span class="cb on">✓</span></td><td>Core Switch Health</td><td>OneTime</td><td>sw-health-check</td><td class="err">Target preset not found - will be disabled</td></tr>
+   <tr><td class="ci"><span class="cb on">✓</span></td><td>Edge Router Audit</td><td>Recurring (0 6 * * 1)</td><td>[Folder] Routers</td><td class="err">Target folder not found - will be disabled</td></tr>
+  </table>
+  <div class="ft"><span class="sum">4 of 4 jobs selected</span><span class="btn pri">Import</span><span class="btn">Cancel</span></div>
+  <p class="note"><span class="err">●</span> Broken-target jobs are pre-checked — one OK click imports known-broken disabled jobs.&nbsp;
+  <span class="warn">●</span> Rename is a fait accompli; Name is read-only.&nbsp; No select all/none: 30-job bundle, want 3 → 27 clicks.</p>
+ </div>
+</div>
+
+<p class="cap g">After — proposed: <b>opt-in broken rows, bulk select, conflict choices</b></p>
+<div class="dlg">
+ <div class="tb">Import Jobs</div>
+ <div class="bd">
+  <p class="hdr">The following jobs will be imported:</p>
+  <p class="links"><a>Select all</a><span>|</span><a>Select none</a></p>
+  <table>
+   <tr><th class="ci">Import</th><th class="cn">Name</th><th class="cs">Schedule</th><th class="ct">Target</th><th>Status</th></tr>
+   <tr><td class="ci"><span class="cb on">✓</span></td><td>Nightly Backup Sweep</td><td>Recurring (0 2 * * *)</td><td>[Folder] Backups</td><td class="ok">OK</td></tr>
+   <tr><td class="ci"><span class="cb on">✓</span></td><td><span class="edit">fw-config-pull-lab2</span></td><td>Recurring (*/30 * * * *)</td><td>fw-config-pull</td><td><span class="dd warn">Rename<i>▾</i></span> <span class="warn" style="font-size:9px">conflicts with existing</span></td></tr>
+   <tr class="bad"><td class="ci"><span class="cb"></span></td><td>Core Switch Health</td><td>OneTime</td><td>sw-health-check</td><td class="err">Target preset not found</td></tr>
+   <tr class="bad"><td class="ci"><span class="cb"></span></td><td>Edge Router Audit</td><td>Recurring (0 6 * * 1)</td><td>[Folder] Routers</td><td class="err">Target folder not found</td></tr>
+  </table>
+  <span class="tip">⚠ Target not found — check to import anyway (job will be imported disabled)</span>
+  <div class="ft"><span class="sum">2 of 4 jobs selected · 2 skipped (missing target)</span><span class="btn pri">Import</span><span class="btn">Cancel</span></div>
+  <p class="note"><span class="ok">●</span> Missing-target rows tinted red and <b>unchecked by default</b> — broken imports are opt-in.&nbsp;
+  <span class="warn">●</span> Conflicted Name cell is editable (writes back to ResolvedName, duplicate-checked); Status offers <b>Rename / Overwrite / Skip</b>.</p>
+ </div>
+</div>
+
+</body></html>

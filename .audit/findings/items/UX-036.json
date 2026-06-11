@@ -1,0 +1,31 @@
+{
+ "id": "UX-036",
+ "title": "Missing WebView2 runtime surfaces as a raw exception message instead of install guidance (Flow Canvas and Run Output window)",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "cross-startup",
+ "lens": "ux",
+ "existing_state": "If CoreWebView2Environment.CreateAsync / EnsureCoreWebView2Async fails (most commonly WebView2RuntimeNotFoundException on machines without the Evergreen runtime — enterprise images, Server SKUs), FlowCanvasForm shows only `Error: {ex.Message}` in the status label with detail going to Debug.WriteLine (UI/FlowCanvasForm.cs:101-106; the throwing calls are at :109-130), and RunOutputWindowForm has the identical pattern (UI/RunOutputWindowForm.cs:83-88). The runtime's exception message is cryptic and offers no next step, leaving both the flagship visual editor and the detached output window dead with no explanation. This contrasts sharply with the same form's missing-dist diagnostics, which list every searched path and give dev/publish remediation steps (UI/FlowCanvasForm.cs:183-191). There is no startup probe either: the user discovers the problem only when opening the canvas.",
+ "recommendation": "In both forms' init catch blocks, special-case Microsoft.Web.WebView2.Core.WebView2RuntimeNotFoundException (and check CoreWebView2Environment.GetAvailableBrowserVersionString() up front) to show a message in the style of the dist-not-found text: 'Flow Canvas needs the Microsoft WebView2 Runtime' with a clickable link to https://developer.microsoft.com/microsoft-edge/webview2/ and a Retry button that re-runs InitializeWebView2Async. Factor the handler into a small shared helper since the two forms duplicate the init pattern; keep the generic ex.Message fallback for other exceptions.",
+ "user_benefit": "On any machine without the Evergreen runtime, the user gets a fix-it-in-one-click path instead of a cryptic one-liner that makes the flagship editor look broken — cutting the most likely 'Flow Canvas is broken' support conversation to a 2-minute self-service install.",
+ "evidence": [
+  {
+   "file": "UI/FlowCanvasForm.cs",
+   "lines": "101-106, 109-130",
+   "note": "Generic 'Error: {ex.Message}' for all WebView2 init failures; CreateAsync/EnsureCoreWebView2Async are the throwing calls"
+  },
+  {
+   "file": "UI/FlowCanvasForm.cs",
+   "lines": "183-191",
+   "note": "Existing high-quality remediation pattern for the missing-dist case to mirror"
+  },
+  {
+   "file": "UI/RunOutputWindowForm.cs",
+   "lines": "83-88",
+   "note": "Same bare-error pattern duplicated in the detached run-output window"
+  }
+ ],
+ "mockup_idea": "Status-panel mockup matching the existing dist-not-found layout: icon, 'Microsoft WebView2 Runtime is not installed. Flow Canvas and the Run Output window require it.' with [Download WebView2 Runtime] and [Retry] buttons.",
+ "merged_from": 3
+}

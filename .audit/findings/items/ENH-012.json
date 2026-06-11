@@ -1,0 +1,31 @@
+{
+ "id": "ENH-012",
+ "title": "Scheduled-run output viewer forces one-host-at-a-time triage: no failed-host filter, no all-hosts view, no save-to-file, and 'Copy All' copies only the selected host",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "dialogs-jobs-history",
+ "lens": "ux",
+ "existing_state": "RunOutputViewerDialog (opened from JobListDialog View Output, JobListDialog.cs:1408-1417) navigates a job run's per-host output solely through a 220px ComboBox (RunOutputViewerDialog.cs:61-67, populated at 228-239 with an 'OK | FAIL | CANCELLED' suffix). To find which of 200 hosts failed overnight, the user must open the dropdown and visually scan entries one by one — there is no failed-only filter, no host-status summary, and no combined all-hosts view. The 'Copy All' button copies only the currently displayed host's text (_rtbOutput.Text, RunOutputViewerDialog.cs:276-285) despite its name, and there is no Save-to-File at all — in contrast, the manual-run ExecutionDetailsDialog has both Copy and Save to File (ExecutionDetailsDialog.cs:569-583). The find bar has no match count or case toggle (RunOutputViewerDialog.cs:319-387).",
+ "recommendation": "Replace the ComboBox with a left-docked host ListBox showing status-colored entries (reuse the result colors from JobListDialog.cs:689-707) plus an 'All hosts (failed only)' / 'All hosts' pseudo-entry that concatenates outputs with per-host headers, and a small filter row (All / Failed / text filter). Add a 'Save All...' button writing the combined report (host header + status + output per host) and rename 'Copy All' to 'Copy Host' (or make it copy the combined view when the All entry is selected). This is mostly UI rearrangement; JobRunPayload.HostOutputs already carries everything needed.",
+ "user_benefit": "Morning triage of an overnight 200-host job drops from ~200 dropdown selections to one click on 'Failed only'; output can finally be archived or attached to a ticket without per-host copy-paste.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\RunOutputViewerDialog.cs",
+   "lines": "61-67, 228-239, 276-300",
+   "note": "ComboBox-only navigation; Copy All copies _rtbOutput.Text (selected host only); no SaveFileDialog in the file"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\ExecutionDetailsDialog.cs",
+   "lines": "569-583",
+   "note": "The sibling manual-run viewer already offers Save to File — inconsistent capability"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs",
+   "lines": "1387-1418",
+   "note": "Entry point: ViewSelectedOutput loads JobRunPayload and shows RunOutputViewerDialog"
+  }
+ ],
+ "mockup_idea": "Single screenshot-style mockup: dialog with a left sidebar listing hosts with red/green/amber dots and a 'Failed (7)' filter chip active, main pane showing concatenated output with '=== 10.0.3.41 (FAIL) ===' section headers, toolbar with Find, Copy Host, Save All.",
+ "merged_from": 1
+}

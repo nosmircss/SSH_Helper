@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-021",
+ "title": "No way to open a hosts CSV via command line, file association, or drag-and-drop",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "S",
+ "area": "cross-startup",
+ "lens": "ux",
+ "existing_state": "Program.Main takes no arguments at all (`static void Main()`, Program.cs:13) — `SSH_Helper.exe C:\\fleets\\core-switches.csv` does nothing with the path, and there is no file-association story. The only drag-and-drop in the app is internal preset/favorites tree reordering (Form1.Designer.cs:566-591; Form1.cs:4620-4662, 5372-5405); the host grid does not accept a dropped .csv from Explorer. Loading hosts requires the menu → OpenFileDialog flow (OpenCsvFile, Form1.cs:9191-9205), even though OpenCsvFile already accepts an explicit filePath parameter and a Recent Files menu already exists (RebuildRecentFilesMenu, Form1.cs:9119).",
+ "recommendation": "Two small additions reusing OpenCsvFile(filePath): (1) change Main to `Main(string[] args)` and pass a first-arg .csv path into Form1 (load it after RestoreInitialEnvironmentState so it wins over restored state), enabling double-click-from-Explorer and shortcut pinning per fleet; (2) set AllowDrop on dgv_variables and handle DragEnter/DragDrop for FileDrop with a single .csv, with the existing unsaved-changes prompt path. Both feed the existing RecentFiles list.",
+ "user_benefit": "A power user juggling multiple device fleets (200-device CSVs per site) can keep per-fleet shortcuts or drag a CSV straight onto the grid — matching baseline behavior of every professional multi-host tool — instead of File-menu-dialog-navigate every time.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Program.cs",
+   "lines": "13",
+   "note": "Main() has no args parameter; no CLI handling anywhere in the app project"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "9191-9205",
+   "note": "OpenCsvFile already accepts an optional path — the plumbing for both features exists"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.Designer.cs",
+   "lines": "566-591",
+   "note": "AllowDrop only on preset/favorites trees (internal node moves), not the host grid"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

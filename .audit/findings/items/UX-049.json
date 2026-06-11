@@ -1,0 +1,31 @@
+{
+ "id": "UX-049",
+ "title": "Toolbar folder-delete silently drops the 'move presets to parent' option the context menu offers",
+ "category": "UX",
+ "severity": "low",
+ "effort": "S",
+ "area": "form1-b",
+ "lens": "ux",
+ "existing_state": "Deleting a folder from the tree's context menu (ctxDeleteFolder_Click, Form1.cs:8115-8188) presents a Yes/No/Cancel choice: Yes = delete folder AND presets, No = delete folder but move presets to the parent (8140-8153). The toolbar delete button (tsbDeleteFolder_Click, 8196-8239) performs the same operation but only offers a Yes/No 'delete folder and ALL its contents' confirmation (8222-8224) — always passing deletePresets: true (8232). A user trained by the context menu to expect a 'keep my presets' escape hatch loses it depending on which button they happened to click, and the only difference in safeguard is the dialog wording.",
+ "recommendation": "Make tsbDeleteFolder_Click delegate to ctxDeleteFolder_Click (exactly as tsbAddFolder_Click already delegates to ctxAddFolder_Click at 8190-8194), after a small refactor so the shared handler resolves the selected folder node itself. One code path, one set of options, one fewer drift hazard.",
+ "user_benefit": "Same action behaves the same everywhere; users keep the non-destructive 'move presets up' option regardless of entry point.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "8140-8153",
+   "note": "context menu: Yes=delete presets, No=move to parent, Cancel"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "8222-8232",
+   "note": "toolbar: Yes/No only, always deletePresets:true"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "8190-8194",
+   "note": "tsbAddFolder already delegates to the context handler — the pattern exists"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

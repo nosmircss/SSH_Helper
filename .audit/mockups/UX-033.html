@@ -1,0 +1,89 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>UX-033 — Send Test for notification profiles</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace}
+  .hdr{color:#8294a8;font-size:10px;margin:0 0 10px}
+  .hdr b{color:#c9d4e3}
+  .cols{display:flex;gap:12px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+  .cap .b{color:#ff5c5c}.cap .a{color:#2bd97c}
+  .card{border:1px solid #1c2330;border-radius:6px;background:#0e1320;overflow:hidden}
+  .tb{padding:4px 8px;border-bottom:1px solid #1c2330;color:#8294a8;font-size:9px}
+  .bodyx{display:flex}
+  .list{width:84px;border-right:1px solid #1c2330;padding:4px 0;flex-shrink:0}
+  .li{padding:3px 7px;color:#8294a8;font-size:9px;white-space:nowrap;overflow:hidden}
+  .li.sel{background:#142438;color:#4cc9f0}
+  .lbtns{display:flex;gap:4px;padding:5px 6px;border-top:1px solid #1c2330;margin-top:4px}
+  .fields{flex:1;padding:8px;min-width:0}
+  .row{display:flex;align-items:center;margin:0 0 5px}
+  .row label{width:86px;flex-shrink:0;color:#8294a8;font-size:9px}
+  .in{flex:1;min-width:0;background:#0b0e13;border:1px solid #1c2330;border-radius:3px;padding:3px 6px;font-size:10px;white-space:nowrap;overflow:hidden}
+  .in.mask{letter-spacing:2px;color:#c9d4e3}
+  .sel2{display:flex;justify-content:space-between}.sel2 i{color:#8294a8;font-style:normal}
+  .btn{display:inline-block;background:#141b29;border:1px solid #1c2330;border-radius:3px;padding:3px 9px;font-size:9px;color:#c9d4e3}
+  .btn.test{border-color:#4cc9f0;color:#4cc9f0}
+  .res{font-size:9px;margin-left:7px}
+  .ok{color:#2bd97c}.bad{color:#ff5c5c}
+  .note{margin-top:7px;font-size:9px;line-height:1.5;border-radius:4px;padding:6px 8px}
+  .note.warn{border:1px solid #3a2a1a;background:#16110b;color:#ffb454}
+  .note.dim{border:1px solid #1c2330;color:#8294a8}
+  .note .r{color:#ff5c5c}.note .g{color:#2bd97c}.note code{color:#c9d4e3}
+  .testrow{margin-top:8px;padding-top:8px;border-top:1px dashed #1c2330}
+  .alt{margin-top:6px;color:#8294a8;font-size:9px}
+</style></head><body>
+
+<p class="hdr"><b>UX-033</b> · Settings &gt; Notifications — the Vault tab gets <b>Test Connection</b>; notification profiles get no way to verify a webhook or SMTP relay.</p>
+
+<div class="cols">
+  <div class="col">
+    <p class="cap"><span class="b">Before</span> — add/remove only, URL masked</p>
+    <div class="card">
+      <div class="tb">Settings — Notifications</div>
+      <div class="bodyx">
+        <div class="list">
+          <div class="li sel">prod-slack</div>
+          <div class="li">oncall-teams</div>
+          <div class="li">smtp-relay</div>
+          <div class="lbtns"><span class="btn">Add</span><span class="btn">Remove</span></div>
+        </div>
+        <div class="fields">
+          <div class="row"><label>Profile Name:</label><div class="in">prod-slack</div></div>
+          <div class="row"><label>Channel:</label><div class="in sel2">Slack <i>▾</i></div></div>
+          <div class="row"><label>Webhook URL:</label><div class="in mask">••••••••••••••••••••••••</div></div>
+          <div class="note warn">No test affordance. A paste error in the masked URL is invisible — found only when the first real <code>notify:</code> send fails mid-run.</div>
+        </div>
+      </div>
+    </div>
+    <div class="note dim">Verify loop today: save settings → write a YAML preset with a <code>notify:</code> step → run it against a host → inspect output.</div>
+  </div>
+
+  <div class="col">
+    <p class="cap"><span class="a">After</span> — Send Test with inline result</p>
+    <div class="card">
+      <div class="tb">Settings — Notifications</div>
+      <div class="bodyx">
+        <div class="list">
+          <div class="li sel">prod-slack</div>
+          <div class="li">oncall-teams</div>
+          <div class="li">smtp-relay</div>
+          <div class="lbtns"><span class="btn">Add</span><span class="btn">Remove</span></div>
+        </div>
+        <div class="fields">
+          <div class="row"><label>Profile Name:</label><div class="in">prod-slack</div></div>
+          <div class="row"><label>Channel:</label><div class="in sel2">Slack <i>▾</i></div></div>
+          <div class="row"><label>Webhook URL:</label><div class="in mask">••••••••••••••••••••••••</div></div>
+          <div class="testrow">
+            <span class="btn test">Send Test</span>
+            <span class="res ok">✓ Delivered — HTTP 200 (412 ms)</span>
+            <div class="alt">…or on a bad paste:</div>
+            <div class="res bad" style="margin:3px 0 0">✗ Failed — HTTP 404 no_service · check webhook URL</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="note dim">Sends a canned <span class="g">“SSH_Helper test notification”</span> using the <code>in-dialog</code> field values (same pattern as Vault’s Test Connection) and reports the NotificationResult inline — no save, no script, no run.</div>
+  </div>
+</div>
+
+</body></html>

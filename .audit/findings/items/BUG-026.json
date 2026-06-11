@@ -1,0 +1,31 @@
+{
+ "id": "BUG-026",
+ "title": "Pool health check sends `echo 1` and uses a prompt regex missing arrow terminators — permanent connection churn for some devices",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "ssh-execution",
+ "lens": "reliability",
+ "existing_state": "`IsConnectionHealthyAsync` actively probes a pooled connection at most every 30s by `scripting.Send(\"echo 1\\r\")` and waiting for `ScriptEvent.FromRegex(@\"[#$>%]\\s*$\")` with a 5s timeout (`SshConnectionPool.cs:552-558`). That terminator set omits the arrow-style prompt terminators the rest of the engine explicitly supports — `PromptDetector.PromptTerminators` includes arrow glyphs (`Utilities/PromptDetector.cs:11`) and `SshShellSession.Patterns.ShellPrompt` matches them (`SshShellSession.cs:123`). So a host with a starship/oh-my-zsh arrow prompt never matches the health-check regex; `ReadUntil` times out at 5s, the catch returns false, and the connection is removed and recreated (`GetOrCreateAsync :156-160`). Every reuse after the 30s window therefore tears down and re-handshakes the connection, defeating pooling entirely for those hosts. Additionally `echo 1` is a literal command injected into every pooled host's session — on network appliances (FortiGate/Cisco) `echo` is often invalid and may be logged as a failed command on the device.",
+ "recommendation": "Use the same prompt-terminator class the engine already standardized on (include the arrow glyphs, ideally reuse `PromptDetector`/`Patterns.ShellPromptPattern`) for the health probe, and prefer a no-op that doesn't pollute device logs — send a bare CR (or the session's keepalive) and wait for the known prompt regex rather than `echo 1`. Better, reuse the connection's already-detected `_promptPattern` instead of a hardcoded regex.",
+ "user_benefit": "Pooling actually works for hosts with modern arrow prompts instead of silently re-connecting on every command batch, and stops injecting bogus `echo` commands into appliance logs.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs",
+   "lines": "554-557",
+   "note": "echo 1 probe + regex [#$>%] omits arrow terminators"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\PromptDetector.cs",
+   "lines": "11",
+   "note": "engine's prompt terminators include arrow glyphs the probe ignores"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs",
+   "lines": "156-160",
+   "note": "failed health check removes+recreates the connection"
+  }
+ ]
+}

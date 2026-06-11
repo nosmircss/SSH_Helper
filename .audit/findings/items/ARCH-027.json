@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-027",
+ "title": "Host-grid editing and clipboard logic exists in three diverging copies (Form1, JobEditorDialog, HostGridUtilities) — Form1 got the fast paste, the Job Editor kept the slow one",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "ui-utilities",
+ "lens": "perf",
+ "existing_state": "The host grid UX is implemented twice-to-three-times in parallel. Form1 has private AddColumn/RenameColumn/DeleteColumn (Form1.cs:9380-9488), CopyToClipboard (:9545-9602, a line-for-line inline duplicate of HostGridUtilities.BuildClipboardText), PasteFromClipboard (:9604-9755), and IsProtectedColumn (:4050-4058). JobEditorDialog re-implements AddHostColumn/RenameHostColumn/DeleteHostColumn (JobEditorDialog.cs:956-1033) as near line-for-line clones of Form1's versions (including the same Microsoft.VisualBasic InputBox prompts), and delegates clipboard/column-name logic to HostGridUtilities (BuildClipboardText :147-221, PasteClipboardText :224-273, GetNextGeneratedColumnName :286-299). The copies have already diverged in four verified ways: (1) Form1.PasteFromClipboard is a heavily optimized rewrite — WM_SETREDRAW repaint suspension (9633-9637), AutoSizeColumnsMode parking with a comment calling out the O(rows^2) behavior (9643-9648), CellValueChanged handler detach (9650-9653), bulk off-grid Rows.AddRange (9716-9736) — while HostGridUtilities.PasteClipboardText is still the naive per-cell Rows.Add version (246-249) and is exactly what JobEditorDialog runs on Ctrl+V (JobEditorDialog.cs:1830-1839), so pasting a large host list from Excel freezes the Job Editor; (2) row-split semantics differ — Form1 splits on \"\\r\\n\" only (9612), the utility on '\\n' with RemoveEmptyEntries (234-236); (3) Form1.AddColumn generates unique names case-sensitively (9383-9389) while GetNextGeneratedColumnName compares case-insensitively (286-299), and Form1's inline paste column auto-create (9666-9670) lacks the duplicate-name guard; (4) Form1.IsProtectedColumn additionally protects SelectColumnName, which HostGridUtilities knows nothing about. Tests cover only the utility (HostGridUtilitiesTests), so the code paths the main grid actually runs are the untested copies.",
+ "recommendation": "Consolidate on HostGridUtilities as the single implementation: lift Form1's optimized paste into it (pre-parse, WM_SETREDRAW suspend, auto-size parking, bulk AddRange) with optional hooks for Form1-specific side effects (handler detach, Host_IP connection-state clearing) and a parameterized protected-column predicate; move Form1's column add/rename/delete and copy in as well; then have both Form1 and JobEditorDialog call the shared versions and delete the private copies. The existing HostGridUtilitiesTests/JobEditorDialogHostGridParityTests harness then covers the real production path, and the Job Editor inherits the fast paste for free.",
+ "user_benefit": "Pasting a large host list into the Job Editor stops freezing the UI, and main-grid vs job-grid editing stop drifting apart — performance fixes, validation rules, and protected-column behavior apply everywhere at once instead of silently differing between the main window and the scheduler editor.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "9380-9488, 9545-9602, 4050-4058",
+   "note": "private main-grid column ops, inline CopyToClipboard duplicate of BuildClipboardText, protected-column check with extra SelectColumnName"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "9604-9755",
+   "note": "optimized PasteFromClipboard: WM_SETREDRAW (9633-9637), auto-size parking with O(rows^2) comment (9639-9648), handler detach (9650-9653), bulk AddRange (9716-9736)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/HostGridUtilities.cs",
+   "lines": "147-299",
+   "note": "BuildClipboardText twin; naive per-cell PasteClipboardText at 246-249 missing every Form1 optimization; case-insensitive name generation differing from Form1's"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobEditorDialog.cs",
+   "lines": "956-1033, 1830-1839",
+   "note": "near-identical clones of Form1's column ops incl. the VB InputBox; Ctrl+V routes to the naive utility paste"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

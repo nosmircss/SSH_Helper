@@ -1,0 +1,26 @@
+{
+ "id": "SEC-015",
+ "title": "Vault profile rename orphans live secrets in Windows Credential Manager forever",
+ "category": "SEC",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-general",
+ "lens": "bugs",
+ "existing_state": "When a vault profile is renamed, PersistVaultProfileByIndex updates the list display and default-profile tracking (SettingsDialog.cs:997-1005) and then re-saves the four secrets under the NEW name (1011-1017) — but never deletes the old ssh_helper:vault:<oldname>:* targets. The notifications tab does this correctly via MigrateNotificationCredential, which copies then deletes the old target (1584-1593); the vault tab has no equivalent. Every rename therefore leaves a complete, working copy of the vault token / AppRole secret-id / LDAP password / userpass password under the stale name in Windows Credential Manager, readable by any process running as the user, with no UI that will ever list or clean it up (BtnVaultRemove_Click at 851-858 only deletes targets for names currently in the profile list).",
+ "recommendation": "In PersistVaultProfileByIndex's rename branch (after line 997's name-change check), migrate the four credentials the same way notifications do: read old target, save under new target, DeletePassword the old one. Extract MigrateNotificationCredential into a shared helper taking the target-builder Func and reuse it for the four VaultAuthTarget types.",
+ "user_benefit": "Stops live vault tokens and directory passwords from silently accumulating under dead names in the OS credential store every time a profile is renamed.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "996-1017",
+   "note": "Rename branch updates display only; secrets re-saved under new name, old targets untouched"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "1584-1593",
+   "note": "Notifications already implement the correct migrate+delete pattern — vault drifted from it"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

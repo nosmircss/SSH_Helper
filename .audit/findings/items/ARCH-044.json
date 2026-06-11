@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-044",
+ "title": "Conditional required-field rules are forked between Properties.tsx (1811-line god-module) and blockSummary.ts — and the copies have already diverged",
+ "category": "ARCH",
+ "severity": "low",
+ "effort": "S",
+ "area": "flowcanvas-ui",
+ "lens": "perf",
+ "existing_state": "The per-block conditional required logic (readfile path/into/path_into, http auth modes, interactive show_window bounds) exists twice: `isPropertyRequired` inside panels/Properties.tsx:870-923 and `isRequired` in utils/blockSummary.ts:22-43 — the latter's own comment admits it was 'ported from Properties.isPropertyRequired'. They have already drifted: Properties gained an `isDynamicRuntimeValue(auth)` guard for `${var}` auth values (Properties.tsx:866-868,894) that blockSummary never received. Today the outcome difference is latent only because http's username/password/token are not statically required (blockDefs/registry.ts:366-369), so the next rule added or flag flipped in one copy makes the on-canvas expanded summary card (which renders '— not set' badges from blockSummary, BaseBlock.tsx:180-182) disagree with the Properties panel's validation about the same block. The duplication exists because the rules live inside a 1811-line component file (Properties.tsx also contains useBufferedInput, ChoiceOptionsEditor, the group resolver, browse-path correlation, StartProperties, and the Test Block UI), which a plain util can't import without dragging the whole panel in.",
+ "recommendation": "Extract `isPropertyRequired` + its `toBoolean`/`hasAnyValue`/`isDynamicRuntimeValue` helpers into a leaf module (e.g. utils/propertyRules.ts) and have both Properties.tsx and blockSummary.ts consume it — that alone removes the fork. While there, split Properties.tsx along its existing seams (useBufferedInput → hooks/, ChoiceOptionsEditor and StartProperties → own files); each is already self-contained, so it's mechanical.",
+ "user_benefit": "Required/validation rules are the contract between what the canvas card warns about and what the panel enforces; one authoritative module means a rule added for a new block can't silently apply in only one of the two surfaces.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/panels/Properties.tsx",
+   "lines": "866-923",
+   "note": "isPropertyRequired with the isDynamicRuntimeValue(auth) guard; file is 1811 lines (wc -l)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/utils/blockSummary.ts",
+   "lines": "21-43",
+   "note": "ported copy ('Required logic ported from Properties.isPropertyRequired'), missing the dynamic-auth guard"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/blockDefs/registry.ts",
+   "lines": "366-369",
+   "note": "http username/password/token not statically required — why the drift is latent today, not forever"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

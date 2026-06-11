@@ -1,0 +1,41 @@
+{
+ "id": "PERF-023",
+ "title": "writefile JSON append re-reads, re-parses, deep-clones and rewrites the whole file on every append — quadratic across loops and fleet runs, and non-atomically",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-b",
+ "lens": "perf",
+ "existing_state": "writefile with format: json, mode: append performs a full read-modify-write cycle per step: File.ReadAllText of the existing file (Services/Scripting/Commands/WriteFileCommand.cs:221), JsonNode.Parse of the entire content plus DeepClone of every appended item (246-265), re-serialization of the whole document (pretty-printed by default, 294-298), then File.WriteAllText of the complete file (101). Appending one record inside a foreach loop, or once per host across a fleet run (each host re-runs the script and appends to the same results file), costs O(current file size) every time — total work grows quadratically. A 1,000-host run accumulating per-host result objects parses and rewrites a steadily growing file 1,000 times. The rewrite is also plain WriteAllText with no temp+replace, unlike the project's own JsonFileWriter.WriteJsonAtomic convention (Utilities/JsonFileWriter.cs), so a crash mid-rewrite loses the entire accumulated results file, not just the last record. By contrast the jsonl path is already O(1) per append (AppendJsonLine reads only the final byte via FileEndsWithLineBreak, 364-387).",
+ "recommendation": "Two-part fix: (1) make the rewrite atomic by routing the merged-JSON write through JsonFileWriter.WriteJsonAtomic (temp + File.Replace) instead of File.WriteAllText at WriteFileCommand.cs:101; (2) kill the quadratic re-parse by caching the parsed JsonNode per resolved path on ScriptContext for the duration of a run (merge into the cached node, serialize from it), or — cheaper — emit a one-time hint when json-append is used inside a loop pointing users at format: jsonl, which already appends in O(1). Also hoist the per-call new JsonSerializerOptions (294-297, 392-397) to two static instances.",
+ "user_benefit": "Large fleet runs that accumulate results into a JSON file stop slowing down as the file grows, and a crash or kill mid-run no longer destroys every previously collected result.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/WriteFileCommand.cs",
+   "lines": "217-233",
+   "note": "append mode: ReadAllText of entire existing file per step"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/WriteFileCommand.cs",
+   "lines": "242-281",
+   "note": "JsonNode.Parse of whole file + DeepClone per item + full re-serialization"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/WriteFileCommand.cs",
+   "lines": "98-102",
+   "note": "merged content written back via plain File.WriteAllText — non-atomic full rewrite"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/WriteFileCommand.cs",
+   "lines": "364-387",
+   "note": "contrast: JSONL append is O(1), reads only the file's last byte"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/JsonFileWriter.cs",
+   "lines": "",
+   "note": "existing project convention for atomic JSON writes, unused here"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

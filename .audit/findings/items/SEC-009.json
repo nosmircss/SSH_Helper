@@ -1,0 +1,36 @@
+{
+ "id": "SEC-009",
+ "title": "Editor hover tooltip echoes plaintext passwords and environment secrets on screen",
+ "category": "SEC",
+ "severity": "medium",
+ "effort": "S",
+ "area": "editor",
+ "lens": "bugs",
+ "existing_state": "Dwelling 250ms over any ${var} or {{column}} token shows its live value in a tooltip for 3 seconds (UI/ScintillaScriptEditorControl.cs:810-844, 2307-2350, 2366). The resolver chain in Form1 maps ${_password} directly to the host grid's password cell (Form1.cs:740), {{password}} (or any custom secret column) to the raw cell value (Form1.cs:747-757), and any ${name} matching an active environment variable to its raw value (Form1.cs:709-713) — environments are a common place to stash API tokens. JobEditorDialog wires the same column resolver for job host grids (JobEditorDialog.cs:588-612). The feature is on by default (EnableVariableInspectorTooltips = true, Models/AppConfiguration.cs:181) with no masking anywhere, so the secret pops up wherever the token appears in a script — including during screen shares and demos.",
+ "recommendation": "Mask sensitive values before display in the tooltip resolvers: always return a fixed mask (e.g. '[set — hidden]') for _password, the password column, and any variable/column whose name matches a sensitive-name heuristic (password|passwd|secret|token|key|vault). Apply in Form1.ResolveEditorVariableValue/TryGetBuiltInEditorVariable/ResolveEditorColumnValue, the environment-variable branch at Form1.cs:709-713, and JobEditorDialog.ResolveCustomPresetColumnValue. Optionally show value length or '[empty]' so the tooltip stays useful for debugging.",
+ "user_benefit": "Hovering a script during a screen share or with someone looking over your shoulder no longer prints fleet SSH passwords and environment tokens on screen.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "709-713, 727-757",
+   "note": "_password -> raw grid cell; environment variable values returned raw to the tooltip"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs",
+   "lines": "2330-2346, 2366",
+   "note": "Tooltip renders '${name} = <value>' with no masking; shown 3000ms"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs",
+   "lines": "588-612",
+   "note": "Job editor wires the same unmasked cell echo for {{password}}"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs",
+   "lines": "181",
+   "note": "EnableVariableInspectorTooltips defaults to true"
+  }
+ ],
+ "mockup_idea": "Before/after tooltip pair: hovering ${_password} showing \"${_password} = Sup3rS3cret!\" vs \"${_password} = [set — hidden]\".",
+ "merged_from": 1
+}

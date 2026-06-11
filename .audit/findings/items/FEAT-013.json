@@ -1,0 +1,31 @@
+{
+ "id": "FEAT-013",
+ "title": "Steps cannot be named/labeled — output, history, and canvas show only command type + line number",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "ux",
+ "existing_state": "The event contract already reserves a slot for a user-defined step name (StepExecutionEventArgs.StepName, documented as \"The step's user-defined name, if any\" at ScriptExecutor.cs:27-28), but the executor hardcodes it to null in both StepStarting (ScriptExecutor.cs:374) and StepCompleted (ScriptExecutor.cs:402). ScriptStep has no name/label property at all (the only 'Name' hit in Models/ScriptStep.cs is a notification-profile comment at line 1321), and `name` is absent from the step-level KnownStepKeys list (ScriptParser.cs:24-69), so writing `name: Backup config` on a step today is rejected as a blocking unknown-key error (unknown keys produce did-you-mean errors). Every consumer — run output, history, and the Flow Canvas per-block panels — can only identify a step as e.g. \"send (line 12)\". Ansible (`- name: ...`), GitHub Actions, and every comparable runner treat per-task names as table stakes for reading multi-host run logs. FLOW_CANVAS_ENHANCEMENTS.md covers branch labels/frames but not user step names (checked lines 24, 95, 142, 283) — no roadmap overlap.",
+ "recommendation": "Add `Name` (string?) to ScriptStep, add \"name\" to KnownStepKeys plus a step-root parse case next to `when`/`capture` (ScriptParser.cs:997-999), and pass `step.Name` into both event constructions at ScriptExecutor.cs:374/402. Then surface it: prefix run-output step lines and history step records with the name when present, and let FlowCanvasBridge carry it into the node payload so canvas blocks render the friendly name as their title (per Development Guideline 8 this needs the React side too). Snippet round-trip in the bridge preserves the key automatically since it rides the step's YAML verbatim.",
+ "user_benefit": "On a 200-device run, output that reads \"Backup running-config — OK (1.2s)\" instead of \"send (line 12)\" makes failures locatable at a glance, and canvas blocks self-document the script.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs",
+   "lines": "27-28, 374, 402",
+   "note": "StepName field documented as user-defined but always passed null"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs",
+   "lines": "24-69",
+   "note": "KnownStepKeys has no `name`; unknown step keys are blocking errors"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Models\\ScriptStep.cs",
+   "lines": "1321",
+   "note": "no Name/label property anywhere on the step model"
+  }
+ ],
+ "mockup_idea": "Before/after of the run output pane and a canvas block: before shows \"send (line 12) ✓ 1.2s\" and a block titled \"send\"; after shows \"Backup running-config ✓ 1.2s\" and the block header reading \"Backup running-config\" with the command type as a small subtitle chip.",
+ "merged_from": 1
+}

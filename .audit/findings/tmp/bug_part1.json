@@ -1,0 +1,166 @@
+[
+ {
+  "id": "BUG-001",
+  "title": "config.json and jobs.json are written non-atomically, and corrupt-load recovery destroys the last-good .bak within seconds — one torn write permanently wipes all presets, environments, and job definitions",
+  "category": "BUG",
+  "severity": "critical",
+  "effort": "S",
+  "area": "persistence-config",
+  "lens": "data-integrity",
+  "existing_state": "The two highest-value files bypass the project's own atomic writer. ConfigurationService.Save writes config.json — which holds ALL presets/scripts, environments, host lists, and the compressed ApplicationState blob — with a plain File.WriteAllText (Services/ConfigurationService.cs:144) after a best-effort .bak copy with an empty catch (ConfigurationService.cs:116-120); JobStorageService.PersistToDisk writes jobs.json the same way (Services/JobStorageService.cs:243, .bak copy at :230-233). Utilities/JsonFileWriter.WriteJsonAtomic (JsonFileWriter.cs:21-88, temp file + File.Replace) exists and is used by both history stores (JobHistoryService.cs:227,425; HistoryStorageService.cs:739-740), and CLAUDE.md names it as the convention. Exposure is constant: config saves fire on every Update()/settings change and app close (ConfigurationService.cs:156-161; Form1.cs:3947), and jobs.json is rewritten TWICE per scheduled run for RunningState bookkeeping (Services/JobExecutionService.cs:768-774, 827-832). Worse, recovery cascades into total loss: on a corrupt load, ConfigurationService.Load COPIES the bad file to .corrupt (TryBackupCorrupt default useMove:false, Utilities/JsonFileWriter.cs:103-117), leaves the corrupt config.json in place, never attempts .bak, and returns defaults (ConfigurationService.cs:91-102). The very next Save() copies the still-corrupt on-disk file OVER the good config.json.bak (ConfigurationService.cs:116-120) before writing defaults — and that save is guaranteed within seconds because the silent startup update check writes LastCheckTime via _configService.Update (Form1.cs:439-441, 14983; CheckOnStartup defaults true at Models/AppConfiguration.cs:457), or at latest at app close. After one corruption event plus one save: live file = defaults, .bak = corrupt, .corrupt = corrupt. JobStorageService has the identical cascade (TryBackupCorrupt copy at JobStorageService.cs:92, .bak clobber at :230-233, empty job roster at :95-97, no .bak fallback in Load at :65-99). The warning dialog (Form1.cs:350-354) mentions only .corrupt, never the good .bak, and offers no restore. Compounding the jobs.json exposure, the scheduler's Saves run on ThreadPool threads against the unsynchronized plain Dictionary _jobs (JobStorageService.cs:15) while the UI thread enumerates Jobs.Values every 5 s (Form1.cs:15205, 15224) and the evaluation loop enumerates it too (JobExecutionService.cs:313): two jobs completing in the same instant collide in File.WriteAllText (IOException 'file in use') and mutate the Dictionary mid-enumeration (undefined behavior); if CompleteJob's Save throws, RunningState is never cleared, so the NEXT launch falsely reports 'Application crashed during execution' for a run that finished fine.",
+  "recommendation": "Route both saves through JsonFileWriter.WriteJsonAtomic(path, json, createBackup: true) — a near drop-in replacement that subsumes the hand-rolled .bak copies and makes backup+swap atomic. In both corrupt-load paths: call TryBackupCorrupt with useMove:true (so the corrupt file can never be re-copied over .bak), then attempt to parse {path}.bak and restore from it before falling back to defaults/empty list, surfacing 'restored from backup' via ConfigLoadError/LoadError; additionally, skip the .bak refresh in Save while a load-failure flag is set. Make the Form1.cs:350-354 dialog actionable (Restore from backup (last saved <time>) / Start with defaults / Open config folder). In JobStorageService, add a private lock taken in Save/Delete/RestoreSnapshots/Load/PersistToDisk and have the Jobs property snapshot under it; optionally move RunningState out of the full jobs.json roster rewrite (sidecar file) so roster rewrites only happen on actual edits.",
+  "user_benefit": "A power cut or crash during one of the app's frequent automatic saves — or two jobs finishing simultaneously — can currently wipe every saved preset, environment, host list, and scheduled-job definition beyond recovery, even though a perfect backup existed moments earlier. This closes the data-loss hole using a helper the codebase already ships.",
+  "mockup_idea": "Before/after dialog mockup: current passive 'Configuration file was corrupted... defaults applied' vs a recovery dialog with 'Restore from backup (last saved 2026-06-09 18:42)' / 'Start with defaults' / 'Open config folder' buttons.",
+  "merged_from": 8,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\ConfigurationService.cs", "lines": "108-151", "note": "Save: best-effort .bak copy (116-120) then raw File.WriteAllText at :144 — truncate-then-write, non-atomic; after a corrupt load the .bak copy source is the still-corrupt file"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\ConfigurationService.cs", "lines": "91-102", "note": "corrupt path: COPY to .corrupt (useMove:false), corrupt config.json left in place, defaults returned, .bak never tried"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobStorageService.cs", "lines": "15, 89-98, 227-244", "note": "plain Dictionary, corrupt->empty fallback, .bak copy at :232 then File.WriteAllText at :243, no .bak fallback in Load"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JsonFileWriter.cs", "lines": "21-88, 103-117", "note": "WriteJsonAtomic exists and is used by the history services; TryBackupCorrupt default is COPY not MOVE"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "768-774, 827-832, 875-888", "note": "RunningState persistence rewrites jobs.json on ThreadPool threads at start and end of every scheduled run — two corruption windows per run plus concurrent-save collisions"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "439-441, 14983, 350-354, 15205, 15224", "note": "startup update check triggers Update->Save seconds after launch (CheckOnStartup default true); warning dialog offers no restore; UI thread enumerates Jobs.Values every 5 s concurrently with writes"}
+  ]
+ },
+ {
+  "id": "BUG-002",
+  "title": "Running a preset against a vault_path host deadlocks (hangs) the entire app on the first uncached secret read",
+  "category": "BUG",
+  "severity": "critical",
+  "effort": "S",
+  "area": "integrations",
+  "lens": "reliability",
+  "existing_state": "VaultCredentialProvider.TryGetPassword resolves a vault secret by blocking on async with `_vaultService.ReadSecretKeysAsync(...).GetAwaiter().GetResult()` (Services/Vault/VaultCredentialProvider.cs:48-49). VaultService never uses ConfigureAwait(false) anywhere (grep over Services/Vault found ConfigureAwait only in VaultOidcLoginFlow.cs) — ReadSecretKeysAsync -> GetAuthenticatedProfileAsync (VaultService.cs:282-313) -> AuthenticateWith*Async -> SendWithErrorTranslationAsync all await without ConfigureAwait(false), so the first genuinely-async HTTP continuation captures the calling thread's SynchronizationContext. Form1.GetHostConnections calls TryGetPassword at Form1.cs:13334, and the main preset path ExecutePresetOnRowsAsync runs synchronously from method entry (Form1.cs:12268) to `GetHostConnections(hostRows).ToList()` (Form1.cs:12277) with NO await in between — i.e. on the WinForms UI thread, which has a WindowsFormsSynchronizationContext. When the secret is not cached (first run after launch, after the 300s CacheTtl expires, or a new path/profile), the HTTP continuation is posted back to the UI thread while the UI thread is blocked inside GetResult() -> classic sync-over-async deadlock. The app hangs permanently and must be force-killed, losing any in-progress work. (If the profile is OIDC with an expired token it is even worse: the blocking call launches a full HttpListener browser login on the UI thread.)",
+  "recommendation": "Make the credential resolution off the UI thread or non-blocking. Minimal fix: add ConfigureAwait(false) to every await in VaultService (ReadSecretKeysAsync/ReadSecretAsync/GetAuthenticatedProfileAsync/SendWithErrorTranslationAsync/auth methods/KV detect) so continuations don't require the UI thread. Better: make GetHostConnections async (resolve vault_path via `await ReadSecretKeysAsync`) and await it in ExecutePresetOnRowsAsync, or hoist the vault resolution onto a Task.Run/await boundary before building HostConnection so no Vault HTTP ever runs under .GetAwaiter().GetResult() on the UI thread. Add a regression test that resolves a vault_path on a thread carrying a SynchronizationContext.",
+  "user_benefit": "Users who store SSH credentials in Vault (a headline feature) can currently freeze the whole app just by clicking Run on a host whose secret isn't already cached. Fixing this keeps the app responsive and prevents lost work from force-kills.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultCredentialProvider.cs", "lines": "48-49", "note": "blocking .GetAwaiter().GetResult() on async Vault read"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "13332-13343", "note": "GetHostConnections calls TryGetPassword for vault_path"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "12268-12278", "note": "ExecutePresetOnRowsAsync runs to GetHostConnections with no preceding await -> UI thread"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs", "lines": "282-313", "note": "GetAuthenticatedProfileAsync awaits HTTP without ConfigureAwait(false); no ConfigureAwait anywhere in VaultService"}
+  ]
+ },
+ {
+  "id": "BUG-003",
+  "title": "writefile JSON append silently destroys the existing file when the merge fails",
+  "category": "BUG",
+  "severity": "critical",
+  "effort": "S",
+  "area": "scripting-commands-b",
+  "lens": "data-integrity",
+  "existing_state": "In `writefile` with `format: json, mode: append`, FormatAsJson reads the existing file and tries to merge (Services/Scripting/Commands/WriteFileCommand.cs:217-233). If the existing content fails to parse as JSON (MergeJsonContent returns null on JsonException at :283-286), if the new value is not an object while the file holds an object (:276-277 returns null), or if the read itself throws (:229-232), execution falls through to `return SerializeToJson(newValue, ...)` at :235 — and ExecuteAsync then does `File.WriteAllText(filePath, content)` at :101, replacing the ENTIRE file with only the newest record. The only diagnostics are Debug-level messages (:231, :276, :285) and the step returns Ok. All writes are also plain non-atomic File.WriteAllText/AppendAllText (:101, :113, :118, :127, :131), so a crash/power loss mid-write leaves a torn JSON file — which then triggers exactly this destroy-on-next-append path on the following run. A multi-host preset accumulating per-host results into one JSON file can lose the whole accumulation from one bad write.",
+  "recommendation": "In append mode, treat a failed merge as a step failure instead of falling through to overwrite: have MergeJsonContent failures return an error result (honoring on_error) and never rewrite the file, or at minimum rename the unparseable file to *.bak before replacing it and emit at Warning/Error level. Separately, switch the write paths to the project's own atomic convention (temp file + File.Replace, like Utilities/JsonFileWriter.WriteJsonAtomic) so a torn write can't corrupt the file in the first place.",
+  "user_benefit": "Stops a script that is supposed to be appending results from wiping out everything it previously collected — the exact opposite of what the user asked for — with no visible error.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WriteFileCommand.cs", "lines": "217-235", "note": "append-mode merge; any failure (parse error, non-object merge, read error) returns/sets null and falls through to SerializeToJson(newValue) — only the new value survives"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WriteFileCommand.cs", "lines": "98-103", "note": "JSON 'append' writes via File.WriteAllText — the merged-or-fallback content fully replaces the file, non-atomically"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WriteFileCommand.cs", "lines": "276-289", "note": "merge failures emit only ScriptOutputType.Debug and return null (the destroy trigger); step still returns Ok"}
+  ]
+ },
+ {
+  "id": "BUG-004",
+  "title": "Flow Canvas copy/paste keeps stale container-membership metadata — pasted blocks silently vanish from exported YAML or duplicate steps inside the original container",
+  "category": "BUG",
+  "severity": "critical",
+  "effort": "M",
+  "area": "flowcanvas-state",
+  "lens": "data-integrity",
+  "existing_state": "Ctrl+C/Ctrl+V uses an internal clipboard that deep-copies the whole node including data.props (FlowCanvas/src/utils/clipboard.ts:44-57). It re-ids nodes and remaps edge endpoints via idMap (clipboard.ts:59-67) but never strips or remaps the structural metadata `_isChildOf`, `_stepPath`, `_membershipFromConnect`, `_forceGraphExport`, or band cosmetics; the paste site adds nodes as-is (FlowCanvas/src/hooks/useKeyboardShortcuts.ts:63-74). A pasted copy of any block that lives inside a container (most blocks in a real preset — every imported block has `_stepPath`) still points at the ORIGINAL container with the ORIGINAL index. Verified consequences: (1) On Apply, the C# exporter skips every node with `_isChildOf` from top-level emission (Services/FlowCanvasBridge.cs:1278-1281, 'Visual-only child nodes do not emit YAML') — if the original container exports via its stored snippet, the pasted block is silently absent from the saved YAML and vanishes on next open, despite being editable and wireable on canvas. (2) If the container regenerates from graph (any prop edit walks `_forceGraphExport` up the `_isChildOf` ancestor chain), children are collected purely by `_isChildOf == containerId` + `_stepPath` (FlowCanvasBridge.cs:1509-1542), so the pasted copy is emitted as a duplicate step INSIDE the original container — e.g. a duplicated `send` runs twice per loop iteration against every host, regardless of where the user placed the copy. (3) Duplicate `_stepPath` values break debug correlation: BuildStepPathToNodeMap is first-wins (Form1.cs:13713-13723), so step highlighting/output lands on the wrong copy. (4) Branch bands fold the pasted node into the original container's lane (utils/branchBands.ts:156-169) and removal-triggered renumbering treats it as a real sibling (utils/childMembership.ts:229-296). (5) The clipboard is module-level and survives `load-graph` (clipboard.ts:9; nothing in stores/messageBridge.ts clears it), and node ids are `node-{counter}` per import (FlowCanvasBridge.cs:331), so pasting after switching presets can attach the block to an unrelated container in the new preset whose id collides.",
+  "recommendation": "In pasteNodes (utils/clipboard.ts), post-process each pasted node's data.props: if the `_isChildOf` target was part of the copied set, remap it through idMap (preserving copied-container subtrees); otherwise strip `_isChildOf`, `_stepPath`, `_membershipFromConnect`, `_forceGraphExport`, `_blankLinesBefore`, and the cosmetic keys (`_branchLabel`, `_branchColor`, `_depth`) — keeping `_yamlSnippet` so a pasted top-level block still round-trips its content. Sanitized pastes then behave like fresh palette drops: they export as orphan/root steps and the existing childMembership.ts onConnect path confers correct membership when wired in. Also clear the module clipboard on `load-graph` (or stamp it with a preset token) to kill the cross-preset id-collision case. Add a unit test that pastes an imported container child and asserts the exported YAML neither drops nor duplicates it and the clone carries no underscore metadata.",
+  "user_benefit": "Copy/paste is the most natural way to duplicate a step; today it can silently make a fleet run execute an extra SSH command inside a loop, or silently lose the pasted block on save. Both are invisible until something runs wrong.",
+  "mockup_idea": "",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\clipboard.ts", "lines": "9, 44-67", "note": "deep copy keeps _isChildOf/_stepPath/_forceGraphExport; only id/position/edge endpoints remapped; module-level clipboard survives preset switches"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\hooks\\useKeyboardShortcuts.ts", "lines": "63-74", "note": "Ctrl+V inserts pasted nodes/edges into the store unsanitized"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "1278-1281", "note": "main export loop: nodes with _isChildOf emit no top-level YAML — silent drop when the container round-trips its snippet"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "1509-1542", "note": "container regeneration collects children by _isChildOf + _stepPath — pasted clone joins the ORIGINAL branch as a duplicate step"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "13713-13723", "note": "BuildStepPathToNodeMap is first-wins on duplicate _stepPath — wrong debug correlation"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\branchBands.ts", "lines": "156-169", "note": "pasted node visually grouped into the original container's band"}
+  ]
+ },
+ {
+  "id": "BUG-005",
+  "title": "Per-host passwords are stored under one credential key but looked up under another — silently lost for any host using a non-default port",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "form1-a",
+  "lens": "security",
+  "existing_state": "When Windows Credential Manager is available, the app moves plaintext `password` cells into the credential store and blanks the cell, keyed by the RAW Host_IP cell text: on environment load (Form1.cs:2294-2303), on every environment switch and app close via BuildApplicationState (Form1.cs:14726-14747 — also writes the blank into the persisted state), on startup state restore (Form1.cs:14824-14833), and in MigratePasswordsToCredentialManager (Form1.cs:1510-1521). At execution time, however, GetHostConnections resolves the password under a DIFFERENT key: it parses Host_IP, overrides the port from the documented `port` convention column (Form1.cs:13317-13325), and looks up `host.ToString()` (Form1.cs:13346-13356), which renders `ip:port` for non-22 ports and bare `ip` for port 22 (Models/HostConnection.cs:92). So a row with Host_IP `10.0.0.5` and port column `2222` stores the password under `10.0.0.5` but looks it up under `10.0.0.5:2222` — a guaranteed miss; `host:22` in the Host_IP cell mismatches the other direction. The username half of the key has the same drift: it falls back to the live toolbar username at blank time (Form1.cs:2298) vs at run time (Form1.cs:13348), so changing the toolbar username also orphans stored passwords. On a miss the run silently falls back to the toolbar default password (Services/SshExecutionService.cs:1198, 1300) — wrong credentials fired at the whole fleet, with the grid cell already blanked so the user sees nothing to fix.",
+  "recommendation": "Create one key-builder helper (parse the Host_IP cell, apply the `port` column override, return HostConnection.ToString() plus a deterministic username resolution) and use it at every StoreHostPassword/TryResolveHostPassword call site (Form1.cs:1520, 2301, 13351, 13353, 14733, 14831). At resolve time, additionally probe the legacy raw-cell key so passwords already stored under the old key are migrated forward instead of lost. Consider warning (status bar) when a per-host password lookup misses and the default password is substituted.",
+  "user_benefit": "Hosts with hardened/non-default SSH ports stop silently authenticating with the wrong password after an environment switch or app restart — which today can fail whole fleet runs and even trigger account lockouts on devices that count failed logins.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "2294-2303", "note": "env load: store under raw Host_IP cell value, blank the cell"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "14726-14747", "note": "every env switch/app close: same raw-key store + blanks password into persisted state"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "13317-13356", "note": "execution: port column applied to HostConnection, lookup under host.ToString()"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HostConnection.cs", "lines": "38-54,92", "note": "Parse/ToString normalize the key: drops :22, renders ip:port otherwise"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "1198,1300", "note": "empty host.Password silently falls back to toolbar default password"}
+  ]
+ },
+ {
+  "id": "BUG-006",
+  "title": "Recurring cron jobs fire at UTC-interpreted times while every UI surface shows local-time interpretation",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "jobs-scheduling",
+  "lens": "correctness",
+  "existing_state": "The due-check for recurring jobs is IsJobDue -> SchedulingService.GetMissedOccurrences (Services/JobExecutionService.cs:1028), which calls Cronos's zone-less cron.GetOccurrences(lastCheckedUtc, DateTime.UtcNow, ...) (Services/SchedulingService.cs:97) — cron fields are matched against the UTC clock. But every place the user sees the schedule uses GetNextRunLocal, which passes TimeZoneInfo.Local to Cronos (Services/SchedulingService.cs:61) — local-clock interpretation: the status-bar countdown (Form1.cs:15230), the Job List 'Next Run' column (JobListDialog.cs:741), and the cron builder's live next-run preview (UI/CronBuilderControl.cs:622). Missed-run detection (SchedulingService.cs:126,165) also uses the UTC interpretation. On any machine not set to UTC, a job built as 'Daily at 9:00 AM' displays next-run 9:00 AM local but actually executes at 9:00 UTC (e.g. 1:00 AM PST) — display and execution disagree by the full UTC offset on every field-anchored schedule. Only pure-interval crons (*/5 * * * *) coincidentally agree. One-time schedules are unaffected (the editor converts local->UTC explicitly).",
+  "recommendation": "Make execution match the displayed local-time semantics with one change: in GetMissedOccurrences (SchedulingService.cs:97), use the Cronos overload that accepts a TimeZoneInfo and pass TimeZoneInfo.Local. That single change fixes IsJobDue, DetectMissedRuns, and DetectMissedRunSummaries together since they all funnel through it. Audit GetNextRunUtc (SchedulingService.cs:71-80) callers for consistency, and add a unit test that pins a non-UTC zone and asserts a '0 9 * * *' occurrence lands at 9 AM in that zone; verify DST transition behavior (Cronos handles skipped/ambiguous times when given a zone).",
+  "user_benefit": "Scheduled fleet commands actually run at the time the UI promised. Today every non-UTC user's cron jobs silently run hours off — e.g. a 'business hours' maintenance script firing in the middle of the night, or vice versa.",
+  "mockup_idea": "Two-row before/after: Job List showing 'Next Run: Tomorrow 9:00 AM' next to a history row stamped 'Started 1:00 AM' (before), versus matching 9:00 AM in both (after).",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SchedulingService.cs", "lines": "53-63, 89-100", "note": "GetNextRunLocal passes TimeZoneInfo.Local to Cronos; GetMissedOccurrences uses the zone-less (UTC) overload"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "1023-1037", "note": "IsJobDue routes recurring due-checks through GetMissedOccurrences (UTC interpretation)"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs", "lines": "734-743", "note": "Next Run column rendered from GetNextRunLocal (local interpretation)"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "15220-15244", "note": "Status-bar countdown computed from GetNextRunLocal"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\CronBuilderControl.cs", "lines": "622", "note": "Editor next-run preview also uses GetNextRunLocal"}
+  ]
+ },
+ {
+  "id": "BUG-007",
+  "title": "Overdue one-time jobs auto-execute immediately at app launch, violating the 'missed runs are never auto-executed' policy",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "jobs-scheduling",
+  "lens": "correctness",
+  "existing_state": "IsJobDue treats a one-time job as due whenever OneTimeScheduleUtc <= now with no staleness bound (Services/JobExecutionService.cs:1030-1031), and the evaluation timer's first tick fires immediately at startup (Start() dueTime Zero, JobExecutionService.cs:177-181). Recurring jobs are protected from downtime catch-up by _lastEvaluationUtc being initialized to construction time (JobExecutionService.cs:93), and startup missed-run detection deliberately records-without-running — but it filters to ScheduleType.Recurring only (Services/SchedulingService.cs:120, 159), matching the documented policy 'never auto-executed' (Models/SkippedRunEntry.cs:5). Net effect: an enabled one-time job whose moment passed while the app was closed (scheduled 2 PM, app closed at 1 PM, reopened days later) executes against its whole host fleet seconds after launch — no prompt, no skipped-run record — no matter how stale the schedule is. On success it is then marked 'One-time schedule completed' (JobExecutionService.cs:877-881) as if it ran on time. Cancelled one-time jobs also stay enabled with their time in the past, so they re-fire on the next 30 s tick.",
+  "recommendation": "Bound one-time due-ness to the scheduler session: in IsJobDue, treat OneTimeScheduleUtc earlier than service start (the _lastEvaluationUtc baseline at construction, or LastAppShutdownUtc plus a small grace window) as missed rather than due — auto-disable with DisabledReason 'Missed one-time schedule (app was closed)' and write a skipped-run history entry, mirroring the recurring behavior. Extend DetectMissedRunSummaries (or a sibling) to cover OneTime so startup detection records it, and pair it with a startup prompt so the user can consciously fire it late via Run Now. Also decide the cancelled-one-time re-fire semantics explicitly (today cancellation leaves it armed to re-fire on the next tick).",
+  "user_benefit": "A maintenance script scheduled for last Tuesday's change window can currently blast the fleet the moment you open the app on Friday. Aligning one-time jobs with the existing recurring-job policy removes the most dangerous surprise in the scheduler.",
+  "mockup_idea": "",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "93, 177-181, 1023-1037", "note": "Immediate first tick; OneTime due-check has no staleness bound; recurring protected by _lastEvaluationUtc init"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SchedulingService.cs", "lines": "120, 154-163", "note": "Missed-run detection filters to Recurring only — one-time misses are invisible to it and unrecorded"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\SkippedRunEntry.cs", "lines": "3-7", "note": "Documented policy: missed runs are 'never auto-executed'"}
+  ]
+ },
+ {
+  "id": "BUG-008",
+  "title": "Conditions and when: guards silently resolve typo'd/undefined variables, flipping branches with no diagnostic",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "scripting-core",
+  "lens": "correctness",
+  "existing_state": "Condition evaluation resolves an unknown identifier to a value that depends on syntax, never an error. In ValueResolver.ResolveExpressionValue an undefined bare token returns the literal token string (ValueResolver.cs:288) and a `${var}`/`{{var}}` form returns empty string (ValueResolver.cs:272-273 via SubstituteVariables, which yields empty for missing vars at ScriptContext.cs:559-565,704). So `when: \"${enabled} == true\"` where the real column is `enable` evaluates AreEqual(\"\", \"true\") = false (ExpressionEvaluator.cs:155-167,399-416) and the step is silently skipped, while bare `when: enabled` with `enabled` undefined falls through to a truthiness check of the literal string \"enabled\" and evaluates TRUE (ExpressionEvaluator.cs:206-207, ValueResolver.IsTruthyValue:357-359). The executor treats a skipped guard as an intentional success (ScriptExecutor.cs:348-365) and `matches` swallows regex errors returning false (ExpressionEvaluator.cs:100-103). Crucially, conditions/when:/set RHS get no parse-time validation at all — only grid columns get a pre-run warning via the dependency analyzer; a typo in a local/loop variable is invisible. The same silent-empty resolution governs `if`, `elif`, and `while`, so a misspelled variable silently takes the wrong branch (or loops zero/forever) across the whole fleet.",
+  "recommendation": "Distinguish 'undefined variable' from 'empty value' in condition resolution: when a referenced identifier is neither a defined variable, a known built-in, nor a literal, surface a warning through EmitOutput (and ideally fail the step under a strict mode) instead of coercing to empty/literal. Add a parse-time lint pass that flags identifiers in conditions/when:/set RHS that are not defined vars, declared params, grid columns, or built-ins, reusing the reference-collection the ScriptDependencyAnalyzer already does.",
+  "user_benefit": "A one-character typo in a condition stops silently inverting branch logic across every host; the author sees a warning instead of a run that 'worked' but did the wrong thing.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ValueResolver.cs", "lines": "272-288", "note": "undefined token returns literal or empty, never an error"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionEvaluator.cs", "lines": "205-207", "note": "no-operator expression falls to truthy check of unresolved token"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs", "lines": "348-365", "note": "when: false (incl. from typo) skips the step as intentional success"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs", "lines": "559-565", "note": "missing variable resolves to empty string"}
+  ]
+ }
+]

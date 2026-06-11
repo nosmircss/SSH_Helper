@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>ENH-051 — Detached capture window drops terminal colors</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+  .hd{font-size:12px;margin:0 0 2px;color:#c9d4e3}
+  .sub{color:#8294a8;font-size:10.5px;margin:0 0 10px}
+  .row{display:flex;gap:12px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .cap{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 5px}
+  .cap.bad{color:#ff5c5c}.cap.good{color:#2bd97c}
+  .win{border:1px solid #1c2330;border-radius:6px;overflow:hidden;background:#000}
+  .tb{display:flex;align-items:center;gap:6px;background:#121826;border-bottom:1px solid #1c2330;
+      padding:4px 8px;font-size:10px;color:#c9d4e3;white-space:nowrap;overflow:hidden}
+  .tb .dot{width:7px;height:7px;border-radius:50%;background:#8294a8;flex:none}
+  .tb .ro{color:#ffb454}
+  .scr{padding:7px 9px;font-size:10.5px;line-height:1.5;white-space:pre;overflow-x:auto}
+  .scr div{min-height:1.5em}
+  .mono .scr{color:#bbb}
+  .note{font-size:10px;color:#8294a8;margin:6px 1px 0;line-height:1.45}
+  .note code{color:#4cc9f0;font-size:9.5px}
+  .c{color:#4cc9f0}.g{color:#2bd97c}.r{color:#ff5c5c}.a{color:#ffb454}.m{color:#8294a8}
+  .al{background:#3a0f0f;color:#ff8a8a}
+  .det{color:#ffb454}
+  .why{border:1px solid #1c2330;border-radius:6px;background:#0e131c;padding:7px 10px;
+       margin-top:12px;font-size:10.5px;color:#8294a8;line-height:1.5}
+  .why b{color:#c9d4e3;font-weight:600}
+</style></head><body>
+
+<p class="hd">ENH-051 &mdash; Detached read-only capture window drops all terminal colors</p>
+<p class="sub">Same window, one frame after a capture step detaches (timeout / Ctrl+C / max-lines / completion).</p>
+
+<div class="row">
+  <div class="col">
+    <p class="cap bad">Before &mdash; current: detach flattens to gray</p>
+    <div class="win mono">
+      <div class="tb"><span class="dot"></span>edge-fw-01 (10.40.2.11) - <span class="ro">Detached (read-only)</span></div>
+      <div class="scr"><div>edge-fw-01 # get system interface physical</div>
+<div>name         ip              status   speed</div>
+<div>port1        10.40.2.11      up       1000full</div>
+<div>port2        10.40.8.1       up       1000full</div>
+<div>port3        0.0.0.0         down     n/a</div>
+<div>wan1         203.0.113.7     up       1000full</div>
+<div>ALARM: port3 link-down for 00:04:12</div>
+<div>edge-fw-01 #</div>
+<div>--- capture detached: max-lines reached (200) ---</div></div>
+    </div>
+    <p class="note"><code>RenderDetachedHistorySnapshot</code> rebuilds from the plain-text
+    transcript and <code>Array.Fill</code>s one gray-on-black color for every cell &mdash;
+    the red/green cues vanish the instant the step detaches.</p>
+  </div>
+
+  <div class="col">
+    <p class="cap good">After &mdash; proposed: colors kept from last snapshot</p>
+    <div class="win">
+      <div class="tb"><span class="dot"></span>edge-fw-01 (10.40.2.11) - <span class="ro">Detached (read-only)</span></div>
+      <div class="scr"><div><span class="c">edge-fw-01 #</span> get system interface physical</div>
+<div class="m">name         ip              status   speed</div>
+<div>port1        10.40.2.11      <span class="g">up</span>       1000full</div>
+<div>port2        10.40.8.1       <span class="g">up</span>       1000full</div>
+<div>port3        0.0.0.0         <span class="r">down</span>     n/a</div>
+<div>wan1         203.0.113.7     <span class="g">up</span>       1000full</div>
+<div><span class="al">ALARM: port3 link-down for 00:04:12</span></div>
+<div><span class="c">edge-fw-01 #</span></div>
+<div><span class="det">--- capture detached: max-lines reached (200) ---</span></div></div>
+    </div>
+    <p class="note">Detached view seeded from the last live <code>TerminalScreenSnapshot</code>
+    (per-cell colors <code>BuildScreenSnapshot</code> already produces); plain-text path stays
+    as the fallback when no snapshot exists.</p>
+  </div>
+</div>
+
+<div class="why"><b>Why it matters:</b> the post-detach window exists so an operator can review
+what happened &mdash; and operators scan by color (<span class="r">errors</span> /
+<span class="g">status up</span> / <span class="a">alarms</span>), not by re-reading every line.
+Effort S: the colored snapshot path already exists; this rewires the detach handoff to use it.</div>
+
+</body></html>

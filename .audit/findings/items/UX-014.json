@@ -1,0 +1,41 @@
+{
+ "id": "UX-014",
+ "title": "Grid passwords are silently moved to Windows Credential Manager — invisible to the user, not gated on the setting, and unmanageable afterward",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "integrations",
+ "lens": "ux",
+ "existing_state": "Two silent flows move grid passwords into Windows Credential Manager. (1) On environment load, any non-empty 'password' cell is stored and the cell is blanked with zero notification (Form1.cs:2284-2304; same migration in MigratePasswordsToCredentialManager, Form1.cs:1501-1523) — a user who authored per-host passwords in their CSV sees them disappear, and a subsequent Save writes the password column back empty, so the file shared with a teammate no longer works. The password column tooltip (Form1.cs:134-141) never mentions this. (2) At run time, any password typed into the grid is auto-saved under SSH_Helper:host:{host}|user:{user} the moment a run builds connections (Form1.cs:13346-13352) and auto-loaded whenever the cell is empty (:13353-13356) — gated only on provider availability (IsCredentialManagerAvailable, Form1.cs:1368), NOT on the Credentials.UseCredentialManager setting, which defaults to false and gates only the default password (Models/AppConfiguration.cs:564-570). There is no UI anywhere to enumerate or delete per-host entries; only the default password has a clear path (Form1.cs:1474-1480). Consequences: 'I cleared the password but it still connects' confusion, and after a fleet-wide password rotation hundreds of stale per-host entries keep being auto-injected until each one fails, with no bulk-clear short of Windows' credential applet.",
+ "recommendation": "Three parts: (1) make the migration visible — after moving N passwords during environment load, show a status-bar message ('Moved 3 passwords to Windows Credential Manager; cells cleared') plus a one-time themed dialog with a don't-show-again checkbox, and update the password column tooltip; (2) honor a setting — reuse Credentials.UseCredentialManager or add a dedicated 'Remember per-host passwords' toggle at the StoreHostPassword/TryResolveHostPassword call sites so the behavior is opt-in; (3) add a 'Stored Credentials...' manager (Settings > Credentials or Tools menu) listing this app's credential targets (host/user pairs, job creds, default) with per-row delete and 'Clear all host passwords' — CredentialTargets (Services/Credentials/CredentialTargets.cs) already centralizes the naming scheme; add a CredEnumerate P/Invoke with the SSH_Helper* filter.",
+ "user_benefit": "Operators regain control and visibility over where secrets actually live; password rotations become a one-click cleanup instead of a hunt through Windows' credential applet; and 'where did my CSV passwords go?' stops being a discovered-the-hard-way surprise.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "2284-2304",
+   "note": "LoadEnvironmentIntoGrid: password cell stored to Credential Manager and blanked, no notification"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "1501-1523",
+   "note": "MigratePasswordsToCredentialManager does the same silent migration"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "13346-13356",
+   "note": "run-time auto-save + auto-load per host|user, gated only on provider availability"
+  },
+  {
+   "file": "Models/AppConfiguration.cs",
+   "lines": "564-570",
+   "note": "UseCredentialManager (default false) gates only the default password per its own doc comment"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "134-141, 1474-1480",
+   "note": "tooltip silent on migration; only the default password has a clear/delete path"
+  }
+ ],
+ "mockup_idea": "A 'Stored Credentials' dialog mockup: table of Host | Username | Stored on | [Delete], with 'Clear All' and a footer note 'Saved automatically when you type a password in the grid — disable in Settings > Credentials'.",
+ "merged_from": 2
+}

@@ -1,0 +1,31 @@
+{
+ "id": "PERF-020",
+ "title": "http command creates a fresh HttpClient and handler per step — no connection reuse in loops, and timeouts over 100s silently broken",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-a",
+ "lens": "perf",
+ "existing_state": "Every execution of an http: step constructs a new HttpClientHandler and HttpClient inside using blocks (Services/Scripting/Commands/HttpCommand.cs:92-93, handler built at 320-333) and disposes them when the step ends. In a foreach/while polling loop or a multi-host run, each request pays a full TCP + TLS handshake and leaves a socket in TIME_WAIT; nothing is pooled or reused — the textbook HttpClient anti-pattern, where sustained tight polling can exhaust ephemeral ports. A side effect of the per-step client: the default HttpClient.Timeout of 100s is never overridden, so a step declaring timeout: 300 (HttpCommand.cs:90, 94-95 only sets the CTS) is silently capped at ~100s by the client's own timeout, then misreported as having timed out after the configured seconds (192-196).",
+ "recommendation": "Cache clients keyed by handler-affecting options — (VerifyTls, FollowRedirects) is the full key today — in a small static ConcurrentDictionary<(bool,bool), HttpClient> (or one SocketsHttpHandler with PooledConnectionLifetime ~2 min per key). Set client.Timeout = Timeout.InfiniteTimeSpan and keep the existing per-step linked-CTS timeout (94-95), which also fixes the 100s cap on long timeout: values. The injectable _handlerFactory test seam (45-48) can stay; only the default path needs caching.",
+ "user_benefit": "Scripts that poll REST APIs in loops or fan HTTP calls across a fleet run noticeably faster (one TLS handshake instead of one per request) and stop risking ephemeral-port exhaustion on long runs; per-step timeouts over 100 seconds actually work.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/HttpCommand.cs",
+   "lines": "92-95",
+   "note": "fresh handler+client pair per step; CTS timeout layered on top of the default 100s client timeout"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/HttpCommand.cs",
+   "lines": "320-333",
+   "note": "CreateDefaultHandler — only FollowRedirects and VerifyTls vary, so a 2-key client cache covers all cases"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/HttpCommand.cs",
+   "lines": "192-196",
+   "note": "timeout catch reports the step's configured seconds even when the client's built-in 100s timeout fired first"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

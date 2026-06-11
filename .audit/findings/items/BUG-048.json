@@ -1,0 +1,26 @@
+{
+ "id": "BUG-048",
+ "title": "extract silently exports every named regex group as a script variable, clobbering existing variables of the same name",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-a",
+ "lens": "correctness",
+ "existing_state": "On every successful single-match extraction, ExposeNamedGroups (Services/Scripting/Commands/ExtractCommand.cs:195-208, called from ExtractSingleMatch at 124) iterates all named groups in the pattern and calls context.SetVariable(group.Name, value) for each — unconditionally overwriting any existing variable with that name. The only trace is a Debug-level line (206) that is invisible unless debug mode is on. A pattern like `(?<host>\\S+)\\s+(?<status>\\w+)` silently replaces the `host` / `status` variables (including CSV-column-derived variables like a `status` column) for all subsequent steps of the run, with no opt-in and no warning. Note the named group also wins even when the group didn't participate in the match (empty string overwrites the old value).",
+ "recommendation": "Make named-group export opt-in (e.g. `export_groups: true` on extract, or only export groups not already present), or at minimum emit a Warning-level (not Debug) message when an existing variable is overwritten by a named group. Also skip groups that did not participate in the match (Group.Success == false) so an optional group can't blank an existing variable.",
+ "user_benefit": "Stops a regex author's incidental group names from silently corrupting unrelated script state (host/credential/loop variables) mid-run — a class of failure that today is nearly undebuggable because the overwrite leaves no visible trace.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExtractCommand.cs",
+   "lines": "195-208",
+   "note": "every non-numeric group name SetVariable'd unconditionally; only Debug-level output"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExtractCommand.cs",
+   "lines": "122-124",
+   "note": "ExposeNamedGroups invoked on every single-match extract before into-assignment"
+  }
+ ]
+}

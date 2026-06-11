@@ -1,0 +1,26 @@
+{
+ "id": "ARCH-043",
+ "title": "Main-form lock during script prompts hinges on the magic control name \"btnStopAll\" and silently no-ops if it's missing",
+ "category": "ARCH",
+ "severity": "low",
+ "effort": "S",
+ "area": "scripting-commands-a",
+ "lens": "perf",
+ "existing_state": "While a script prompt (input/choose/confirm/etc.) is open, MainFormPromptLock disables the entire main form except the ancestor chain of a control found by name probe: `FindControlByName(mainForm, \"btnStopAll\")` (Services/Scripting/Commands/ScriptPromptDialogRunner.cs:384). If that probe fails — control renamed, moved into a different container type, or replaced by a toolbar item — `TryAcquire` returns null (379-386) and the prompt runs with no lock at all: the user can freely edit the host grid, change environments, or start another run mid-prompt, with no error or log to indicate the protection vanished. A Form1 designer rename is exactly the kind of change that would never be connected to \"script prompts stopped locking the UI\" in review.",
+ "recommendation": "Replace the name probe with an explicit injection point: Form1 already feeds ScriptPromptDialogRunner configuration (DefaultPromptFontSize, AnchorFormOverride at lines 16-26) — add a `StopControlProvider` (Func<Control?>) the form sets once at startup, and Debug.Fail/log when it yields nothing so a broken wiring is loud in dev instead of silent in prod.",
+ "user_benefit": "Removes a one-string coupling between the scripting layer and Form1's control tree that can silently disable a safety behavior (UI locked during prompts) after an unrelated UI refactor.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ScriptPromptDialogRunner.cs",
+   "lines": "379-401",
+   "note": "TryAcquire returns null (no lock, no warning) when the literal name \"btnStopAll\" is not found"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ScriptPromptDialogRunner.cs",
+   "lines": "384",
+   "note": "FindControlByName(mainForm, \"btnStopAll\") — the magic string"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

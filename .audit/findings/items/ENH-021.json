@@ -1,0 +1,31 @@
+{
+ "id": "ENH-021",
+ "title": "Multi-select can only delete — no bulk disable, breakpoint, duplicate, or align operations",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-ui",
+ "lens": "ux",
+ "existing_state": "The canvas has a complete selection model (shift-click toggle, drag rectangle — App.tsx) but selecting 2+ blocks renders only a '{n} blocks selected' placeholder in the Properties panel (panels/Properties.tsx:1577-1594). The block context menu operates on the single right-clicked nodeId only (BlockContextMenu.tsx:62, removeNodes([nodeId]) at :115-118). The sole multi-node operation is keyboard Delete. There is no bulk disable/enable, bulk breakpoint set/clear, multi-duplicate, or align/distribute — table stakes in comparable node editors. This overlaps the FLOW_CANVAS_ENHANCEMENTS.md roadmap ('Multi-Select Action Bar + Bulk Ops', lines 154-155, rated Impact 4 / Effort M).",
+ "recommendation": "Per the roadmap, render a floating action bar (React Flow's NodeToolbar with nodeId={selectedIds} or a fixed strip above the canvas) when selectedNodeIds.size > 1, offering: Disable/Enable all (loop toggleDisabled), Set/Clear breakpoints (loop toggleBreakpoint), Duplicate (reuse utils/clipboard.ts copy+paste), Delete with count confirmation, and Align left/top (single undo snapshot + layout autosave). Alternatively start smaller: replace the Properties placeholder with these as buttons.",
+ "user_benefit": "Debugging a 60-block preset routinely means 'disable these five blocks' or 'breakpoint this whole branch' — today that is five separate right-click round-trips. Bulk gestures collapse minutes of clicking into one.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\Properties.tsx",
+   "lines": "1577-1594",
+   "note": "multi-select renders a count placeholder only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\BlockContextMenu.tsx",
+   "lines": "62, 110-120",
+   "note": "context menu is single-node; delete passes [nodeId]"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FLOW_CANVAS_ENHANCEMENTS.md",
+   "lines": "154-155, 286",
+   "note": "roadmap overlap: Multi-Select Action Bar already planned"
+  }
+ ],
+ "mockup_idea": "Canvas with three blocks rubber-band selected and a floating pill bar above them: [Disable 3] [Breakpoints] [Duplicate] [Align] [Delete 3] — versus today's empty right panel saying '3 blocks selected'.",
+ "merged_from": 1
+}

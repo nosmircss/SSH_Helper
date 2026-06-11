@@ -1,0 +1,97 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+.wrap{display:flex;gap:14px}
+.col{flex:1;min-width:0}
+.cap{font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin:0 0 6px}
+.cap.b{color:#ffb454}.cap.a{color:#2bd97c}
+.win{border:1px solid #1c2330;border-radius:6px;background:#0d1118;overflow:hidden;position:relative}
+.ed{position:relative;height:88px;background:#10151e;overflow:hidden;font-size:11px;line-height:16px;padding:4px 0}
+.l{display:flex;white-space:pre}
+.n{width:26px;text-align:right;padding-right:8px;color:#3d4a5c;flex:none}
+.k{color:#4cc9f0}.s{color:#9ece6a}.m{color:#8294a8}
+.caret{display:inline-block;width:1px;height:12px;background:#4cc9f0;vertical-align:-2px}
+.split{height:6px;background:#151b26;border-top:1px solid #1c2330;border-bottom:1px solid #1c2330}
+.split i{display:block;width:34px;height:2px;background:#2a3445;margin:2px auto;border-radius:2px}
+.out{height:148px;padding:5px 8px;font-size:10.5px;line-height:15px;color:#8294a8;overflow:hidden}
+.out b{color:#c9d4e3;font-weight:normal}.out .h{color:#4cc9f0}
+.pop{position:absolute;background:#161d29;border:1px solid #2a3445;border-radius:4px;box-shadow:0 6px 18px rgba(0,0,0,.55);font-size:11px;overflow:hidden}
+.row{display:flex;justify-content:space-between;gap:10px;padding:1px 8px;line-height:17px;white-space:nowrap}
+.row .d{color:#8294a8;font-size:10px;overflow:hidden;text-overflow:ellipsis}
+.sel{background:rgba(76,201,240,.14);box-shadow:inset 2px 0 0 #4cc9f0}
+.note{font-size:10.5px;line-height:1.4;margin-top:6px;color:#8294a8}
+.note em{font-style:normal}.note.b em{color:#ffb454}.note.a em{color:#2bd97c}
+</style></head><body>
+
+<div class="wrap">
+
+<div class="col">
+<p class="cap b">Before — popup caged in the editor pane</p>
+<div class="win">
+  <div class="ed">
+    <div class="l"><span class="n">6</span><span><span class="k">steps</span>:</span></div>
+    <div class="l"><span class="n">7</span><span>  - <span class="k">send</span>: <span class="s">get system status</span></span></div>
+    <div class="l"><span class="n">8</span><span>  - <span class="k">extract</span>: <span class="s">'Version: (\S+)'</span></span></div>
+    <div class="l"><span class="n">9</span><span>    <span class="k">as</span>: <span class="s">fw_ver</span></span></div>
+    <div class="l"><span class="n">10</span><span>  - <span class="caret"></span></span></div>
+    <!-- clamped popup: ClientSize.Height - 4 leaves room for ~1 row -->
+    <div class="pop" style="left:48px;bottom:2px;width:200px;height:26px">
+      <div class="row sel"><span>assert</span><span class="d">Assert</span></div>
+      <div class="row"><span>break</span><span class="d">Exit loop</span></div>
+    </div>
+  </div>
+  <div class="split"><i></i></div>
+  <div class="out">
+    <span class="h">[10.0.40.12]</span> fortigate-edge-01 — connected<br>
+    <b>get system status</b><br>
+    Version: FortiGate-100F v7.4.5 build2702<br>
+    Serial-Number: FG100F3G21091234<br>
+    Operation Mode: NAT &nbsp; HA: a-p (primary)<br>
+    <span class="h">[10.0.40.13]</span> fortigate-edge-02 — connected<br>
+    <b>get system status</b><br>
+    Version: FortiGate-100F v7.4.5 build2702<br>
+    Serial-Number: FG100F3G21095521
+  </div>
+</div>
+<p class="note b"><em>1 of 8 rows visible.</em> Popup height is clamped to the editor's ClientSize, so with the output pane maximized the list collapses and clips at the pane edge.</p>
+</div>
+
+<div class="col">
+<p class="cap a">After — floats over the output pane</p>
+<div class="win">
+  <div class="ed" style="overflow:visible">
+    <div class="l"><span class="n">6</span><span><span class="k">steps</span>:</span></div>
+    <div class="l"><span class="n">7</span><span>  - <span class="k">send</span>: <span class="s">get system status</span></span></div>
+    <div class="l"><span class="n">8</span><span>  - <span class="k">extract</span>: <span class="s">'Version: (\S+)'</span></span></div>
+    <div class="l"><span class="n">9</span><span>    <span class="k">as</span>: <span class="s">fw_ver</span></span></div>
+    <div class="l"><span class="n">10</span><span>  - <span class="caret"></span></span></div>
+  </div>
+  <div class="split"><i></i></div>
+  <div class="out">
+    <span class="h">[10.0.40.12]</span> fortigate-edge-01 — connected<br>
+    <b>get system status</b><br>
+    Version: FortiGate-100F v7.4.5 build2702<br>
+    Serial-Number: FG100F3G21091234<br>
+    Operation Mode: NAT &nbsp; HA: a-p (primary)<br>
+    <span class="h">[10.0.40.13]</span> fortigate-edge-02 — connected<br>
+    <b>get system status</b><br>
+    Version: FortiGate-100F v7.4.5 build2702<br>
+    Serial-Number: FG100F3G21095521
+  </div>
+  <!-- top-level (WS_EX_NOACTIVATE) popup overlays the splitter + output pane -->
+  <div class="pop" style="left:48px;top:82px;width:212px;z-index:2">
+    <div class="row sel"><span>assert</span><span class="d">Assert</span></div>
+    <div class="row"><span>break</span><span class="d">Exit loop</span></div>
+    <div class="row"><span>call</span><span class="d">Call sub</span></div>
+    <div class="row"><span>choose</span><span class="d">Selection</span></div>
+    <div class="row"><span>confirm</span><span class="d">Yes/no</span></div>
+    <div class="row"><span>extract</span><span class="d">Regex extract</span></div>
+    <div class="row"><span>send</span><span class="d">SSH command</span></div>
+    <div class="row"><span>set</span><span class="d">Set variable</span></div>
+  </div>
+</div>
+<p class="note a"><em>All 8 rows usable.</em> Hosted as a non-activating top-level window positioned in screen coords — it overlays the output pane; existing dismiss filter already handles outside clicks.</p>
+</div>
+
+</div>
+</body></html>

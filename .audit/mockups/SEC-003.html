@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>SEC-003 — SSH host-key verification (TOFU)</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{font-weight:700}
+  .row{display:flex;gap:12px}
+  .col{flex:1;min-width:0}
+  .term{background:#070a0f;border:1px solid #1c2330;border-radius:6px;padding:10px 12px;line-height:1.7;margin-bottom:14px}
+  .mut{color:#8294a8}.cy{color:#4cc9f0}.gn{color:#2bd97c}.am{color:#ffb454}.rd{color:#ff5c5c}
+  .warnbadge{display:inline-block;border:1px solid #ff5c5c55;background:#ff5c5c14;color:#ff5c5c;border-radius:4px;padding:1px 7px;font-size:10px;margin-left:8px}
+  .dlg{background:#10141c;border:1px solid #1c2330;border-radius:8px;overflow:hidden;box-shadow:0 6px 18px #0008}
+  .dlg.red{border-color:#ff5c5c66}
+  .tbar{display:flex;align-items:center;gap:7px;padding:6px 10px;background:#0d1118;border-bottom:1px solid #1c2330;font-size:11px;color:#8294a8}
+  .dlg.red .tbar{color:#ff5c5c;border-bottom-color:#ff5c5c44}
+  .tbar .x{margin-left:auto;color:#8294a8}
+  .bd{padding:10px 12px;line-height:1.55}
+  .fp{background:#070a0f;border:1px solid #1c2330;border-radius:5px;padding:7px 9px;margin:8px 0;word-break:break-all;font-size:11px}
+  .fp .lbl{color:#8294a8;font-size:10px;text-transform:uppercase;letter-spacing:.08em}
+  .btns{display:flex;gap:8px;justify-content:flex-end;padding:9px 12px;border-top:1px solid #1c2330}
+  .btn{border-radius:5px;padding:5px 14px;font:11px "Cascadia Code",Consolas,monospace;border:1px solid #1c2330;background:#0d1118;color:#c9d4e3}
+  .btn.go{border-color:#2bd97c66;background:#2bd97c1a;color:#2bd97c}
+  .btn.no{border-color:#ff5c5c55;color:#ff5c5c;background:#ff5c5c10}
+  .note{font-size:10px;color:#8294a8;margin-top:6px}
+  .keyicon{color:#ffb454}
+</style></head><body>
+
+<p class="cap"><b>Before</b> — current behavior (all 4 paths: execution · pool · interactive terminal · sftp)</p>
+<div class="term">
+  <span class="mut">&gt;</span> connect <span class="cy">10.0.0.5:22</span> <span class="mut">(core-sw-01)</span><br>
+  <span class="mut">  host key ED25519 received —</span> <span class="rd">not checked, any key accepted</span><span class="warnbadge">MITM-trivial</span><br>
+  <span class="mut">  login</span> admin <span class="am">••••••••</span> <span class="rd">← password sent to unverified host</span><br>
+  <span class="gn">  OK</span> <span class="mut">— same on fw-edge-02, rtr-wan-01 … entire fleet</span>
+</div>
+
+<p class="cap"><b>After</b> — shared trust store under AppData + TOFU prompt, mismatch hard-fails</p>
+<div class="row">
+  <div class="col">
+    <div class="dlg">
+      <div class="tbar"><span class="keyicon">⚿</span> SSH Host Key Verification <span class="x">✕</span></div>
+      <div class="bd">
+        First connection to <span class="cy">10.0.0.5:22</span> <span class="mut">(core-sw-01)</span>.<br>
+        <span class="mut">This host is not in the trusted store. Verify the fingerprint before sending credentials.</span>
+        <div class="fp">
+          <span class="lbl">ED25519 · SHA-256</span><br>
+          <span class="am">SHA256:jXk9mP2vQ8rT5wYbN3cF7hL1aZ6dE4gU0sIo</span>
+        </div>
+        <span class="note">On accept: saved to %LocalAppData%\SSH_Helper\known_hosts.json</span>
+      </div>
+      <div class="btns"><button class="btn no">Reject</button><button class="btn go">Accept &amp; Trust</button></div>
+    </div>
+    <p class="note">First contact (TOFU — proposed default policy)</p>
+  </div>
+
+  <div class="col">
+    <div class="dlg red">
+      <div class="tbar"><span class="rd">⚠</span> HOST KEY MISMATCH — CONNECTION BLOCKED <span class="x">✕</span></div>
+      <div class="bd">
+        <span class="cy">fw-edge-02</span> <span class="mut">(192.168.40.1:22)</span> presented a key that <span class="rd">does not match</span> the trusted one.
+        <div class="fp">
+          <span class="lbl">Trusted</span> <span class="gn">SHA256:jXk9mP2vQ8rT5wYbN3cF7hL1a…</span><br>
+          <span class="lbl">Received</span> <span class="rd">SHA256:Tq4Zr8LwXv2nB6eK9sDfH0cJm…</span>
+        </div>
+        <span class="rd">Possible man-in-the-middle.</span> <span class="mut">Connection closed — no credentials were sent.</span>
+      </div>
+      <div class="btns"><button class="btn">Remove trusted key…</button><button class="btn no">Close</button></div>
+    </div>
+    <p class="note">Key changed (hard-fail; policy strict / TOFU / insecure opt-in in Settings)</p>
+  </div>
+</div>
+
+</body></html>

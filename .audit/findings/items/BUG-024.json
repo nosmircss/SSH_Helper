@@ -1,0 +1,31 @@
+{
+ "id": "BUG-024",
+ "title": "Scheduled job runs hang on writefile's modal save dialog (unattended-run gate missing)",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "scripting-commands-b",
+ "lens": "reliability",
+ "existing_state": "writefile pops a modal \"Choose Save Location\" dialog whenever the resolved path is not fully qualified (Services/Scripting/Commands/WriteFileCommand.cs:175-184 calls _savePathPrompt -> ScriptPromptDialogRunner at :187-193) with no check of `context.AllowFileSelectionDialogs`. The sibling readfile command DOES gate its picker on that flag (ReadFileCommand.cs:237-238, throwing a clear manual-only message), and JobExecutionService explicitly forces the flag off for scheduler and Run-Now job executions (Services/JobExecutionService.cs:687 and :744 pass allowFileSelectionDialogs: false, threaded into the context at SshExecutionService.cs:1771). Result: a scheduled job whose script contains `writefile: { path: output.txt }` (or a path built from a variable that resolves relative) blocks mid-run on a dialog nobody is there to click — the job stalls indefinitely — or pops a modal over the user's desktop mid-meeting. There is even an unattended preflight mechanism for localcmd (SshExecutionService.cs:939-942, TryBuildUnattendedLocalCmdPreflightMessage) that writefile is not part of.",
+ "recommendation": "Mirror the readfile gate: in WriteFileCommand.ResolveFilePathAsync, if the path is not fully qualified and !context.AllowFileSelectionDialogs, fail the step with a clear message (\"relative writefile paths require a manual run — use an absolute path in scheduled jobs\") instead of prompting. Optionally also extend the unattended preflight (TryBuildUnattendedLocalCmdPreflightMessage pattern) to detect relative writefile paths before the run starts.",
+ "user_benefit": "Scheduled jobs no longer silently stall forever (or surprise-popup on the desktop) because of a relative output path; the failure becomes an actionable error in job history.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WriteFileCommand.cs",
+   "lines": "170-193",
+   "note": "ResolveFilePathAsync prompts on any non-fully-qualified path; no AllowFileSelectionDialogs check"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ReadFileCommand.cs",
+   "lines": "237-238",
+   "note": "readfile's gate — the established pattern writefile is missing"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "687, 744",
+   "note": "scheduler/job runs pass allowFileSelectionDialogs: false — proving the unattended scenario is real and intended to be dialog-free"
+  }
+ ]
+}

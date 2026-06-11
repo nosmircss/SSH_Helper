@@ -1,0 +1,36 @@
+{
+ "id": "ENH-049",
+ "title": "Version is a hand-edited constant in Form1.cs — releases depend on remembering to bump it, and exe file properties show the wrong version",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "models-samples-build",
+ "lens": "ux",
+ "existing_state": "The application version is `private const string ApplicationVersion = \"0.51.23\"` at Form1.cs:115 (the current git branch is literally named 0.51.23 — confirming a manual per-release edit ritual). It feeds the title bar (Form1.cs:329), the About dialog (6493), and the update checker (374-377), which compares it against GitHub release tag names via UpdateService.IsNewerVersion (Services/UpdateService.cs:35, 171, 727). SSH_Helper.csproj has no <Version> property and CI publishes pass none (build-release.yml:84-87), so the shipped exe's file properties report 1.0.0.0. The version therefore exists in two unlinked places (Form1 const + git tag); forgetting the const bump makes the in-app updater either re-offer the user's current version or fail to offer a real update — and nothing in the pipeline catches the mismatch.",
+ "recommendation": "Single-source from the git tag: in build-release.yml derive `VERSION=${GITHUB_REF_NAME#v}` and publish with `-p:Version=$VERSION -p:InformationalVersion=$VERSION`. In Form1, replace the const with a static property that reads AssemblyInformationalVersionAttribute (falling back to a dev default like '0.0.0-dev' when unstamped). Optionally add a release-job sanity check that the tag parses semver. This also fixes the 1.0.0.0 file-properties issue that makes downloaded builds indistinguishable.",
+ "user_benefit": "Update notifications become trustworthy (no stale-const window where users are told they're current when they're not), and support/triage can read the real version from the exe's file properties instead of asking the user to open the About dialog.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "115, 329, 374-377, 6493",
+   "note": "hardcoded const; consumed by title bar, updater, About dialog"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\UpdateService.cs",
+   "lines": "35, 105-112, 171, 727",
+   "note": "update check compares the const against GitHub tag names"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SSH_Helper.csproj",
+   "lines": "1-35",
+   "note": "no <Version> property; only BuildTimestamp metadata is stamped"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml",
+   "lines": "83-87",
+   "note": "publish steps pass no version property"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

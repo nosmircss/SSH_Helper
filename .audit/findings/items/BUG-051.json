@@ -1,0 +1,26 @@
+{
+ "id": "BUG-051",
+ "title": "Retry loop mutates the shared step.OnError field; concurrent parallel/subroutine reuse of a step races",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "reliability",
+ "existing_state": "The retry path temporarily rewrites the step object's OnError and restores it in a finally: `var originalOnError = step.OnError; ... step.OnError = onErrorForAttempt; try { ... } finally { step.OnError = originalOnError; }` (ScriptExecutor.cs:456-471). ScriptStep instances are not per-execution copies — subroutine bodies are parsed once and the same `ScriptSubroutineDefinition.Subroutine.Steps` instances are executed every call. ParallelCommand runs each branch on the shared context concurrently via Task.Run (ParallelCommand.cs:40-61) with the comment 'Steps share one context'. So if two parallel branches both `call:` the same subroutine (or a parallel branch and the main flow re-enter the same shared step) and that step has `retry:`, the two executions write/restore the same `step.OnError` without synchronization — one branch can permanently observe the other's forced 'stop', or have its original on_error wiped to the interleaved value, changing whether failures are suppressed. The same shared-instance hazard touches `step.StepPath ??=` (ScriptExecutor.cs:318), though that one is idempotent.",
+ "recommendation": "Stop mutating shared step state for retry: thread the per-attempt on_error override as a parameter into ExecuteStepCoreAsync / the command result evaluation instead of writing step.OnError, so retry attempts never touch the shared ScriptStep. This also makes retries safe under Parallel and concurrent subroutine calls.",
+ "user_benefit": "Retries inside parallel blocks or shared subroutines behave deterministically instead of intermittently flipping error-handling behavior under concurrency.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs",
+   "lines": "456-471",
+   "note": "retry mutates and restores shared step.OnError"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ParallelCommand.cs",
+   "lines": "40-61",
+   "note": "branches run concurrently on the shared context/steps"
+  }
+ ]
+}

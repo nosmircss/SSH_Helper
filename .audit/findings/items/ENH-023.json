@@ -1,0 +1,31 @@
+{
+ "id": "ENH-023",
+ "title": "Undo/redo silently desyncs from the host's saved layout, and comment edits aren't undoable",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-state",
+ "lens": "ux",
+ "existing_state": "undo/redo restore only nodes+edges+exportStatus (FlowCanvas/src/stores/slices/undoSlice.ts:46-98) and never call sendLayoutAutosave — but every forward action does autosave (drag stop, comment ops, etc. via utils/layoutAutosave.ts). So after Ctrl+Z the canvas shows one graph while the host's persisted layout (WindowState positions, Manual-mode tuple merge) still holds the un-undone one; undo a drag, close the window, reopen — the undo is gone. isDirty is also never recomputed on undo (undoSlice.ts has no isDirty handling; it's only set true by edits at graphSlice.ts:416/424/454/505/559 and cleared on load at :637), so undoing back to the exact loaded state still reports unsaved changes. Separately, updateComment performs no pushSnapshot (FlowCanvas/src/stores/slices/commentSlice.ts:45-71) while add/remove comment do — so Ctrl+Z right after editing a comment's text skips the comment and reverts the previous structural change instead, a destructive surprise.",
+ "recommendation": "Call sendLayoutAutosave() (and flush on window close) at the end of undo() and redo() in undoSlice.ts so the host mirror tracks the visible graph. Push one undo snapshot per comment edit session (on focus/blur boundary, mirroring how Properties.tsx pushes one per property edit session) in commentSlice.updateComment. For isDirty, stamp each snapshot with the isDirty value at capture time and restore it on undo/redo.",
+ "user_benefit": "Ctrl+Z becomes trustworthy: what you see after undo is what persists across a close/reopen, and editing a comment can't silently sacrifice your last structural edit to the undo stack.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\undoSlice.ts",
+   "lines": "30-98",
+   "note": "snapshots carry nodes/edges only; undo/redo restore them + clear exportStatus; no sendLayoutAutosave, no isDirty"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\commentSlice.ts",
+   "lines": "45-71",
+   "note": "updateComment autosaves to host but pushes no undo snapshot (add/remove do)"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\graphSlice.ts",
+   "lines": "416-424, 637-638",
+   "note": "isDirty set by every edit, cleared only by load-graph"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

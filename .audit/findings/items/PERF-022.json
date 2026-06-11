@@ -1,0 +1,31 @@
+{
+ "id": "PERF-022",
+ "title": "parallel silently serializes any send steps — the shared shell session has a single-slot execution lock, so the most common use gets zero concurrency",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-b",
+ "lens": "perf",
+ "existing_state": "ParallelCommand runs each branch via Task.Run against one shared ScriptContext (Services/Scripting/Commands/ParallelCommand.cs:40-61), with a comment at line 45 deferring to 'internal synchronization'. That synchronization is SshShellSession._commandExecutionLock, a SemaphoreSlim(1,1) (Services/SshShellSession.cs:75) acquired by every command-execution path: ExecuteAsync (536-552), the expect variant (573-594), and ExecuteWithRespondsAsync (615-653). So when a user puts send steps in parallel branches — the natural thing to try in an SSH tool — they execute strictly one at a time on the single shell channel. The user gets the threading overhead, the result-ordering complexity, and concurrent StepStarting/StepCompleted events, but no actual speedup; nothing warns them. Concurrency is only real for local/network utility steps (ping, portcheck, webhook, wait, dns).",
+ "recommendation": "Make the behavior honest at validation time: in ScriptParser validation (or a preflight in ParallelCommand), detect send/interactive steps inside parallel branches and emit a warning ('send steps inside parallel run sequentially on the shared SSH session'), plus a line in the script docs and the Flow Canvas parallel block's property panel. As a follow-up feature (separate, ~a week), real concurrency is achievable: the Rebex connection pool already exists, so parallel branches containing sends could each check out their own pooled channel for the branch duration.",
+ "user_benefit": "Users stop architecting scripts around a parallelism that does not exist for SSH commands, and understand why their parallel device interrogation takes exactly as long as sequential.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ParallelCommand.cs",
+   "lines": "40-61",
+   "note": "Task.Run per branch over one shared ScriptContext/session; comment at 45 defers to session synchronization"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshShellSession.cs",
+   "lines": "75",
+   "note": "_commandExecutionLock = new SemaphoreSlim(1, 1)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshShellSession.cs",
+   "lines": "536-552, 573-594, 615-653",
+   "note": "all three command execution paths serialize on the single-slot lock"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

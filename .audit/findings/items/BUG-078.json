@@ -1,0 +1,26 @@
+{
+ "id": "BUG-078",
+ "title": "Multi-block parallel arms export only their first block — the rest are dropped behind a non-blocking warning",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-bridge",
+ "lens": "data-integrity",
+ "existing_state": "The canvas lets users chain several blocks inside a parallel arm, but TryGenerateContainerFromGraph emits only `branchChain[0]` per arm, adding a Warning diagnostic 'Parallel branch contains multiple sequential nodes; exporting the first node only' (FlowCanvasBridge.cs:2257-2281). Warnings don't fail the export (Success = no errors), so Apply/Run proceeds and txtCommand is overwritten with YAML missing blocks 2+ of every arm (Form1.cs:6966-6969). The dropped blocks remain visible on the canvas until the next reload from YAML, at which point they vanish — delayed, easy-to-miss data loss of canvas-authored work.",
+ "recommendation": "Either (a) escalate this diagnostic to Error so the apply is blocked (consistent with the missing-then/missing-do errors at FlowCanvasBridge.cs:2036-2043, 2083-2090), with a message telling the user the YAML schema runs one step per parallel arm, or (b) make it expressible: auto-wrap a multi-node arm in a nested container step on export. Option (a) is a one-line severity change plus a React-side blocker; (b) needs an executor-compatible wrapping rule.",
+ "user_benefit": "Stops the canvas from accepting a structure it cannot persist and then quietly amputating it on the next save/run.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "2257-2281",
+   "note": "first node only emitted per parallel arm; Warning severity"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "6946-6969",
+   "note": "warnings don't block; editor overwritten with the truncated YAML"
+  }
+ ]
+}

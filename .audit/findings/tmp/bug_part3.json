@@ -1,0 +1,160 @@
+[
+ {
+  "id": "BUG-017",
+  "title": "Multi-host runs hide failures and silently drop invalid hosts from the run entirely",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "ssh-execution",
+  "lens": "correctness",
+  "existing_state": "Two compounding gaps. (1) Silent skips: every per-host loop skips hosts failing IsValid() with a bare `continue` and no ExecutionResult — simple commands at Services/SshExecutionService.cs:394-395 and 439-443, scripts at :589-591, and ExecuteFolderAsync pre-filters with `hosts.Where(h => h.IsValid())` (:634). IsValid() (Models/HostConnection.cs:59-65) rejects not just blank rows but any malformed host/IP via InputValidator.IsValidHostOrIp, so a typo'd address in the grid simply vanishes from the run; the only trace is a debug-mode-only SshDebugLog (:441). The returned List<ExecutionResult> has fewer entries than the user selected with no per-host explanation. (2) No failure roll-up: the plain Execute path's completion status is built as `resultCount => $\"Completed execution on {resultCount} hosts\"` (Form1.cs:12676, 12774) — it says 'Completed execution on 8 hosts' even when all 8 failed, and when 10 were selected but 2 were skipped as invalid. The folder-run path already does this right: 'Completed folder X: N succeeded, M failed' (Form1.cs:12958-12964). To find which hosts failed, the user must scroll the full transcript for error banners; history stores per-host success (Form1.cs:8568-8571) but the live run gives no roll-up and skipped hosts never appear anywhere, including history.",
+  "recommendation": "In SshExecutionService, replace the silent `continue` at :394, :439, and :589 (and the :634 pre-filter) with a failed ExecutionResult (Success=false, ErrorMessage=\"Skipped: invalid host address '<value>'\") so skipped hosts appear in output, summary counts, and history. In Form1, give the plain-preset path parity with the folder path: compute successCount/failCount from results (as at 12958-12959) and use a 'N succeeded, M failed' status plus an appended summary block listing failed hosts at the end of the output transcript.",
+  "user_benefit": "On a fleet tool, a host that silently never received the change is the worst failure mode — the run reports completion and nothing flags the omission. Failed/skipped hosts become visible at a glance instead of requiring a transcript scroll-and-search after every run.",
+  "mockup_idea": "Before/after of the post-run state: current status bar 'Completed execution on 8 hosts' vs 'Completed: 6 succeeded, 2 failed, 1 skipped (invalid)' plus an end-of-output summary listing the failed/skipped host addresses.",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "394-395,439-443,589-591,634", "note": "invalid hosts skipped with no result entry in all per-host loops; folder path filters them out entirely"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HostConnection.cs", "lines": "59-65", "note": "IsValid rejects malformed (not just empty) addresses via InputValidator.IsValidHostOrIp"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "12673-12677,12771-12775", "note": "completion status reports raw result count with no success/fail breakdown"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "12958-12964", "note": "folder path already shows 'N succeeded, M failed' — parity model exists"}
+  ]
+ },
+ {
+  "id": "BUG-018",
+  "title": "A dozen UI handlers reload config.json from disk mid-session; a single transient read failure makes them overwrite the entire config with defaults",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "form1-a",
+  "lens": "data-integrity",
+  "existing_state": "Preset/folder drag-reorder (Form1.cs:4946, 4954, 4973, 5010), rename ordering (Form1.cs:5085), favorites refresh/reorder (Form1.cs:5197, 5477), folder summary (Form1.cs:11159), and every folder execution (Form1.cs:12836, 12866) call `_configService.Load()` — a full disk re-read — instead of `GetCurrent()`. `ConfigurationService.Load()` catches ALL exceptions (corrupt JSON, or a transient sharing violation from sync/backup/AV tooling holding config.json), backs the file up to config.json.corrupt, and silently returns a DEFAULT configuration while replacing the in-memory cache (Services/ConfigurationService.cs:91-102). The resulting `ConfigLoadError` is only ever surfaced at startup (Form1.cs:350-354). So during something as mundane as dragging a preset, a momentary read failure yields a default config that the handler immediately mutates and saves (e.g., ReorderFolders at Form1.cs:4946-4948) — writing defaults over config.json: all presets, all environments including host inventories, Vault and notification settings. The next save then copies the defaulted file over config.json.bak (Services/ConfigurationService.cs:116-120), destroying the last good backup. Even absent a failure, each Load() discards any in-memory config mutations not yet saved and re-inflates the compressed saved-state blob from disk on every drag step — pure churn.",
+  "recommendation": "Replace every mid-session `_configService.Load()` with `GetCurrent()` (or the existing `Update(...)` helper, which is the intended pattern). In ConfigurationService.Load(), when a cached config already exists, treat a read/parse failure as an error (rethrow or surface ConfigLoadError immediately) rather than silently substituting defaults that callers will persist. (The atomic-write/backup-restore half of this hole is covered by BUG-001.)",
+  "user_benefit": "Eliminates a one-shot total-config-wipe path (presets, environments, host lists, Vault settings) that can be triggered by OneDrive/antivirus briefly locking config.json while you drag a preset, and removes repeated full-config disk reloads during normal UI interactions.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "4946-4948,4954-4968,4973-5005,5010-5042,5085-5106,5477-5513", "note": "Load() -> mutate -> Save() handlers; defaults would be persisted on a failed Load"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "12836,12866", "note": "folder execution also does full disk reloads"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\ConfigurationService.cs", "lines": "91-102", "note": "catch-all: backs up file, returns defaults, replaces cache, silent mid-session"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "350-354", "note": "ConfigLoadError only surfaced once at startup"}
+  ]
+ },
+ {
+  "id": "BUG-019",
+  "title": "EnvironmentDialog: Delete/Rename/Import write to disk instantly — the Cancel button does not cancel anything",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "dialogs-general",
+  "lens": "data-integrity",
+  "existing_state": "The dialog presents a standard Save/Cancel pair (EnvironmentDialog.cs:249-250, _btnCancel has DialogResult.Cancel), but every action button mutates persistent state at click time: BtnDelete_Click calls _environmentService.DeleteEnvironment + _presetManager.ClearFolderBaseEnvironment (EnvironmentDialog.cs:496-501), BtnRename_Click calls RenameEnvironment + RenameFolderBaseEnvironment (470-473), BtnImport_Click calls ImportEnvironment with overwriteExisting (595), and every list selection change pushes description/color/variables through UpdateEnvironmentDetails (403-413 -> 802-823). All of these end in ConfigurationService.SaveEnvironmentState which writes config.json immediately (Services/EnvironmentService.cs:207, 323-326). BtnSave_Click's only real effect is setting SelectedEnvironmentName so Form1 switches environments (EnvironmentDialog.cs:639-643; Form1.cs:1941-1944). A user who deletes or renames an environment and then clicks Cancel has still permanently destroyed it — all its variables, description, and vault-profile binding are gone with no undo and no indication that Cancel was ineffective.",
+  "recommendation": "Make the dialog operate on an in-memory working copy (clone of the environment map) and commit through EnvironmentService only in BtnSave_Click; Cancel then discards the working copy. If a full staging refactor is too invasive, the minimal fix is (a) remove the Cancel button and relabel Save to Close so the UI stops lying, and (b) keep the per-action confirmation prompts. Either way the current Save/Cancel pair must not remain as-is.",
+  "user_benefit": "Prevents permanent, unrecoverable loss of an environment (and its variables) by a user who reasonably believes Cancel reverts their session.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\EnvironmentDialog.cs", "lines": "481-507, 458-479, 595, 249-250, 639-643", "note": "Destructive ops fire immediately; Save only sets SelectedEnvironmentName; Cancel closes with DialogResult.Cancel and reverts nothing"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\EnvironmentService.cs", "lines": "187-213, 301-327", "note": "DeleteEnvironment and UpdateEnvironmentDetails both call SaveEnvironmentState (disk write) synchronously"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "1935-1957", "note": "Form1 only consumes SelectedEnvironmentName on OK; Cancel path returns early"}
+  ]
+ },
+ {
+  "id": "BUG-020",
+  "title": "SettingsDialog: Windows Credential Manager secrets are deleted/overwritten before Save — Cancel leaves config pointing at profiles whose secrets are gone",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "dialogs-general",
+  "lens": "security",
+  "existing_state": "Config changes are staged until BtnSave_Click's single _configService.Update (SettingsDialog.cs:2657-2663), but credential-store mutations are not. (1) Remove deletes secrets instantly: BtnVaultRemove_Click deletes all four vault auth credentials for the profile (851-858) and BtnNotificationRemove_Click deletes the webhook URL and SMTP password (1450-1455) — before any Save. (2) Rename of a notification profile migrate-deletes the old credential target during PersistNotificationProfileByIndex (1557-1564 -> MigrateNotificationCredential 1584-1593, which DeletePassword's the old target at 1591), and that persist fires on a mere list selection change (1396-1401). (3) Any secret typed or cleared in a textbox is written to / deleted from Credential Manager on selection change or Test Connection (PersistVaultProfileByIndex 1011-1017, SaveVaultCredential 1020-1027 deletes on empty). Concrete trigger: open Settings -> Vault tab -> select a profile -> Remove -> Cancel. The saved config still contains the profile (Save never ran), but its token/AppRole secret/LDAP password are permanently deleted — the next vault fetch fails auth with no obvious cause. Same for a renamed notification profile: rename A, click profile B, Cancel -> config still references 'A' but its webhook/SMTP password now lives only under the new name.",
+  "recommendation": "Stage credential operations the same way config is staged: keep secret edits in memory (the textboxes already hold them), record pending deletes/migrations in a list, and flush all SavePassword/DeletePassword/migrate calls inside BtnSave_Click after ValidateVaultProfiles passes. Test Connection can keep reading from textboxes (it already does via the provider lambdas at 1062-1065), so nothing needs to be written for it to work.",
+  "user_benefit": "A cancelled Settings dialog no longer silently destroys vault tokens and notification secrets, which today breaks vault-backed SSH runs and notification dispatch with no error pointing at the cause.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "851-858, 1450-1455", "note": "Remove buttons DeletePassword immediately, pre-Save"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "1396-1401, 1557-1593", "note": "Notification rename migrate-deletes the old credential target on selection change"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs", "lines": "1011-1027, 2657-2663", "note": "Secret writes/deletes happen in PersistVaultProfileByIndex; config itself is only committed in BtnSave_Click"}
+  ]
+ },
+ {
+  "id": "BUG-021",
+  "title": "Saving a job whose name matches an existing job destroys everything entered in the editor (and orphans a Credential Manager secret)",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "dialogs-jobs-history",
+  "lens": "ux",
+  "existing_state": "JobEditorDialog never checks name uniqueness: JobEditorValidator.ValidateAll (Utilities/JobEditorValidator.cs:215-241) has no existing-names input, and ValidateName only checks empty/length. After validation passes, ValidateAndSave persists the Stored-mode password to Windows Credential Manager keyed by the (possibly brand-new) job id (JobEditorDialog.cs:2060-2064), then sets DialogResult.OK and closes the dialog (JobEditorDialog.cs:2135-2137). Only afterwards does JobListDialog call _jobStorage.Save (JobListDialog.cs:1041-1053 for New, 1354-1366 for Edit), and JobStorageService.Save throws ArgumentException on a case-insensitive duplicate name (Services/JobStorageService.cs:124-132). Result: type a full job — hosts grid, custom YAML, schedule, credentials — give it a name that collides with any existing job, hit Save, and you get \"Failed to save job: A job with the name 'X' already exists\" with the editor already disposed; every keystroke is gone. For Stored credential mode the secret was already written under the orphan job id and is never cleaned up (the duplicate-job flow got rollback at JobListDialog.cs:1295-1308; New/Edit did not). The Duplicate action has the same hole: duplicating the same job twice produces two \"X (copy)\" names and the second Save throws (JobListDialog.cs:1122-1123).",
+  "recommendation": "Pass the set of existing job names (minus the job being edited) into JobEditorDialog and add a uniqueness check to JobEditorValidator.ValidateAll so the collision is caught before the dialog closes — same pattern JobExportService.PrepareImport already uses for import renames. Alternatively (or additionally), move the _jobStorage.Save call inside the dialog's save handler so any storage exception keeps the editor open with all input intact, and only persist the CredMan secret after storage Save succeeds. For Duplicate, reuse the \"(imported)\" suffix-probing loop to find a free \"(copy N)\" name.",
+  "user_benefit": "A name collision becomes an inline correction instead of silently throwing away minutes of host-grid and YAML editing work, and Credential Manager stops accumulating secrets for jobs that never existed.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs", "lines": "2012-2138", "note": "credential persisted at 2060-2064; dialog closes at 2135-2137 before storage save"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JobEditorValidator.cs", "lines": "20-29, 215-241", "note": "no name-uniqueness validation anywhere in the validator"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobStorageService.cs", "lines": "117-132", "note": "Save throws ArgumentException on case-insensitive duplicate name"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs", "lines": "1041-1053, 1354-1366, 1122-1123", "note": "catch shows error after the editor is disposed; Duplicate builds a colliding '(copy)' name"}
+  ]
+ },
+ {
+  "id": "BUG-022",
+  "title": "Deleting a running job leaves an uncancellable fleet execution, recreates orphaned history, and can resurrect the job in jobs.json",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "dialogs-jobs-history",
+  "lens": "reliability",
+  "existing_state": "UpdateJobActionState keeps Delete enabled while a job is running (JobListDialog.cs:896, 902 — only Run Now/Cancel are gated on isRunning). DeleteSelectedJob (JobListDialog.cs:1369-1385) confirms with just \"Delete job 'X'?\" then removes the job and all history without checking IsJobRunning or calling CancelJob. Three concrete consequences: (1) the in-flight SSH execution keeps running against every target host, and since the grid row is gone there is no remaining UI surface to cancel it (JobExecutionService.CancelJob needs the jobId from a row, Services/JobExecutionService.cs:274-282) — it runs to completion no matter what. (2) When it finishes, JobHistoryService's JobCompleted subscription (Services/JobHistoryService.cs:36-47) writes the run payload, recreating job-history/<deleted-id>/ immediately after DeleteAllHistory wiped it — an orphan directory nothing can ever clean up because the only delete path requires the job row. (3) For One-Time jobs, HandlePostExecution holds the captured JobDefinition reference and calls _jobStorage.Save(job) on success or scheduled failure (Services/JobExecutionService.cs:875-888); Save unconditionally re-inserts it (_jobs[job.Id] = job, JobStorageService.cs:135) — the deleted job literally reappears in jobs.json complete with hosts and credentials.",
+  "recommendation": "In DeleteSelectedJob, check _executionService.IsJobRunning first: either block with \"Cancel the running job before deleting\" or offer \"Cancel and delete\" (call CancelJob, then delete). In JobExecutionService, make the post-run writers tolerant of deletion: HandlePostExecution should re-fetch via _jobStorage.Get(job.Id) and skip Save when null (CompleteJob at lines 827-832 already does exactly this), and JobHistoryService.OnJobCompleted could accept a job-exists predicate to skip writing history for deleted ids.",
+  "user_benefit": "Deleting a job actually stops it; no zombie SSH runs against the fleet, no undeleteable history directories, and no one-time jobs rising from the dead in jobs.json.",
+  "mockup_idea": "Before/after of the delete confirmation: current generic \"Delete job 'X'?\" vs a running-aware dialog showing a live-run warning with [Cancel run and delete] / [Keep job] buttons.",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs", "lines": "886-904, 1369-1385", "note": "Delete enabled while running; no IsJobRunning check or CancelJob before delete"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "875-888, 820-833, 274-282", "note": "HandlePostExecution saves the captured job object back (resurrection); CompleteJob shows the correct Get-then-skip pattern; CancelJob requires the jobId"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobHistoryService.cs", "lines": "36-47", "note": "JobCompleted subscription writes run history unconditionally, recreating the deleted job's history dir"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobStorageService.cs", "lines": "134-139", "note": "Save unconditionally re-inserts _jobs[job.Id] = job and persists"}
+  ]
+ },
+ {
+  "id": "BUG-023",
+  "title": "Scheduled jobs do not block interactive presets — an unattended run pops a terminal window and hangs the job queue",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "terminal",
+  "lens": "reliability",
+  "existing_state": "The single-host-only preflight for `interactive:` only fires when `hostList.Count != 1` (Services/SshExecutionService.cs:564), and the unattended preflight covers LocalCmd confirmation only (SshExecutionService.cs:937-955). `JobExecutionService` runs presets via `sshService.ExecutePresetAsync(..., allowFileSelectionDialogs: false)` (Services/JobExecutionService.cs:687) which routes scripts to `ExecuteScriptAsync` (SshExecutionService.cs:476-478) — so a scheduled job targeting one host with an `interactive:` preset sails past every guard (grep confirms JobExecutionService contains zero interactive checks). At runtime the step marshals onto the main form's UI thread (InteractiveTerminalService.cs:3615-3638) and shows a real terminal window (1775-1907); window mode then awaits `formClosedTcs` with no timeout (1946). An overnight/unattended scheduled run therefore pops a terminal on the desktop and blocks forever until a human closes it — while holding the scheduler's `_concurrencyGate` semaphore (JobExecutionService.cs:84, 342-355), so subsequent scheduled jobs queue behind it indefinitely. Inconsistently, folder-type jobs ARE protected because `ExecuteFolderAsync` blocks interactive presets regardless of host count (SshExecutionService.cs:662-682).",
+  "recommendation": "Add an unattended-run preflight for interactive (and browser-callback) steps, exactly like the existing LocalCmd one: pass an `unattended`/`allowInteractive: false` flag from JobExecutionService through `ExecutePresetAsync`/`ExecuteScriptAsync`, and fail the job up front with a clear message ('interactive steps are not supported in scheduled jobs'). Optionally also warn at job-save time in JobEditorDialog using `ScriptDependencyAnalyzer.UsesInteractive`.",
+  "user_benefit": "A single mis-assigned preset currently wedges the entire scheduler overnight (jobs queue behind a window nobody is there to close). With the guard, the job fails fast with an actionable message instead of silently stalling automation.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "564", "note": "interactive guard gated on hostList.Count != 1 — single-host jobs skip it"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "937-955", "note": "unattended preflight exists but only for LocalCmd confirmation"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "687, 744", "note": "jobs call ExecutePresetAsync/ExecuteFolderAsync with allowFileSelectionDialogs:false; no interactive check anywhere in the file"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs", "lines": "476-478, 662-682", "note": "ExecutePresetAsync routes scripts to ExecuteScriptAsync; folder path blocks interactive regardless of host count (inconsistency)"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs", "lines": "1904-1946, 3615-3638", "note": "window shown on the main form's UI thread; RunWindowLoopAsync awaits form close with no timeout"}
+  ]
+ },
+ {
+  "id": "BUG-024",
+  "title": "Scheduled job runs hang on writefile's modal save dialog (unattended-run gate missing)",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "scripting-commands-b",
+  "lens": "reliability",
+  "existing_state": "writefile pops a modal \"Choose Save Location\" dialog whenever the resolved path is not fully qualified (Services/Scripting/Commands/WriteFileCommand.cs:175-184 calls _savePathPrompt -> ScriptPromptDialogRunner at :187-193) with no check of `context.AllowFileSelectionDialogs`. The sibling readfile command DOES gate its picker on that flag (ReadFileCommand.cs:237-238, throwing a clear manual-only message), and JobExecutionService explicitly forces the flag off for scheduler and Run-Now job executions (Services/JobExecutionService.cs:687 and :744 pass allowFileSelectionDialogs: false, threaded into the context at SshExecutionService.cs:1771). Result: a scheduled job whose script contains `writefile: { path: output.txt }` (or a path built from a variable that resolves relative) blocks mid-run on a dialog nobody is there to click — the job stalls indefinitely — or pops a modal over the user's desktop mid-meeting. There is even an unattended preflight mechanism for localcmd (SshExecutionService.cs:939-942, TryBuildUnattendedLocalCmdPreflightMessage) that writefile is not part of.",
+  "recommendation": "Mirror the readfile gate: in WriteFileCommand.ResolveFilePathAsync, if the path is not fully qualified and !context.AllowFileSelectionDialogs, fail the step with a clear message (\"relative writefile paths require a manual run — use an absolute path in scheduled jobs\") instead of prompting. Optionally also extend the unattended preflight (TryBuildUnattendedLocalCmdPreflightMessage pattern) to detect relative writefile paths before the run starts.",
+  "user_benefit": "Scheduled jobs no longer silently stall forever (or surprise-popup on the desktop) because of a relative output path; the failure becomes an actionable error in job history.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WriteFileCommand.cs", "lines": "170-193", "note": "ResolveFilePathAsync prompts on any non-fully-qualified path; no AllowFileSelectionDialogs check"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ReadFileCommand.cs", "lines": "237-238", "note": "readfile's gate — the established pattern writefile is missing"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "687, 744", "note": "scheduler/job runs pass allowFileSelectionDialogs: false — proving the unattended scenario is real and intended to be dialog-free"}
+  ]
+ }
+]

@@ -1,0 +1,21 @@
+{
+ "id": "ENH-054",
+ "title": "Missing Rebex license is silently ignored at startup; pooled SSH and terminals fail later with an opaque error",
+ "category": "ENH",
+ "severity": "low",
+ "effort": "S",
+ "area": "cross-startup",
+ "lens": "ux",
+ "existing_state": "Program.Main resolves the Rebex key from assembly metadata → rebex.key file → REBEX_LICENSE_KEY env var, and if all three are absent it simply skips setting Rebex.Licensing.Key and continues (Program.cs:17-40, the `if (!string.IsNullOrEmpty(rebexKey))` at :37-40 has no else). Nothing in Services/ checks licensing either (only test-seam comments mention it). The user finds out only when they enable connection pooling or open an interactive terminal and Rebex throws its licensing exception mid-workflow — long after the cause (a build/environment issue) is visible.",
+ "recommendation": "After the three-tier resolution in Program.cs, if rebexKey is empty, record a static flag (e.g. RebexLicenseState.Missing). In Form1, surface it once: a status-bar warning or a tooltip/disable on the pooling checkbox and Interactive Terminal menu item — 'Rebex license key not found (set REBEX_LICENSE_KEY or place rebex.key next to the exe); pooled sessions and terminals are unavailable.' Plain SSH.NET execution keeps working untouched.",
+ "user_benefit": "Anyone building from source without the env var (a contributor, or the owner on a new machine) learns at launch why terminals/pooling will not work, instead of decoding a Rebex exception during a live session against production devices.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Program.cs",
+   "lines": "17-40",
+   "note": "Three-tier key resolution with silent continue when no key is found"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

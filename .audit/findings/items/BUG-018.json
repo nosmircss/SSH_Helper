@@ -1,0 +1,36 @@
+{
+ "id": "BUG-018",
+ "title": "A dozen UI handlers reload config.json from disk mid-session; a single transient read failure makes them overwrite the entire config with defaults",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "form1-a",
+ "lens": "data-integrity",
+ "existing_state": "Preset/folder drag-reorder (Form1.cs:4946, 4954, 4973, 5010), rename ordering (Form1.cs:5085), favorites refresh/reorder (Form1.cs:5197, 5477), folder summary (Form1.cs:11159), and every folder execution (Form1.cs:12836, 12866) call `_configService.Load()` — a full disk re-read — instead of `GetCurrent()`. `ConfigurationService.Load()` catches ALL exceptions (corrupt JSON, or a transient sharing violation from sync/backup/AV tooling holding config.json), backs the file up to config.json.corrupt, and silently returns a DEFAULT configuration while replacing the in-memory cache (Services/ConfigurationService.cs:91-102). The resulting `ConfigLoadError` is only ever surfaced at startup (Form1.cs:350-354). So during something as mundane as dragging a preset, a momentary read failure yields a default config that the handler immediately mutates and saves (e.g., ReorderFolders at Form1.cs:4946-4948) — writing defaults over config.json: all presets, all environments including host inventories, Vault and notification settings. The next save then copies the defaulted file over config.json.bak (Services/ConfigurationService.cs:116-120), destroying the last good backup. Even absent a failure, each Load() discards any in-memory config mutations not yet saved and re-inflates the compressed saved-state blob from disk on every drag step — pure churn.",
+ "recommendation": "Replace every mid-session `_configService.Load()` with `GetCurrent()` (or the existing `Update(...)` helper, which is the intended pattern). In ConfigurationService.Load(), when a cached config already exists, treat a read/parse failure as an error (rethrow or surface ConfigLoadError immediately) rather than silently substituting defaults that callers will persist. (The atomic-write/backup-restore half of this hole is covered by BUG-001.)",
+ "user_benefit": "Eliminates a one-shot total-config-wipe path (presets, environments, host lists, Vault settings) that can be triggered by OneDrive/antivirus briefly locking config.json while you drag a preset, and removes repeated full-config disk reloads during normal UI interactions.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "4946-4948,4954-4968,4973-5005,5010-5042,5085-5106,5477-5513",
+   "note": "Load() -> mutate -> Save() handlers; defaults would be persisted on a failed Load"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12836,12866",
+   "note": "folder execution also does full disk reloads"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\ConfigurationService.cs",
+   "lines": "91-102",
+   "note": "catch-all: backs up file, returns defaults, replaces cache, silent mid-session"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "350-354",
+   "note": "ConfigLoadError only surfaced once at startup"
+  }
+ ]
+}

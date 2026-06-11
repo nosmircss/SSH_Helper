@@ -1,0 +1,31 @@
+{
+ "id": "ENH-020",
+ "title": "Run Output console: Find shows a match count but cannot jump between matches; buffer truncates silently at 5000 lines; no save-to-file",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-ui",
+ "lens": "ux",
+ "existing_state": "The Run Output console's Find bar (panels/RunOutputView.tsx:93-114) computes a total match count (RunOutputView.tsx:32-39) and <mark>-highlights every occurrence (:164-177), but there is no next/previous control, no current-match tracking, and no scroll-to-match — on a multi-thousand-line run against a device fleet, '47 matches' leaves the user manually scrolling to find them. The buffer keeps only the last 5000 lines (MAX_RUN_OUTPUT_LINES, stores/slices/executionSlice.ts:4) and appendRunOutput drops the oldest lines with no indicator whatsoever (executionSlice.ts:119-127), so on long runs the beginning of the output vanishes without the user knowing it ever existed. The only export is clipboard 'Copy all' (RunOutputView.tsx:87) — no save-to-file for attaching a run log to a ticket. The detached window (?panel=runoutput) shares all three gaps since it renders the same component.",
+ "recommendation": "1) Track currentMatchIndex in RunOutputView, add up/down buttons + Enter/Shift+Enter in the find input, render the current match with a distinct mark style, and scrollIntoView its line div ('3 of 47'). 2) When appendRunOutput truncates, prepend a one-line sentinel (e.g. '— output truncated, showing last 5000 lines —') or keep a truncatedLines counter the view renders as a banner. 3) Add a 'Save…' toolbar button posting a small save-run-output message to the host (FlowCanvasForm shows SaveFileDialog and writes the buffer) — mirroring the existing browse-path request/response pattern.",
+ "user_benefit": "The run console is the primary triage surface after executing against hosts. Jump-to-match turns Find from decorative into functional, the truncation banner prevents silently losing the first half of a long run, and save-to-file closes the loop for sharing/auditing run logs.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\RunOutputView.tsx",
+   "lines": "32-39, 93-114, 164-177",
+   "note": "count-only find, no nav controls, all-matches highlight with no current"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\executionSlice.ts",
+   "lines": "4, 119-127",
+   "note": "silent oldest-line drop at 5000 lines"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\RunOutputView.tsx",
+   "lines": "87",
+   "note": "Copy-all is the only export path"
+  }
+ ],
+ "mockup_idea": "Find bar before/after: current [input · '47 matches'] vs. [input · '3 of 47' · up/down arrows] with the current match in an orange mark while others stay cyan, plus a dim '— output truncated, showing last 5000 lines —' banner pinned at the top of the scrollback.",
+ "merged_from": 1
+}

@@ -1,0 +1,91 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>UX-005 — Environment Manager Cancel semantics</title>
+<style>
+body{background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace;margin:12px}
+.row{display:flex;gap:14px}
+.col{flex:1;min-width:0}
+.cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px 2px}
+.cap b{color:#ff5c5c;font-weight:600}.cap i{color:#2bd97c;font-style:normal;font-weight:600}
+.dlg{border:1px solid #1c2330;border-radius:6px;background:#10141c;overflow:hidden}
+.tb{background:#151b26;border-bottom:1px solid #1c2330;padding:5px 8px;color:#8294a8;font-size:10px;display:flex;justify-content:space-between;align-items:center}
+.pend{color:#ffb454;font-size:9px;border:1px solid #4a3a1c;border-radius:8px;padding:1px 7px;background:#1a1408}
+.body{display:flex;min-height:118px}
+.list{width:96px;border-right:1px solid #1c2330;padding:5px 0}
+.list div{padding:3px 8px;white-space:nowrap;overflow:hidden}
+.sel{background:#16314a;color:#4cc9f0}
+.dot{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px;vertical-align:1px}
+.del{color:#5b6878;text-decoration:line-through}
+.tag{font-size:8px;border-radius:7px;padding:0 5px;margin-left:4px;text-decoration:none;display:inline-block}
+.det{flex:1;padding:7px 9px;min-width:0}
+.acts{display:flex;gap:4px;margin-bottom:7px}
+.acts span{border:1px solid #2a3344;border-radius:3px;padding:2px 7px;color:#8294a8;font-size:9px}
+.fld{display:flex;gap:6px;margin:4px 0;align-items:center}
+.fld label{color:#8294a8;width:62px;flex:none;font-size:10px}
+.in{flex:1;border:1px solid #2a3344;background:#0c1017;border-radius:3px;padding:2px 6px;color:#c9d4e3;overflow:hidden;white-space:nowrap}
+.var{display:flex;gap:6px;margin-top:3px}
+.var .in{flex:1}
+.foot{border-top:1px solid #1c2330;background:#0d1118;padding:7px 9px;display:flex;justify-content:flex-end;gap:6px;align-items:center}
+.btn{border:1px solid #2a3344;background:#1a212e;border-radius:3px;padding:3px 12px;color:#c9d4e3}
+.pri{border-color:#2a6e8f;background:#0f2a3a;color:#4cc9f0}
+.note{margin:6px 2px 0;font-size:10px;line-height:1.45}
+.bad{color:#ff5c5c}.good{color:#2bd97c}.mut{color:#8294a8}.amb{color:#ffb454}
+.arrow{color:#5b6878}
+.hint{color:#8294a8;font-size:9px;margin-right:auto}
+.optb{margin-top:14px}
+hr{border:0;border-top:1px solid #1c2330;margin:14px 0 10px}
+h1{font-size:12px;color:#c9d4e3;margin:0 0 2px}.sub{color:#8294a8;font-size:10px;margin:0 0 12px}
+</style></head><body>
+<h1>UX-005 — “Cancel” in Manage Environments doesn’t cancel</h1>
+<p class="sub">Scenario: user deletes <span class="bad">Production</span>, edits a Staging variable, then clicks Cancel.</p>
+
+<div class="row">
+<div class="col">
+<p class="cap"><b>Before</b> — every action writes config.json immediately</p>
+<div class="dlg">
+ <div class="tb">Manage Environments</div>
+ <div class="body">
+  <div class="list">
+   <div class="del"><span class="dot" style="background:#5b6878"></span>Production</div>
+   <div class="sel"><span class="dot" style="background:#2bd97c"></span>Staging</div>
+   <div><span class="dot" style="background:#ffb454"></span>Lab-DC2</div>
+  </div>
+  <div class="det">
+   <div class="acts"><span>New</span><span>Duplicate</span><span>Rename</span><span style="border-color:#5c2424;color:#ff5c5c">Delete</span><span>Import</span></div>
+   <div class="fld"><label>Description</label><div class="in">Staging fabric — 10.20.0.0/16</div></div>
+   <div class="fld"><label>Vault</label><div class="in">stage-ops (approle)</div></div>
+   <div class="var"><div class="in">NTP_SERVER</div><div class="in" style="border-color:#4a3a1c">10.20.0.5 <span class="amb">← already on disk</span></div></div>
+  </div>
+ </div>
+ <div class="foot"><span class="btn pri">Save</span><span class="btn">Cancel ⟵</span></div>
+</div>
+<p class="note"><span class="bad">✗ Cancel only closes the form.</span> The delete, the variable edit, even an Import overwrite were persisted the moment they happened — <span class="mut">Production is gone for good.</span></p>
+</div>
+
+<div class="col">
+<p class="cap"><i>After</i> — Option A (preferred): staged working set</p>
+<div class="dlg">
+ <div class="tb">Manage Environments <span class="pend">● 2 pending changes</span></div>
+ <div class="body">
+  <div class="list">
+   <div class="del"><span class="dot" style="background:#5b6878"></span>Production<span class="tag" style="color:#ff5c5c;border:1px solid #5c2424">del</span></div>
+   <div class="sel"><span class="dot" style="background:#2bd97c"></span>Staging<span class="tag" style="color:#ffb454;border:1px solid #4a3a1c">mod</span></div>
+   <div><span class="dot" style="background:#ffb454"></span>Lab-DC2</div>
+  </div>
+  <div class="det">
+   <div class="acts"><span>New</span><span>Duplicate</span><span>Rename</span><span style="border-color:#5c2424;color:#ff5c5c">Delete</span><span>Import</span></div>
+   <div class="fld"><label>Description</label><div class="in">Staging fabric — 10.20.0.0/16</div></div>
+   <div class="fld"><label>Vault</label><div class="in">stage-ops (approle)</div></div>
+   <div class="var"><div class="in">NTP_SERVER</div><div class="in" style="border-color:#4a3a1c">10.20.0.5 <span class="amb">staged</span></div></div>
+  </div>
+ </div>
+ <div class="foot"><span class="hint">nothing written until Save</span><span class="btn pri">Save changes</span><span class="btn">Cancel</span></div>
+</div>
+<p class="note"><span class="good">✓ Edits live in an in-memory clone.</span> Save commits once via EnvironmentService <span class="mut">(same pattern as SettingsDialog)</span>; Cancel discards the clone — <span class="good">Production survives the misclick.</span></p>
+</div>
+</div>
+
+<hr>
+<p class="cap">Option B (cheap fallback) — keep immediate-apply, drop the false promise</p>
+<div class="dlg"><div class="foot"><span class="hint amb">⚠ Changes are saved as you go</span><span class="btn pri">Switch &amp; Close</span><span class="btn">Close</span></div></div>
+<p class="note mut">No staging work — just honest labels: “Save” becomes <span style="color:#4cc9f0">Switch &amp; Close</span> (its only real effect today), Cancel becomes Close, and a caption tells the truth.</p>
+</body></html>

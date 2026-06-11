@@ -1,0 +1,26 @@
+{
+ "id": "ENH-043",
+ "title": "F1–F12 are not forwarded to the host — menu-driven and full-screen apps are unusable in the interactive terminal",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "terminal",
+ "lens": "ux",
+ "existing_state": "The KeyDown function-key map (Forms/InteractiveTerminalForm.cs:303-320) covers Enter/Tab/Backspace/Escape/arrows/Home/End/PageUp/PageDown/Insert/Delete but no F-keys, so F1–F12 fall through to `return` at line 322-323 and never reach the host. Rebex's FunctionKey enum supports F1–F20 (verified in Rebex.Terminal 7.0.9313 XML docs), and the existing KeyInput path already forwards FunctionKey + modifiers (InteractiveTerminalService.cs:1830-1840), so this is purely a missing switch case. Network-device setup wizards, htop/mc/aptitude F-key bars, and any curses app with function-key menus (the alternate-screen apps the transcript filter at InteractiveTerminalService.cs:2272-2357 explicitly supports) cannot be driven from this terminal.",
+ "recommendation": "Add Keys.F1 through Keys.F12 → Rebex.TerminalEmulation.FunctionKey.F1–F12 cases to the switch in InteractiveTerminalForm_KeyDown (form 303-320). Modifiers (Shift/Ctrl/Alt+F-keys) are already collected at lines 326-329 and forwarded, so no service-side change is needed.",
+ "user_benefit": "Full-screen and menu-driven remote tools (htop, mc, device setup wizards) become fully usable instead of dead-ending the moment they ask for an F-key.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs",
+   "lines": "303-323",
+   "note": "Function-key switch has no F1-F12 cases; unmapped keys return without forwarding"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "1830-1840",
+   "note": "KeyInput pipeline already sends FunctionKey + modifiers to the Rebex stream — only the mapping is missing"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

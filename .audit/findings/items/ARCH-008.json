@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-008",
+ "title": "No staging layer: dialogs mutate Credential Manager and disk during navigation, making Cancel structurally impossible",
+ "category": "ARCH",
+ "severity": "high",
+ "effort": "M",
+ "area": "dialogs-general",
+ "lens": "perf",
+ "existing_state": "SettingsDialog presents itself as staged-until-Save (everything funnels through one _configService.Update in BtnSave_Click, SettingsDialog.cs:2657-2755), but secrets bypass the staging entirely: PersistVaultProfileByIndex runs on every profile selection change (795) and writes or deletes Credential Manager entries right then (1011-1017; SaveVaultCredential 1020-1027 deletes the credential when the textbox is empty). Notifications do the same (1401, 1577-1581, 1595-1602). The Remove buttons purge stored secrets immediately (Vault 851-858, Notifications 1450-1455). Net effect: clicking Remove then Cancel leaves config.json still referencing a profile whose secrets are irreversibly gone; renaming then cancelling leaves credentials migrated/duplicated for a rename that never happened. EnvironmentDialog has the same architecture: every action (New 427, Duplicate, Rename, Delete, Import) and every selection change (408) persists straight to disk through EnvironmentService, and the Save button's only real effect is setting SelectedEnvironmentName (639-643) — Cancel is cosmetic, and the persist path swallows all exceptions (819-822). This single structural decision is the root of the whole cancel-doesn't-cancel defect family the dialogs exhibit, and every new profile field added inherits the same pre-Save-mutation trap.",
+ "recommendation": "Introduce per-dialog staged state for external side effects: hold pending secret values in an in-memory map (profile -> slot -> value, with a tombstone for deletions), populate textboxes from it, and flush to Credential Manager only inside BtnSave_Click after ValidateVaultProfiles passes; queue Remove's credential purges the same way. For EnvironmentDialog, operate on a cloned environment map (LoadEnvironmentState already returns clones) and commit through EnvironmentService once on Save. Immediate-action buttons that must stay immediate (Clear Browser Data, Reset Preset Timeouts) should be visually marked as such.",
+ "user_benefit": "Cancel actually cancels: no more losing stored Vault tokens or webhook URLs from a dialog session the user backed out of, and no orphaned config-to-credential references that fail mysteriously at run time.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "795, 1011-1027",
+   "note": "CredMan writes/deletes fire on profile selection change, pre-Save"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "851-858, 1450-1455",
+   "note": "Remove buttons purge stored secrets immediately; Cancel cannot restore them"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/EnvironmentDialog.cs",
+   "lines": "403-414, 639-643, 819-822",
+   "note": "Every action persists to disk; Save only sets SelectedEnvironmentName; persist failures swallowed"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "2657-2755",
+   "note": "Everything else in the dialog IS staged until this single Update — the inconsistency is the trap"
+  }
+ ],
+ "mockup_idea": "Before/after of the Settings Vault tab: before — Remove instantly deletes stored token (annotated 'already gone even if you Cancel'); after — removed profile shown struck-through with a 'pending until Save' badge and Cancel restoring it.",
+ "merged_from": 1
+}

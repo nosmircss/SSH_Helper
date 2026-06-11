@@ -1,0 +1,51 @@
+{
+ "id": "PERF-006",
+ "title": "Every canvas drag, settings toggle, and one-field config change rewrites the entire config.json (gzip of the host fleet + full indented serialize + .bak copy) synchronously on the UI thread",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "persistence-config",
+ "lens": "perf",
+ "existing_state": "ConfigurationService.Update (Services/ConfigurationService.cs:156-161) funnels every tiny write into Save() (108-151), which on each call re-normalizes every environment's host rows (NormalizeEnvironmentData, 360-389), copies the existing file to .bak (116-120), re-serializes and GZip+base64-encodes the entire ApplicationState host-grid blob even when it did not change (CompressSavedState, 345-355), serializes the whole config with Formatting.Indented (135), and writes it with raw File.WriteAllText (144) — not the project's JsonFileWriter.WriteJsonAtomic convention. The hottest caller is Flow Canvas layout autosave: React debounces only 300ms (FlowCanvas/src/utils/layoutAutosave.ts:14-17) and fires on every node drag stop (App.tsx:176-178), branch-band drag (nodes/BranchBandsLayer.tsx:49), breakpoint/disable toggle (stores/slices/debugSlice.ts:75,90,104), comment add/edit/delete (commentSlice.ts:42,70,83), and display-setting change (settingsSlice.ts:58-61); each lands in Form1.ApplyLayoutAutosave (Form1.cs:2419-2501) -> PresetManager.UpdateCanvasLayout -> PersistToConfig (Services/PresetManager.cs:223-243, 1022-1042) -> full Save, dispatched on the UI thread (WebMessageReceived / BeginInvoke at Form1.cs:6792-6795). Canvas display prefs and panel resizes do the same via FlowCanvasForm.SavePanelSizes (UI/FlowCanvasForm.cs:474-527, RightPanel persists on mouseup), and the silent startup update check rewrites the whole config seconds after every launch just to record LastCheckTime (Form1.cs:14983, invoked from Form1_Shown:441 with the continuation on the UI thread), plus ~12 more Update sites across Form1/SettingsDialog/EnvironmentDialog. The live config.json is already 274KB and scales with fleet, environments, and presets: an arranging session of ~50 drags means 50+ full compress+serialize+double-write cycles (~27MB of file IO) on the UI thread, each one also a non-atomic crash window on the single file holding all presets, environments, and app state.",
+ "recommendation": "Two tiers. Cheap: cache the compressed SavedState blob and only re-run CompressSavedState when the application state actually changed (dirty flag/version counter set by the state-save path), and coalesce Save calls with a short trailing debounce (500ms-1s) flushed on FormClosing so a burst of autosaves produces one disk write; route the write through JsonFileWriter.WriteJsonAtomic and move it off the UI thread, keeping a synchronous Save only for the explicit close-path. Structural: stop persisting high-frequency canvas data through the config monolith — move per-preset CanvasLayoutData and Flow Canvas display prefs/WindowState to a small sidecar file under AppDataPaths (e.g. canvas-layouts.json or per-preset files) written atomically, leaving config.json for genuinely low-frequency settings.",
+ "user_benefit": "Eliminates repeated whole-config gzip/serialize/write stalls felt as micro-hitches while arranging blocks on the canvas or toggling settings (growing linearly with fleet size), cuts pointless .bak churn from writes that changed one timestamp, and shrinks the window where a crash mid-write corrupts the one file holding everything.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+   "lines": "108-161, 345-389",
+   "note": "Update always calls Save; Save = normalize all environments + .bak copy + unconditional CompressSavedState + full indented serialize + raw File.WriteAllText"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "2419-2501, 6792-6795",
+   "note": "ApplyLayoutAutosave -> PresetManager.UpdateCanvasLayout, invoked on the UI thread per autosave message"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/PresetManager.cs",
+   "lines": "223-243, 1022-1042",
+   "note": "UpdateCanvasLayout/UpdateLayoutMode -> PersistToConfig -> full config save per call"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/utils/layoutAutosave.ts",
+   "lines": "8-17",
+   "note": "only a 300ms debounce; callers include drag stop, band drag, comment ops, breakpoint/disable toggles, settings changes"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/FlowCanvasForm.cs",
+   "lines": "474-527",
+   "note": "three Update() sites — every canvas toggle/slider/panel-resize commit = full config rewrite"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "14983",
+   "note": "silent startup update check triggers a full config rewrite on every launch just for LastCheckTime"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/AppConfiguration.cs",
+   "lines": "18, 59-65",
+   "note": "one root object holds presets+layouts, the compressed state blob, and all environments' host grids"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 3
+}

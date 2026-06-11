@@ -1,0 +1,71 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+.cols{display:flex;gap:14px;align-items:flex-start}
+.col{flex:1;min-width:0}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px}
+.cap.bad{color:#ff5c5c}.cap.good{color:#2bd97c}
+.win{border:1px solid #1c2330;border-radius:6px;background:#11151d;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.tb{display:flex;align-items:center;gap:8px;background:#161b26;border-bottom:1px solid #1c2330;padding:5px 9px;font-size:11px;color:#8294a8}
+.tb .x{margin-left:auto;color:#8294a8}
+.body{padding:11px 12px;display:flex;gap:10px}
+.ico{font-size:20px;line-height:1}
+.msg{font-size:11px;line-height:1.5}
+.msg code{color:#ffb454}
+.btns{display:flex;gap:8px;justify-content:flex-end;padding:9px 12px;border-top:1px solid #1c2330;background:#0e121a;flex-wrap:wrap}
+.btn{border:1px solid #2a3445;border-radius:4px;background:#1a2230;color:#c9d4e3;padding:5px 12px;font-size:11px}
+.btn.pri{border-color:#2bd97c;background:rgba(43,217,124,.12);color:#2bd97c}
+.btn.link{border-color:transparent;background:none;color:#4cc9f0}
+.note{font-size:10.5px;line-height:1.55;margin-top:8px;color:#8294a8}
+.note b{font-weight:600}
+.note.bad b{color:#ff5c5c}.note.good b{color:#2bd97c}
+.files{margin-top:7px;border:1px solid #1c2330;border-radius:5px;padding:6px 9px;font-size:10.5px;line-height:1.7;background:#0e121a}
+.files .r{color:#ff5c5c}.files .g{color:#2bd97c}.files .a{color:#ffb454}.files .m{color:#8294a8}
+.hd{font-size:10px;color:#8294a8;text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px}
+</style></head><body>
+
+<div class="cols">
+  <div class="col">
+    <div class="cap bad">Before &mdash; corrupt config.json on launch</div>
+    <div class="win">
+      <div class="tb">&#9888; Configuration Warning<span class="x">&#10005;</span></div>
+      <div class="body"><div class="ico" style="color:#ffb454">&#9888;</div>
+        <div class="msg">Configuration file was corrupted and could not be loaded. A backup was saved to <code>config.json.corrupt</code>. Default settings have been applied.</div>
+      </div>
+      <div class="btns"><span class="btn">OK</span></div>
+    </div>
+    <div class="note bad"><b>No mention of the good config.json.bak.</b> Seconds later the startup update-check saves defaults &mdash; first copying the still-corrupt file over the backup.</div>
+    <div class="files">
+      <div class="hd">%LocalAppData%\SSH_Helper\ after next save</div>
+      <div><span class="r">config.json</span> <span class="m">&mdash; factory defaults (14 presets, 3 envs, 27 hosts gone)</span></div>
+      <div><span class="r">config.json.bak</span> <span class="m">&mdash; clobbered with the corrupt bytes</span></div>
+      <div><span class="a">config.json.corrupt</span> <span class="m">&mdash; corrupt copy (only artifact left)</span></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap good">After &mdash; recovery offered, .bak protected</div>
+    <div class="win">
+      <div class="tb">&#9888; Configuration Recovery<span class="x">&#10005;</span></div>
+      <div class="body"><div class="ico" style="color:#4cc9f0">&#8634;</div>
+        <div class="msg">config.json could not be parsed (unexpected end of file, byte 48,211). A healthy backup exists with 14 presets, 3 environments (prod / lab / dmz), and 27 hosts.</div>
+      </div>
+      <div class="btns">
+        <span class="btn pri">Restore from backup (last saved 2026-06-09 18:42)</span>
+        <span class="btn">Start with defaults</span>
+        <span class="btn link">Open config folder</span>
+      </div>
+    </div>
+    <div class="note good"><b>Corrupt file is moved (not copied) to .corrupt</b>, so no later save can re-copy it over the backup; all saves go through atomic temp-file + File.Replace.</div>
+    <div class="files">
+      <div class="hd">Same crash, after recovery</div>
+      <div><span class="g">config.json</span> <span class="m">&mdash; restored from .bak, everything intact</span></div>
+      <div><span class="g">config.json.bak</span> <span class="m">&mdash; preserved (load-failure flag skips refresh)</span></div>
+      <div><span class="a">config.json.corrupt</span> <span class="m">&mdash; moved aside for inspection</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="note" style="margin-top:10px">Same cascade applies to <span style="color:#4cc9f0">jobs.json</span>: rewritten twice per scheduled run on ThreadPool threads with a plain File.WriteAllText &mdash; one torn write empties the job roster the same way. Fix routes both through the existing JsonFileWriter.WriteJsonAtomic.</div>
+
+</body></html>

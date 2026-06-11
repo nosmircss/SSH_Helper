@@ -1,0 +1,56 @@
+{
+ "id": "FEAT-001",
+ "title": "No post-run failure triage: no success/fail summary, no failed-only view, no re-run-failed-hosts",
+ "category": "FEAT",
+ "severity": "high",
+ "effort": "M",
+ "area": "fleet-workflow",
+ "lens": "ux",
+ "existing_state": "After a multi-host run, the status bar reports only a flat count — \"Completed execution on {resultCount} hosts\" (Form1.cs:12676, 12774) — with no success/failure breakdown; folder runs do slightly better with a status-bar \"{successCount} succeeded, {failCount} failed\" (Form1.cs:12958-12964) but never say WHICH hosts failed. Per-host outcomes ARE captured: ExecutionResult.Success/WasCancelled are rolled into HostExecutionContext (Form1.cs:13115, 13141) and HostHistoryEntry (Models/AppConfiguration.cs:428-437, Form1.cs:13255-13256), and the history host pane owner-draws a green check / red X / amber square per host (Form1.cs:8541-8583). But that is the end of the road: the history context menus offer only Save/Delete/View Details/Export Host Output (Form1.cs:8358-8399, 8814-8840), the host list has no failed-only filter or failure count, grid rows are never marked with execution results (only connection tests paint cells — SetConnectionTestVisualState at Form1.cs:8926), and there is no retry mechanism anywhere (a repo-wide search for rerun/retry-failed finds only script-level send.retry and update-download retry). A user who runs a preset against 200 devices and gets 18 failures must visually scan the host list for red X icons, note the IPs by hand, find and check those rows in the grid, and run again.",
+ "recommendation": "All the data already exists in memory at run completion (the results list in ExecutePresetOnRowsAsync, Form1.cs:12400-12437 and 12463-12496). (1) Change completionStatus to include the breakdown, e.g. \"Completed: 182 succeeded, 18 failed\" with a red tint when failures > 0. (2) Paint per-row result indicators in the host grid after any multi-host run by reusing the connection-test visual-state mechanism (SetConnectionTestVisualState / ApplyConnectionTestCellResult, Form1.cs:8920-8937). (3) Add a \"Show failed only\" toggle above lstHosts that filters the host pane to !Success entries. (4) Add \"Check failed hosts in grid\" and \"Re-run on failed hosts\" actions (post-run button plus history host-pane context-menu items, disabled when the entry has zero failures): match HostHistoryEntry.HostAddress back to grid rows by IP:port (reuse HostConnection.Parse + TryGetExplicitPortFromHostValue at Form1.cs:13401, same as UpdateHostColumn at Form1.cs:14190), check those rows and uncheck the rest, then invoke the existing ExecuteOnCheckedHosts() (Form1.cs:12753) — the Ansible '--limit @retry' equivalent.",
+ "user_benefit": "Turns the most common fleet-ops loop (run, find failures, retry failures) from minutes of error-prone scan-and-transcribe across 200 rows into two clicks. Table stakes in Ansible (retry files) and comparable tools.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12673-12677, 12771-12775",
+   "note": "completion status is a bare host count, no success/fail split"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12958-12964",
+   "note": "folder path computes success/fail counts but only shows them in the status bar, no host identification"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13112-13145",
+   "note": "per-host Success/WasCancelled already computed and persisted into history"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs",
+   "lines": "428-437",
+   "note": "HostHistoryEntry already stores per-host HostAddress/Success/WasCancelled"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8541-8583",
+   "note": "host pane draws pass/fail icons but offers no filter or count"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8358-8399, 8814-8840",
+   "note": "history context menus: Save/Delete/View Details/Export Host Output only — no re-run"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8920-8937",
+   "note": "connection test already paints per-row cell states — reusable pattern for run results"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12753-12776",
+   "note": "ExecuteOnCheckedHosts is the ready-made re-run entry point"
+  }
+ ],
+ "mockup_idea": "Before/after of the run-complete state: before = status bar \"Completed execution on 200 hosts\" and a 200-row host list user must scroll; after = a summary strip \"✓ 182  ✗ 18  ■ 0\" with [Show failed only] toggle filtering the host pane to 18 red rows, a [Check failed in grid] button with the Run button now reading \"Run Checked (18)\", and the history host-pane context menu showing new items \"Check failed hosts in grid (18)\" / \"Re-run on failed hosts (18)\".",
+ "merged_from": 3
+}

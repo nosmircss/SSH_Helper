@@ -1,0 +1,36 @@
+{
+ "id": "ENH-003",
+ "title": "Multi-step parallel arms are silently truncated to their first block on export",
+ "category": "ENH",
+ "severity": "high",
+ "effort": "L",
+ "area": "flowcanvas-bridge",
+ "lens": "ux",
+ "existing_state": "The canvas lets you wire a chain of blocks into a Parallel branch, but export emits only the first node of each arm: Services/FlowCanvasBridge.cs:2258-2280 collects the full branch chain via CollectBranchChain, adds a Warning diagnostic 'Parallel branch contains multiple sequential nodes; exporting the first node only' (2266-2272), then serializes branchChain[0] only (2274-2280). The apply still reports success=true, so the YAML that runs is missing user-authored blocks while the canvas keeps displaying them. The warning is effectively invisible: on success React only console.warn's warnings (FlowCanvas/src/stores/messageBridge.ts:209-211), the Problems panel is hidden by default (FlowCanvas/src/stores/slices/uiSlice.ts:140), and the toolbar Problems badge counts errors only (FlowCanvas/src/panels/Toolbar.tsx:21,257). Root cause is the YAML schema: ParallelCommand runs each item of step.Parallel.Steps as one concurrent step (Services/Scripting/Commands/ParallelCommand.cs:24-44), so a sequential chain per arm is not expressible. Not on the FLOW_CANVAS_ENHANCEMENTS.md roadmap (the multi-host cuts there are unrelated).",
+ "recommendation": "Two stages. Immediate (S): promote the truncation diagnostic from Warning to Error in TryGenerateContainerFromGraph so the apply fails loudly instead of silently dropping blocks — the existing error plumbing already blocks Run (Toolbar.tsx:104 disables Run on exportStatus.hasErrors). Full fix (L): extend the parallel schema so an arm can be a step group (e.g. allow a list item that is itself a `steps:` list, or a `do:` wrapper) in ScriptParser + ParallelCommand, expand it in TextToGraph's GetBranches, and emit the whole CollectBranchChain per arm in the parallel branch of TryGenerateContainerFromGraph (FlowCanvasBridge.cs:2258+).",
+ "user_benefit": "Users can actually author 'run these two command sequences concurrently' visually — today the canvas accepts the wiring and then runs something different from what is on screen, which is the worst kind of surprise on a 200-device fleet tool.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "2258-2280",
+   "note": "Warning + branchChain[0]-only emission for parallel arms"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ParallelCommand.cs",
+   "lines": "24-44",
+   "note": "Schema: each Parallel.Steps item is one concurrent step — no per-arm chains"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\messageBridge.ts",
+   "lines": "207-211",
+   "note": "On success, warnings go only to console.warn"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\Toolbar.tsx",
+   "lines": "19-21, 251-270",
+   "note": "Problems badge renders errorCount only; warnings get no badge"
+  }
+ ],
+ "mockup_idea": "Side-by-side: left, a canvas Parallel block with two arms of 2-3 chained blocks each; right-top, today's exported YAML showing only one step per arm with a tiny console-only warning; right-bottom, the proposed export with full per-arm step groups and (interim) a red blocking error on the Parallel block.",
+ "merged_from": 1
+}

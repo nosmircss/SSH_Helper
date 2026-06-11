@@ -1,0 +1,31 @@
+{
+ "id": "UX-013",
+ "title": "No live per-host status during multi-host runs; parallel output interleaves into one text box",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "L",
+ "area": "fleet-workflow",
+ "lens": "cross",
+ "existing_state": "During a run the only feedback is the single output TextBox plus a status-bar percentage (BeginManualExecutionProgress, Form1.cs:12384-12388). Form1 never subscribes the service's ProgressChanged event at all (event wiring at Form1.cs:362-371 covers 8 events, not ProgressChanged). With parallel hosts, ExecuteFolderAsync runs batch hosts concurrently (SshExecutionService.cs:697, 888) and each host's session streams chunks via OnOutputReceived as they arrive, so the live pane interleaves output from N hosts with no per-host routing — the per-host view (with pass/fail icons) only materializes after the run completes, via StoreExecutionHistory and the history host pane (Form1.cs:8299-8322). At 200 hosts there is no way to see mid-run which hosts are queued/running/failed, or to triage early failures while the run continues.",
+ "recommendation": "Add a live run panel (reuse the lstHosts owner-draw pattern, Form1.cs:8541) listing target hosts with state icons (queued/running/ok/failed), fed by ProgressChanged + per-host completion inside ExecuteFolderAsync (it already computes per-host results at SshExecutionService.cs:884-890; raise a HostCompleted event there). Optionally color grid rows live using the existing connection-test visual-state infrastructure (Form1.cs:2687-2721). Selecting a host in the panel can filter the live output by that host once chunks are tagged with e.Host (already on the event args).",
+ "user_benefit": "On long fleet runs you can watch failures accumulate in real time and start triaging immediately, instead of staring at interleaved text and waiting for the history entry to appear.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "362-371",
+   "note": "ProgressChanged never subscribed by Form1"
+  },
+  {
+   "file": "Services/SshExecutionService.cs",
+   "lines": "697-890",
+   "note": "concurrent batch hosts stream OnOutputReceived chunks that interleave in the single output box"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "8299-8322",
+   "note": "per-host status pane exists only post-run via history payload"
+  }
+ ],
+ "mockup_idea": "Run-in-progress view: left panel listing hosts with spinner/check/X icons and counts ('137 done · 4 failed · 9 running · 50 queued'), right side the existing output box filtered to the clicked host.",
+ "merged_from": 1
+}

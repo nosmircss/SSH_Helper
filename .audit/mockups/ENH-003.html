@@ -1,0 +1,98 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace;margin:12px}
+.cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+.wrap{display:grid;grid-template-columns:272px 1fr;gap:12px}
+.panel{background:#10141c;border:1px solid #1c2330;border-radius:6px;padding:8px}
+.pblock{border:1px solid #ffb454;background:#1a1610;border-radius:5px;padding:4px 8px;text-align:center;color:#ffb454;font-size:10px;width:200px;margin:0 auto}
+.pblock small{display:block;color:#8294a8;font-size:9px}
+.stem{width:2px;height:9px;background:#2a3550;margin:0 auto}
+.rail{height:2px;background:#2a3550;width:58%;margin:0 auto}
+.arms{display:flex;gap:10px;justify-content:center}
+.arm{flex:1;max-width:120px}
+.arm::before{content:"";display:block;width:2px;height:9px;background:#2a3550;margin:0 auto}
+.blk{border:1px solid #1c2330;border-left:3px solid #4cc9f0;background:#141a24;border-radius:4px;padding:3px 5px;font-size:9.5px;line-height:1.25}
+.blk b{color:#4cc9f0;font-weight:600}
+.blk.t{border-left-color:#ffb454}.blk.t b{color:#ffb454}
+.blk.d{border-left-color:#2bd97c}.blk.d b{color:#2bd97c}
+.blk span{color:#8294a8}
+.drop{outline:1px dashed #ff5c5c;outline-offset:2px;position:relative}
+.vl{width:2px;height:8px;background:#2a3550;margin:0 auto}
+.legend{margin-top:9px;font-size:9px;color:#ff5c5c}
+.legend i{display:inline-block;width:9px;height:9px;outline:1px dashed #ff5c5c;outline-offset:1px;margin:0 5px 0 2px;vertical-align:-1px}
+pre{margin:0;font-size:10.5px;line-height:1.45;white-space:pre}
+.k{color:#4cc9f0}.s{color:#2bd97c}.dash{color:#8294a8}.com{color:#8294a8}
+.lost{color:#ff5c5c;font-size:9.5px}
+.new{background:rgba(43,217,124,.07);border-left:2px solid #2bd97c;display:block;margin-left:-8px;padding-left:6px}
+.console{margin-top:7px;border-top:1px dashed #1c2330;padding-top:5px;font-size:9px;color:#8294a8}
+.console em{color:#ffb454;font-style:normal}
+.stage{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:9.5px}
+.chip{border:1px solid #ff5c5c;color:#ff5c5c;border-radius:4px;padding:2px 7px;background:rgba(255,92,92,.08)}
+.runbtn{border:1px solid #1c2330;color:#5a6878;border-radius:4px;padding:2px 9px;background:#0e1118}
+.col{display:flex;flex-direction:column;gap:11px}
+.note{color:#8294a8;font-size:9.5px;margin-top:6px}
+</style></head><body>
+
+<div class="wrap">
+  <div>
+    <p class="cap">Canvas — what the user built</p>
+    <div class="panel">
+      <div class="pblock">&#10907; parallel · Health sweep<small>max_concurrent: 2</small></div>
+      <div class="stem"></div><div class="rail"></div>
+      <div class="arms">
+        <div class="arm">
+          <div class="blk"><b>send</b><br><span>get system status</span></div>
+          <div class="vl"></div>
+          <div class="blk t drop"><b>wait</b><br><span>2 s</span></div>
+          <div class="vl"></div>
+          <div class="blk drop"><b>send</b><br><span>diagnose sys top 5</span></div>
+        </div>
+        <div class="arm">
+          <div class="blk"><b>send</b><br><span>get router info bgp summary</span></div>
+          <div class="vl"></div>
+          <div class="blk d drop"><b>set</b><br><span>bgp_raw = {{last_output}}</span></div>
+        </div>
+      </div>
+      <div class="legend"><i></i>3 blocks silently dropped on export — canvas still shows them</div>
+    </div>
+    <p class="note">fgt-edge-01 · 10.20.4.11 — the YAML that actually runs &ne; what's on screen.</p>
+  </div>
+
+  <div class="col">
+    <div>
+      <p class="cap">Before — exported YAML today</p>
+      <div class="panel">
+<pre><span class="dash">-</span> <span class="k">name:</span> <span class="s">Health sweep</span>
+  <span class="k">parallel:</span>
+    <span class="k">max_concurrent:</span> 2
+    <span class="k">steps:</span>
+      <span class="dash">-</span> <span class="k">send:</span> <span class="s">get system status</span>          <span class="lost">&larr; arm A lost wait + send</span>
+      <span class="dash">-</span> <span class="k">send:</span> <span class="s">get router info bgp summary</span> <span class="lost">&larr; arm B lost set</span></pre>
+        <div class="console"><em>&#9888; console.warn</em> "Parallel branch contains multiple sequential nodes; exporting the first node only." — DevTools only; apply reports <em>success</em>, Problems badge stays at 0.</div>
+      </div>
+    </div>
+
+    <div>
+      <p class="cap">After — proposed export (per-arm step groups)</p>
+      <div class="panel">
+<pre><span class="dash">-</span> <span class="k">name:</span> <span class="s">Health sweep</span>
+  <span class="k">parallel:</span>
+    <span class="k">max_concurrent:</span> 2
+    <span class="k">steps:</span>
+      <span class="dash">-</span> <span class="k">steps:</span>                <span class="com"># arm A = full chain</span>
+          <span class="dash">-</span> <span class="k">send:</span> <span class="s">get system status</span>
+<span class="new">          <span class="dash">-</span> <span class="k">wait:</span> 2</span><span class="new">          <span class="dash">-</span> <span class="k">send:</span> <span class="s">diagnose sys top 5</span></span>      <span class="dash">-</span> <span class="k">steps:</span>                <span class="com"># arm B</span>
+          <span class="dash">-</span> <span class="k">send:</span> <span class="s">get router info bgp summary</span>
+<span class="new">          <span class="dash">-</span> <span class="k">set:</span>
+              <span class="k">bgp_raw:</span> <span class="s">"{{last_output}}"</span></span></pre>
+        <div class="stage">
+          <span class="chip">&#9679; Interim (S): error, not warning</span>
+          <span class="runbtn">&#9654; Run (disabled)</span>
+          <span style="color:#8294a8">apply fails loudly until the schema fix lands</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body></html>

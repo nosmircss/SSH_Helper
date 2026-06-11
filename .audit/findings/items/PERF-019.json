@@ -1,0 +1,41 @@
+{
+ "id": "PERF-019",
+ "title": "Every reference to a list variable re-parses and double-copies the whole list; lambda bodies are re-parsed per element — big-output scripts go quadratic",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-functions",
+ "lens": "perf",
+ "existing_state": "The engine's standard pattern for processing command output is split-into-lines followed by count/filter/map/foreach over the list. Three compounding O(n) costs are paid on EVERY evaluation: (1) when any function argument names a List<string> variable, JsonUtilities.ResolveJsonValue builds a brand-new List<object> by running ParseJsonValue on every item (Services/Scripting/JsonUtilities.cs:317-327) — per item that is a Trim, bool/null comparisons, long.TryParse, double.TryParse, and for any line starting with a brace/bracket an exception-guarded JsonSerializer.Deserialize attempt (69-108). (2) The receiving function immediately converts that List<object> straight back to List<string> by ToString-ing every item (ValueResolver.ResolveListValue, Services/Scripting/ValueResolver.cs:159-165; CollectionFunctions.ResolveList round-trip at Functions/CollectionFunctions.cs:280-284). So count(lines) on a 50k-line output performs ~100k parse/ToString operations and two full list copies just to return a count — and a while-loop conditioned on count(lines) pays that every iteration, i.e. O(n^2). (3) Inside map/filter/find/any/all/count, the lambda body string is re-tokenized from scratch for every element — LambdaExpression.Evaluate constructs a new ExpressionParser(Body, context) per item (Services/Scripting/LambdaExpression.cs:74-78), each call re-walking the full dispatch chain. Additionally map() stringifies its results (CollectionFunctions.cs:34-40), forcing the next pipeline stage to re-parse everything again. None of this is observable on 100-item lists, but this app's domain is multi-host fleets producing tens of thousands of output lines, where chained set/filter/map steps and loop conditions stall the run for seconds between SSH commands.",
+ "recommendation": "Three contained changes, no semantics change: (a) in ResolveJsonValue, return List<string> variables as-is instead of eagerly per-item ParseJsonValue-ing them (JsonUtilities.cs:318-327) — every verified consumer either ToStrings the items back or handles List<string> explicitly; keep the conversion only inside the JSON-serialization paths that genuinely need typed items (JsonUtilities.cs:48, 164, 279). (b) Parse the lambda body once per collection call: cache the tokenized form on the LambdaExpression instance (or a small static LRU keyed by body string) and let ExpressionParser accept the pre-parsed form. (c) In ParseJsonValue, pre-validate with a cheap structural check (Utf8JsonReader try-parse) before the exception-guarded Deserialize so JSON-looking non-JSON lines do not throw per item. Add a benchmark-style test over a 100k-line synthetic output to lock in the improvement.",
+ "user_benefit": "Scripts that parse large command output (config dumps, log greps, inventory listings) across a fleet stop stalling for seconds per step/loop iteration; the engine's per-element cost drops by roughly an order of magnitude in the common split-then-filter pattern.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/JsonUtilities.cs",
+   "lines": "317-327",
+   "note": "List<string> variable -> new List<object> with per-item ParseJsonValue on every reference"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/JsonUtilities.cs",
+   "lines": "69-108",
+   "note": "ParseJsonValue per-item TryParses + exception-guarded Deserialize for brace/bracket items"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ValueResolver.cs",
+   "lines": "159-175",
+   "note": "immediate ToString round-trip back to List<string>"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/LambdaExpression.cs",
+   "lines": "74-78",
+   "note": "new ExpressionParser constructed and body re-parsed for every list element"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Functions/CollectionFunctions.cs",
+   "lines": "34-40, 280-284",
+   "note": "map stringifies results; ResolveList performs the resolve/round-trip per call"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

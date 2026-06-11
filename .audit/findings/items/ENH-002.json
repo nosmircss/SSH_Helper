@@ -1,0 +1,46 @@
+{
+ "id": "ENH-002",
+ "title": "Preset-delete undo restores a whole-library snapshot — it silently reverts unrelated edits, or evaporates because 26 other actions defensively clear it",
+ "category": "ENH",
+ "severity": "high",
+ "effort": "M",
+ "area": "persistence-config",
+ "lens": "ux",
+ "existing_state": "Deleting a preset or folder records an undo (TryDeletePresetWithUndo / TryDeleteFolderWithUndo, restorable via Ctrl+Z, Form1.cs:9896-9965), but the undo record is a snapshot of the ENTIRE preset library (PresetLibrarySnapshot.Capture, Services/PresetDeleteUndoService.cs:119-135). UndoLatest (PresetDeleteUndoService.cs:41-59) restores it via PresetManager.RestoreLibrarySnapshot, which clears and fully replaces all presets, folders, and ordering lists, then saves immediately (Services/PresetManager.cs:1044-1074) — so a user who deletes preset A, edits presets B and C, and later clicks \"Undo Delete Preset 'A'\" gets the B/C edits silently rolled back and the rollback persisted to config.json, with no warning and no redo. To limit exactly that damage, Form1 defensively wipes the undo history from 26 call sites — move-to-folder (7959, 8017), folder rename (8107), base-environment change (7904), add (10311), duplicate (10497), rename (10552), favorite toggles (11961, 11995), imports (10748, 10824), preset save (10216), and drag-drop paths (4722-5042) — so in practice the deleted preset becomes unrecoverable the moment the user does almost anything else (delete a preset, absent-mindedly star a favorite, and it is gone). Meanwhile rename and move are themselves destructive-ish operations with no undo of their own (ctxRenameFolder_Click, Form1.cs:8080-8113).",
+ "recommendation": "Scope the undo record to the deleted artifacts instead of a whole-library snapshot: store the deleted PresetInfo objects (name, commands, folder, favorite, canvas layout), their manual-order positions, and the affected-job references already captured (CaptureAffectedJobsForPresetDelete, Form1.cs:9836). Restoring then re-inserts the items into the CURRENT library state rather than replacing it, so unrelated mutations (edits, favorites, renames of other presets) no longer need to clear the stack — only genuine conflicts (e.g. creating a preset with the same name) do, and those prompt for a rename. With item-scoped records the same mechanism naturally extends to a 2-3 deep stack and to rename/move undo. As a cheaper interim guard, diff the snapshot against current state at undo time and warn ('Undoing this delete will also revert changes made to 3 other presets since then — continue?') before applying.",
+ "user_benefit": "Undo becomes trustworthy: deleting the wrong preset stays recoverable even after doing something else first, and Undo stops being the only operation in the app that can silently destroy and persist the loss of unrelated work.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\PresetDeleteUndoService.cs",
+   "lines": "41-59",
+   "note": "UndoLatest restores full snapshot, no diff/warning"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\PresetDeleteUndoService.cs",
+   "lines": "119-135",
+   "note": "snapshot captures entire library, not just the deleted subtree"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\PresetManager.cs",
+   "lines": "1044-1074",
+   "note": "RestoreLibrarySnapshot clears and replaces presets/folders/orders and saves config"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "9896-9965",
+   "note": "UndoLatestPresetDelete restores from whole-config snapshot"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "7904-11995 (26 sites via grep)",
+   "note": "ClearPresetDeleteUndoHistory called from every other mutation"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8080-8113",
+   "note": "folder rename has no undo and clears the delete undo"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

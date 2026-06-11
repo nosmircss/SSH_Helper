@@ -1,0 +1,51 @@
+{
+ "id": "PERF-003",
+ "title": "Select All / checkbox toggles on the host grid are O(N²) with per-row disk stats, layout reflows, and WebView2 messages — multi-second freeze on large fleets",
+ "category": "PERF",
+ "severity": "high",
+ "effort": "S",
+ "area": "form1-a",
+ "lens": "perf",
+ "existing_state": "SetAllCheckboxes (Form1.cs:2560-2575) loops every row setting the checkbox cell Value. Each programmatic set fires Dgv_Variables_CellValueChanged, whose checkbox branch (Form1.cs:4315-4322) calls UpdateSelectionCount for EVERY row — not once at the end. UpdateSelectionCount (Form1.cs:2536-2558) then does: a full-row scan in GetCheckedHostCount (2525-2534), a second full-row scan for totalCount (2539-2540), UpdateHostsFileIndicator, UpdateRunButtonText, and SendTargetHostToCanvas. UpdateRunButtonText (Form1.cs:11272-11296) performs a THIRD GetCheckedHostCount scan plus a Graphics allocation to measure text and button-reposition layout. SendTargetHostToCanvas -> ResolveTargetHostRow (Form1.cs:13430-13450) is a FOURTH full scan, plus a WebView2 IPC message with a full host payload built from every column when the Flow Canvas is open (13456-13496). UpdateHostsFileIndicator (Form1.cs:2370-2373) additionally calls ResolveLoadedFileSyncStatus (2343-2368) -> CsvFileSyncEvaluator.Evaluate (Utilities/CsvFileSyncEvaluator.cs:36-60), which hits the disk (File.Exists + new FileInfo) — 2 disk metadata reads per row toggle while a CSV is loaded. And when the grid is dirty, IsHostsGridUnsaved (Form1.cs:2375-2393) builds a full O(rows x cols) snapshot of the grid and deep-compares it — per row toggle. Net cost of one header select-all click on N hosts: ~4N² cell accesses + 2N disk stats + N layout reflows (+N IPC messages with canvas open). The same cascade applies to the context-menu Select All/Deselect All (Form1.cs:6523-6531), Invert Selection's loop (6533-6546), and every single checkbox click (4274-4283). The HostGridRestoreBatcher (UI/HostGridRestoreBatcher.cs:47-56) only defers these during restore/mutation scopes — SetAllCheckboxes opens no scope, and Form1.PasteFromClipboard (9604-9786) already demonstrates the handler-detachment fix.",
+ "recommendation": "Wrap the SetAllCheckboxes and invert-selection loops in _hostGridRestoreBatcher.BeginMutationScope() (or a _suppressSelectionCountUpdate flag checked in Dgv_Variables_CellValueChanged, mirroring how PasteFromClipboard detaches CellValueChanged) so UpdateSelectionCount runs exactly once after the loop. Inside UpdateSelectionCount, compute checked/total in a single pass and pass the checked count into UpdateRunButtonText instead of re-scanning. Cache the CsvFileSyncEvaluator result (re-evaluate at most every 1-2s or on FileSystemWatcher events) so per-click UI updates stop doing synchronous disk IO, and skip the BuildSnapshot deep-compare on checkbox-only changes (they never affect CSV dirty state, per the comment at 4317).",
+ "user_benefit": "Selecting all hosts in a 1,000+ row fleet currently locks the UI thread for seconds (and floods the canvas with hundreds of redundant IPC messages); this makes the core 'check everything and run' workflow instant.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "2560-2575",
+   "note": "SetAllCheckboxes per-row Value set, no event suppression"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "4315-4322",
+   "note": "CellValueChanged -> UpdateSelectionCount fires once per row during the loop"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "2536-2558",
+   "note": "UpdateSelectionCount: two full-row scans + indicator + run-button + canvas IPC"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "11272-11296",
+   "note": "UpdateRunButtonText re-runs GetCheckedHostCount (third scan) + Graphics text measure + layout"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "2343-2393",
+   "note": "ResolveLoadedFileSyncStatus disk stat + IsHostsGridUnsaved full snapshot deep-compare when dirty"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/CsvFileSyncEvaluator.cs",
+   "lines": "23-60",
+   "note": "Evaluate -> File.Exists + new FileInfo on every call"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "13430-13496",
+   "note": "ResolveTargetHostRow fourth full scan; SetTargetHost WebView2 message per row when canvas open"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

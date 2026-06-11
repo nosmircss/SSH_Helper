@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ENH-032 — SSH config load feedback</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;
+    font:12px "Cascadia Code",Consolas,monospace}
+  .cols{display:flex;gap:14px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    color:#8294a8;margin:0 0 6px 2px}
+  .cap b{color:#ff5c5c;font-weight:600}
+  .cap.good b{color:#2bd97c}
+  .panel{background:#10141c;border:1px solid #1c2330;border-radius:6px;
+    padding:10px 12px}
+  .sect{color:#4cc9f0;font-size:11px;border-bottom:1px solid #1c2330;
+    padding-bottom:4px;margin-bottom:8px}
+  .chk{display:flex;gap:7px;align-items:center}
+  .box{width:11px;height:11px;border:1px solid #8294a8;border-radius:2px;
+    flex:none;position:relative;background:#0b0e13}
+  .box.on{border-color:#4cc9f0}
+  .box.on::after{content:"✓";position:absolute;top:-3px;left:1px;
+    color:#4cc9f0;font-size:11px}
+  .note{color:#8294a8;font-size:11px;margin:5px 0 0 18px}
+  .status{margin:7px 0 0 18px;font-size:11px}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;
+    margin-right:5px;vertical-align:1px}
+  .g{background:#2bd97c}.a{background:#ffb454}
+  .lnk{color:#4cc9f0;text-decoration:underline;cursor:pointer}
+  .warns{margin:7px 0 0 18px;background:#0b0e13;border:1px solid #1c2330;
+    border-radius:5px;padding:7px 9px;font-size:11px}
+  .warns div{margin:3px 0;display:flex;gap:7px}
+  .ln{color:#8294a8;flex:none;width:52px}
+  .amber{color:#ffb454}.green{color:#2bd97c}.red{color:#ff5c5c}
+  .ghost{margin-top:9px;border-top:1px dashed #1c2330;padding-top:7px;
+    color:#8294a8;font-size:11px}
+  .ghost .red{font-weight:600}
+  .cfg{margin-top:10px;background:#10141c;border:1px solid #1c2330;
+    border-radius:6px;padding:8px 12px;font-size:11px;line-height:1.55}
+  .cfg .cap2{color:#8294a8;font-size:10px;letter-spacing:.1em;
+    text-transform:uppercase;margin-bottom:4px}
+  .k{color:#4cc9f0}.v{color:#c9d4e3}.cm{color:#8294a8}
+  .tag{font-size:10px;border-radius:3px;padding:0 4px;margin-left:6px}
+  .tag.drop{color:#ff5c5c;border:1px solid #ff5c5c}
+  .tag.bug{color:#ffb454;border:1px solid #ffb454}
+</style>
+</head>
+<body>
+
+<div class="cols">
+  <div class="col">
+    <p class="cap">Before — <b>silent checkbox, no feedback</b></p>
+    <div class="panel">
+      <div class="sect">SSH Config</div>
+      <div class="chk"><span class="box on"></span>Use SSH config file (~/.ssh/config)</div>
+      <div class="note">Path: C:\Users\chris\.ssh\config</div>
+      <div class="ghost">
+        Invisible to the user:<br>
+        &bull; only 6 directives parsed, rest <span class="red">silently dropped</span><br>
+        &bull; parse/I-O error &rarr; <span class="red">empty config</span>, no message<br>
+        &bull; <span class="red">!negation ignored</span> &rarr; options applied to
+        excluded hosts
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <p class="cap good">After — <b>load status + warnings</b></p>
+    <div class="panel">
+      <div class="sect">SSH Config</div>
+      <div class="chk"><span class="box on"></span>Use SSH config file (~/.ssh/config)</div>
+      <div class="note">Path: C:\Users\chris\.ssh\config</div>
+      <div class="status"><span class="dot g"></span>Loaded: 14 host blocks
+        &nbsp;<span class="dot a"></span>3 warnings &nbsp;<span class="lnk">Hide details</span></div>
+      <div class="warns">
+        <div><span class="ln">line 8</span><span class="green">negation
+          "!prod-fw01.corp.net" honored — entry excluded</span></div>
+        <div><span class="ln">line 23</span><span class="amber">ProxyJump
+          bastion.corp.net — not supported (ignored)</span></div>
+        <div><span class="ln">line 31</span><span class="amber">Include
+          ~/.ssh/work.d/* — not supported (ignored)</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cfg">
+  <div class="cap2">~/.ssh/config the user actually has</div>
+  <span class="k">Host</span> <span class="v">* !prod-fw01.corp.net</span>
+    <span class="tag bug">before: ! matched literally &rarr; options hit prod anyway</span><br>
+  &nbsp;&nbsp;<span class="k">IdentityFile</span> <span class="v">~/.ssh/lab_ed25519</span><br>
+  <span class="k">Host</span> <span class="v">core-sw* 10.20.30.*</span><br>
+  &nbsp;&nbsp;<span class="k">ProxyJump</span> <span class="v">bastion.corp.net</span>
+    <span class="tag drop">dropped, no hint</span><br>
+  <span class="k">Include</span> <span class="v">~/.ssh/work.d/*</span>
+    <span class="tag drop">dropped, no hint</span>
+  <span class="cm">&nbsp;&nbsp;# 14 host blocks live here</span>
+</div>
+
+</body>
+</html>

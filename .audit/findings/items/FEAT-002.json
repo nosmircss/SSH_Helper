@@ -1,0 +1,46 @@
+{
+ "id": "FEAT-002",
+ "title": "Scheduled job outcomes never reach the notification system or output panel — nightly failures are silent",
+ "category": "FEAT",
+ "severity": "high",
+ "effort": "M",
+ "area": "jobs-scheduling",
+ "lens": "cross",
+ "existing_state": "The app has a complete multi-channel NotificationService (SMTP, Teams, Toast, Webhook, with profiles, mentions, attachments; SendAsync at Services/Notifications/NotificationService.cs:83-114), but scheduled-job outcomes never use it. JobExecutionService.NotificationService (Services/JobExecutionService.cs:75) is only threaded into the per-run SshExecutionService (JobExecutionService.cs:410) to power the YAML `notify` script command — NotifyCommand.cs:66 is the sole caller of SendAsync — so a job only notifies if its script author hand-wrote notify steps, and a job that fails before/outside the script (credential resolution, connection failure, missing preset) can never notify. Form1's handlers do nothing user-visible: OnSchedulerJobCompleted (Form1.cs:15250-15256) just removes the id from _runNowJobIds and refreshes the status-bar countdown; OnSchedulerJobStateChanged (Form1.cs:15299-15304) only refreshes the status bar — despite the wiring comment 'Subscribe to execution events for output panel notifications' (Form1.cs:15073). A complete, tested formatter exists for exactly this — SchedulerNotificationFormatter.FormatCompletion/FormatStateChange (Utilities/SchedulerNotificationFormatter.cs:16-64) with [Scheduled:]/[Run Now:]/[Skipped:] prefixes — yet production code only calls ShouldShowStatusBar/FormatStatusBar/FormatTimeRemaining; FormatCompletion/FormatStateChange are referenced solely by tests, and the _runNowJobIds set (Form1.cs:167, 15309) exists only to pick a prefix that is never rendered. JobDefinition has zero notification-related fields. Net effect: a 2 AM backup job fails and there is no toast, no email, no Teams message, not even an output-panel line; the user finds out only by opening the Job List dialog and checking the Last Result column.",
+ "recommendation": "Two layers, both cheap given the existing pieces: (1) In Form1.OnSchedulerJobCompleted/OnSchedulerJobStateChanged, render SchedulerNotificationFormatter.FormatCompletion/FormatStateChange (using _runNowJobIds for the prefix — what it was built for) into the main output panel, red on failure. (2) Add per-job notification policy to JobDefinition (NotifyOnFailure defaulting from a global 'Notify on scheduled job failure' setting, NotifyOnSuccess opt-in, optional NotificationProfileName) surfaced as a small group on the JobEditorDialog Advanced tab; on JobCompleted per policy, dispatch via NotificationService.SendAsync (either inside JobExecutionService before raising the event, or in a small subscriber alongside JobHistoryService which already subscribes at Services/JobHistoryService.cs:41) with job name, host success/fail counts, ErrorMessage, and duration; failure-only by default to avoid noise from frequent cron jobs. A config-level default gives existing jobs failure alerts without re-editing each one.",
+ "user_benefit": "The entire point of a scheduler is unattended operation; today a failed nightly device backup against 200 hosts is invisible until someone manually opens the Job List dialog. This turns the existing notification machinery into actual ops alerting — table stakes for any scheduler (cron + mail, Ansible Tower, Rundeck).",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "15250-15256, 15299-15304",
+   "note": "JobCompleted/JobStateChanged handlers only touch _runNowJobIds and the status bar"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\SchedulerNotificationFormatter.cs",
+   "lines": "16-64",
+   "note": "FormatCompletion/FormatStateChange fully implemented; grep confirms production callers are limited to ShouldShowStatusBar/FormatStatusBar/FormatTimeRemaining"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "75, 410",
+   "note": "NotificationService property only threaded into the per-run SshExecutionService for the script 'notify' command"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\NotifyCommand.cs",
+   "lines": "66",
+   "note": "the sole caller of NotificationService.SendAsync"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "167, 15309, 15254, 15322",
+   "note": "_runNowJobIds tracked solely for a notification prefix that is never displayed"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Notifications\\NotificationService.cs",
+   "lines": "83-114",
+   "note": "SendAsync multi-channel dispatch exists and is ready to be called"
+  }
+ ],
+ "mockup_idea": "Before/after pair: Before — main window at 8 AM, output panel empty, status bar quietly showing 'Scheduler: 3 active', no hint that the 3 AM job failed. After — output panel shows '[03:00:12] [Scheduled: Nightly Backup] Failed — 4/200 hosts failed (12:31)' in red, a Windows toast 'Nightly Backup FAILED — 4 hosts unreachable', and the JobEditorDialog Advanced tab with a 'Notifications' group (Notify on failure [x], Notify on success [ ], Profile: [Slack #netops]) plus a preview of the message format.",
+ "merged_from": 3
+}

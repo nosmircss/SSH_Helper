@@ -1,0 +1,31 @@
+{
+ "id": "UX-040",
+ "title": "Branch identity is silently guessed when wiring container outputs; correcting it requires discovering a right-click edge menu",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-state",
+ "lens": "ux",
+ "existing_state": "Dragging a new wire out of a container infers the branch with no user input (inferDefaultBranchMetadata, FlowCanvas/src/stores/slices/graphSlice.ts:70-136): a second default-handle edge from an If becomes an elif with an EMPTY condition (graphSlice.ts:98-101) that looks valid on canvas until apply-time validation; a fourth edge from Try silently becomes a DUPLICATE 'catch' branch (graphSlice.ts:113); a Switch edge is always 'cases/N/do' — the inference can never author the 'default' arm (graphSlice.ts:116-125). The only way to fix any of this is right-clicking the edge to open EdgeContextMenu's branch editor (FlowCanvas/src/panels/EdgeContextMenu.tsx:59-88, 231-285), an affordance nothing on the canvas advertises; that editor also accepts any hand-typed Branch Index with no collision check against existing arms (EdgeContextMenu.tsx:331-348). connectionRules.ts permits the 4th Try edge rather than rejecting it (connectionRules.ts:40-47 lets containers emit unlimited empty-handle edges).",
+ "recommendation": "On onConnect from a container source, pop a lightweight branch-chooser popover anchored at the new edge (reuse EdgeContextMenu's editor body), pre-filled with the inferred branch: If → then/elif(+condition field)/else, Switch → case(+value)/default, Try → do/catch/finally. Reject the 4th Try edge in isConnectionAllowed with a connectionNotice ('Try already has do/catch/finally') instead of duplicating catch. Emit an immediate per-node warning diagnostic (existing diagnostics pipeline) for elif edges whose condition is empty, and validate index collisions in the edge editor.",
+ "user_benefit": "New users stop shipping broken elifs/duplicate catch arms they never knowingly created, and the (currently hidden) branch-editing capability surfaces exactly when it's needed — at wire time.",
+ "evidence": [
+  {
+   "file": "FlowCanvas/src/stores/slices/graphSlice.ts",
+   "lines": "70-136",
+   "note": "silent inference; elif condition:'' at 98-101; duplicate catch fallback at 113; switch never 'default' at 116-125"
+  },
+  {
+   "file": "FlowCanvas/src/panels/EdgeContextMenu.tsx",
+   "lines": "59-88, 231-285, 331-348",
+   "note": "right-click-only branch editor (incl. switch Default); free-typed Branch Index, no dedupe"
+  },
+  {
+   "file": "FlowCanvas/src/utils/connectionRules.ts",
+   "lines": "40-47",
+   "note": "containers may emit unlimited empty-handle branch edges — no guard when try's three branches are exhausted"
+  }
+ ],
+ "mockup_idea": "A small popover appearing at the just-dropped wire's midpoint: 'New branch from If' with radio options Then / Elif (inline condition input, focused) / Else, OK + 'use default' buttons; second frame shows the Switch variant with Case (value input) / Default.",
+ "merged_from": 1
+}

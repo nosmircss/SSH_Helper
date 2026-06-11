@@ -1,0 +1,36 @@
+{
+ "id": "UX-041",
+ "title": "Problems panel gives zero feedback when clean, and diagnostics evaporate on the first edit after every Apply",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-ui",
+ "lens": "ux",
+ "existing_state": "ProblemsPanel renders null unless it is both toggled on AND diagnostics exist (FlowCanvas/src/panels/ProblemsPanel.tsx:12) — clicking the toolbar's 'Problems' button on a clean graph does literally nothing, with no 'No problems' state to confirm the click registered. Diagnostics only ever arrive from the C# apply-result round-trip (stores/messageBridge.ts:199-205), and clearedExportStatusState() wipes both exportStatus and diagnostics on essentially every graph mutation (stores/slices/graphSlice.ts:23-30, applied at ~13 call sites: 235, 240, 322, 341, 417, 424, 455, 473, 506, 560, 595, 602, 612). So the panel is empty for almost the entire editing session, even though rich client-side validation already exists per-field (isPropertyRequired with conditional rules for readfile/http/interactive at Properties.tsx:870-923, inline red borders) — that knowledge is trapped inside the Properties pane of whichever single block is selected. A user with three blocks missing required fields discovers them one Apply-error round-trip at a time. Overlaps the roadmap's 'Problems Panel: Click-to-Fix Validation Router' (FLOW_CANVAS_ENHANCEMENTS.md:246-247); the live-lint half is what's missing.",
+ "recommendation": "1) Cheap fix: when visible && diagnostics.length === 0, render a small 'No problems' card instead of null (ProblemsPanel.tsx:12). 2) Real fix: compute client-side lint diagnostics in a selector — walk all block nodes, reuse isPropertyRequired/validation helpers from Properties.tsx (extract them to utils/validation.ts) to flag missing required fields per block — and merge these 'live' diagnostics with host apply-result ones in the panel and the toolbar error pill. Live entries survive edits (they recompute); host entries keep the current clear-on-mutation behavior.",
+ "user_benefit": "Authors see every incomplete block in one list while they build, instead of discovering errors serially through Apply round-trips or by clicking each block. The Problems button also stops feeling broken when the graph is clean.",
+ "evidence": [
+  {
+   "file": "FlowCanvas/src/panels/ProblemsPanel.tsx",
+   "lines": "12",
+   "note": "returns null when toggled with zero diagnostics — silent button"
+  },
+  {
+   "file": "FlowCanvas/src/stores/slices/graphSlice.ts",
+   "lines": "23-30, 235-612",
+   "note": "clearedExportStatusState wipes diagnostics on every mutation (~13 call sites)"
+  },
+  {
+   "file": "FlowCanvas/src/stores/messageBridge.ts",
+   "lines": "199-205",
+   "note": "diagnostics only populated from apply-result"
+  },
+  {
+   "file": "FlowCanvas/src/panels/Properties.tsx",
+   "lines": "870-923",
+   "note": "per-field conditional required validation already exists, but only for the selected block"
+  }
+ ],
+ "mockup_idea": "Problems panel two states: (a) clean graph showing a small 'No problems' card; (b) live-lint list: 'send #2 — command is required', 'http \"check api\" — token required when auth=bearer', each row deep-linking to its block.",
+ "merged_from": 1
+}

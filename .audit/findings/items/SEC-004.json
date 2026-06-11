@@ -1,0 +1,36 @@
+{
+ "id": "SEC-004",
+ "title": "http command leaks Authorization headers (Basic creds / bearer tokens) into script output and on-disk run history when debug is on",
+ "category": "SEC",
+ "severity": "critical",
+ "effort": "S",
+ "area": "scripting-commands-a",
+ "lens": "bugs",
+ "existing_state": "HttpCommand sets the Authorization header for basic/bearer auth (Services/Scripting/Commands/HttpCommand.cs:107-118), then emits the FULL serialized request headers to script output at HttpCommand.cs:145 via SerializeHeaders (HttpCommand.cs:298-315), which iterates request.Headers with no redaction — so 'Authorization: Basic <base64(user:pass)>' (trivially reversible to the plaintext password) or 'Bearer <token>' lands in the output stream. It also echoes the basic-auth username (line 109 authSummary, emitted at 143), the full request body (146-149), and the full response headers — including Set-Cookie / session tokens — and body (175-176). These are ScriptOutputType.Debug lines gated only on DebugMode (ScriptContext.cs:872-876), which is enabled by a plain `debug: true` directive in the YAML script (ScriptExecutor.cs:201-204) or the app's Debug Mode menu (Form1.cs:6460 -> SshExecutionService.cs:1301). Run output is persisted in plain text to disk in history payloads (Models/HistoryRunPayload.cs:9) under %LocalAppData%\\SSH_Helper\\history — so a one-time debug troubleshooting session durably writes API credentials to disk and into anything the user copies/shares from the output pane.",
+ "recommendation": "Redact sensitive headers in both SerializeHeaders overloads (HttpCommand.cs:282-315): mask Authorization, Proxy-Authorization, Cookie, Set-Cookie, and X-Api-Key values (e.g. emit 'Authorization: Basic ***' or value length only, mirroring the existing password_length pattern at line 109). Consider also masking the request body when auth mode is basic/bearer, or at minimum document that debug mode dumps bodies. This keeps debug mode useful (method, URL, non-sensitive headers, timing) without persisting secrets.",
+ "user_benefit": "Prevents API passwords and bearer tokens from being silently written to the output pane and plaintext history files every time someone turns on debug mode to troubleshoot a script — exactly the moment output tends to get copied into tickets and chat.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\HttpCommand.cs",
+   "lines": "107-118, 141-149, 171-176, 298-315",
+   "note": "Authorization header set, then emitted unredacted via SerializeHeaders(request); response headers/body also dumped"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+   "lines": "872-876",
+   "note": "Debug output suppressed only when DebugMode is false"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs",
+   "lines": "201-204",
+   "note": "Script-level `debug: true` flips context.DebugMode for the whole run"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HistoryRunPayload.cs",
+   "lines": "9",
+   "note": "Run Output persisted to disk in history payloads"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

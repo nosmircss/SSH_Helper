@@ -1,0 +1,51 @@
+{
+ "id": "PERF-029",
+ "title": "Flow Canvas per-node/per-edge store selectors do linear scans — O(edges x nodes) on every store update, fired at high rate during runs and drags",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-ui",
+ "lens": "perf",
+ "existing_state": "The canvas is one flat zustand store (FlowCanvas/src/stores/useFlowStore.ts:26-38); every set() re-runs every mounted component's selectors, and several hot ones are linear scans. Every AnimatedEdge subscribes to five selectors (nodes/AnimatedEdge.tsx:12-19), three of which scan per evaluation: selectEdgePathStatus does edges.find + nodes.find x2 plus a per-edge selectIterationScope ancestor walk that itself calls nodes.find per hop (stores/selectors/edgePath.ts:106-131, iterationScope.ts:33-48); selectEdgeIsRunningFrontier does edges.find + edges.some over all edges (edgePath.ts:83-90); selectEdgeIsBranch does edges.find + nodes.find. Every BaseBlock runs selectIterationScope too (nodes/BaseBlock.tsx:110), and with heatmap on additionally scans the entire blockTimings map for the max duration (BaseBlock.tsx:95-103); BranchBandsLayer subscribes to the whole nodes array and recomputes computeBranchBands unmemoized on every nodes change (nodes/BranchBandsLayer.tsx:13-22). Store updates fire at high rate during runs: one execution-update message fans out to ~8 separate set() calls (setBlockState is itself two sets — the Map plus updateNodeData, executionSlice.ts:64-77; then setBlockTiming, timeline add/update, setVariablesWithChanges, setLoopIteration, setBranchTaken, recordIterationEvent — messageBridge.ts:231-313), run-output chunks land every 50ms (Form1.cs:118, 13984), and node dragging fires onNodesChange per mousemove (graphSlice.ts:243-326). Net cost is O(E x (N+E)) per update — on a 150-block graph, hundreds of thousands of find() iterations per second inside WebView2, degrading the packet animation and drag smoothness exactly when the user is watching the run.",
+ "recommendation": "Three coordinated changes: (1) maintain id-indexed lookups (nodesById, edgesById, outEdgesBySource, id-to-parent index) in graphSlice alongside the arrays — or a module-level WeakMap memo keyed on the arrays — and use them in edgePath.ts/iterationScope.ts instead of find/some; (2) compute path status for ALL edges once per relevant state change (blockStates/branchTaken/loopIterations/pathVisible/iterationSelections) into a single Map<edgeId, status> selector and have each AnimatedEdge subscribe to map.get(id); (3) batch the execution-update handler's ~8 writes into one set() so one message produces one notification. Also precompute maxTimingDuration in executionSlice when setBlockTiming runs, and memoize computeBranchBands on a layout version counter.",
+ "user_benefit": "Smooth live-run animation and node dragging on realistic preset sizes; the canvas stops burning CPU during exactly the moments the user is watching it work — this is the scaling ceiling for big flows.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/selectors/edgePath.ts",
+   "lines": "83-90, 106-131",
+   "note": "edges.find/edges.some/nodes.find per edge per evaluation; selectIterationScope called per edge"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/selectors/iterationScope.ts",
+   "lines": "33-48",
+   "note": "ancestor walk with nodes.find per hop — called per block and per edge"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/nodes/AnimatedEdge.tsx",
+   "lines": "12-19",
+   "note": "five store subscriptions per edge instance"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/nodes/BaseBlock.tsx",
+   "lines": "95-103, 110-116",
+   "note": "per-block full blockTimings scan when heatmap on; per-block iterScope subscription"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/nodes/BranchBandsLayer.tsx",
+   "lines": "13-22",
+   "note": "subscribes to whole nodes array; computeBranchBands recomputed unmemoized every nodes change"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/messageBridge.ts",
+   "lines": "231-313",
+   "note": "one execution-update fires ~8 separate set() calls"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/executionSlice.ts",
+   "lines": "64-77",
+   "note": "setBlockState is two store updates (Map + updateNodeData), rewriting the nodes array per step event"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

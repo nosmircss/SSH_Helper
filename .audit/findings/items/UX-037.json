@@ -1,0 +1,36 @@
+{
+ "id": "UX-037",
+ "title": "Canvas load failures are completely silent — blank or stale canvas with no error surface and no handshake watchdog",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-bridge",
+ "lens": "ux",
+ "existing_state": "Three independent failure modes all end in a blank or stale canvas with zero user-visible feedback. (1) Form1.LoadCurrentScriptIntoCanvas wraps TextToGraph in `catch { // Silently fail — canvas will show empty state }` (Form1.cs:6886-6889): a YAML preset that parses in the editor but trips the bridge shows an empty canvas on fresh open — or, worse, on the window-reuse path (Form1.cs:6648-6655) the canvas silently keeps the PREVIOUS preset's graph. (2) There is no watchdog on the ready handshake: if React crashes before posting {type:'ready'}, every message including load-graph queues forever in _pendingMessages (UI/FlowCanvasForm.cs:352-362) and the status label was already hidden by NavigationCompleted success (145-153), leaving a dead white window. (3) Malformed messages and handler exceptions are Debug.WriteLine-only (UI/FlowCanvasForm.cs:208-211, 306-309), invisible in release builds.",
+ "recommendation": "In LoadCurrentScriptIntoCanvas's catch, send the canvas a visible error (the existing show-error/DialogTheme path or a dedicated load-error message rendered as a canvas banner) including ex.Message, and log via SshDebugLog. In FlowCanvasForm, start a ~10s timer after NavigationCompleted; if _reactReady is still false, re-show _statusLabel with 'Flow Canvas failed to start (press F12 for DevTools)' guidance. Route OnWebMessageReceived exceptions to the app debug log instead of Debug-only output.",
+ "user_benefit": "When the canvas breaks (bad dist after an update, a script that hits a bridge edge case), the user currently has no way to distinguish 'my script is empty' from 'the canvas is broken' — and may edit/apply against a stale graph from a different preset. A 10-line watchdog and one error banner turn a support mystery into a self-explanatory state.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "6886-6889",
+   "note": "Swallow-all catch with 'Silently fail' comment"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "6648-6655",
+   "note": "Reuse path: failed reload leaves the previous preset's graph on screen"
+  },
+  {
+   "file": "UI/FlowCanvasForm.cs",
+   "lines": "145-159, 222-227, 352-362",
+   "note": "Status label hidden on nav success; no ready timeout; messages queue forever"
+  },
+  {
+   "file": "UI/FlowCanvasForm.cs",
+   "lines": "200-212, 306-309",
+   "note": "Message/handler exceptions Debug-only"
+  }
+ ],
+ "mockup_idea": "The canvas window in its failed state: today a plain empty surface; after, a centered card 'Couldn't load this preset into the canvas: <parser message>' with 'Open YAML editor' and 'Copy details' buttons, plus the startup-timeout variant of the same card.",
+ "merged_from": 1
+}

@@ -1,0 +1,26 @@
+{
+ "id": "UX-050",
+ "title": "No Ctrl+S to apply the canvas graph, and the shortcut set is undiscoverable",
+ "category": "UX",
+ "severity": "low",
+ "effort": "S",
+ "area": "flowcanvas-state",
+ "lens": "ux",
+ "existing_state": "Applying the canvas back to YAML is only reachable via the Toolbar 'Apply YAML' button (FlowCanvas/src/panels/Toolbar.tsx:57-63, 219-221). The central shortcut handler (hooks/useKeyboardShortcuts.ts:26-157) wires Ctrl+Z/Y/C/V/F, Delete, Escape, Ctrl+Enter (test step), F5 (run), F10 (debug step) — but no Ctrl+S, the muscle-memory 'save' every editor user presses; in the WebView2 host it currently does nothing. None of these shortcuts (notably F5/F10/Ctrl+Enter) are listed anywhere in the UI — discovery is via button tooltips or source code.",
+ "recommendation": "Add a Ctrl+S branch in useKeyboardShortcuts that sends the same applyYaml payload as Toolbar.handleApplyYaml (guard on exportStatus.hasErrors like F5 does). Add a '?' / Ctrl+/ keyboard-shortcut cheat-sheet overlay (a static panel like SearchOverlay) listing the bindings, and mention Ctrl+S in the Apply button tooltip.",
+ "user_benefit": "Matches the save reflex from VS Code-class tools and makes the existing power shortcuts (F5 run, F10 step, Ctrl+Enter test) actually findable.",
+ "evidence": [
+  {
+   "file": "FlowCanvas/src/hooks/useKeyboardShortcuts.ts",
+   "lines": "26-157",
+   "note": "complete shortcut list; no Ctrl+S, no help overlay binding"
+  },
+  {
+   "file": "FlowCanvas/src/panels/Toolbar.tsx",
+   "lines": "57-63, 219-221",
+   "note": "Apply YAML is button-only"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

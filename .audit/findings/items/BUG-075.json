@@ -1,0 +1,36 @@
+{
+ "id": "BUG-075",
+ "title": "React Flow's default Backspace delete handler is still enabled — a second, snapshot-less delete pipeline that bypasses undo and dirty tracking",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-state",
+ "lens": "correctness",
+ "existing_state": "The app implements Delete/Backspace itself (hooks/useKeyboardShortcuts.ts:84-94) routing through `removeNodes`/`removeEdges`, which push undo snapshots and set isDirty (graphSlice.ts:427-476). But the <ReactFlow> element never sets `deleteKeyCode` (App.tsx:363-396), and the library default is 'Backspace' (node_modules/@xyflow/react/dist/esm/index.mjs:3586), so React Flow's internal delete handler is ALSO live, emitting removals through `onNodesChange`/`onEdgesChange` — paths that push no undo snapshot, and (for node removals) never set isDirty (graphSlice.ts:243-326; the remove branch at :317-323 returns no isDirty). The two pipelines disagree because selection state is tracked twice and only partially synced: `selectedEdgeIds` is only populated by explicit `selectEdge` calls (graphSlice.ts:478-483; `onEdgesChange` at :328-344 ignores edge 'select' changes), and `selectNodes` (used by paste, :629-631) sets the store Set without setting RF's `node.selected` flags. Whenever RF's internal selection has something the store Sets don't (e.g. edges selected via the selection box, or selected-flagged nodes restored by undo), Backspace deletes them through the snapshot-less RF path — un-undoable, and for nodes also not flagged dirty. The asymmetric key handling also means Backspace and Delete behave differently for the same selection.",
+ "recommendation": "Set `deleteKeyCode={null}` on the <ReactFlow> element in App.tsx so all deletions funnel through the app's own handler, and make that handler read RF's authoritative selection (nodes/edges with `selected === true`) in addition to the store Sets. As defense in depth, set `isDirty: true` in the `onNodesChange` remove branch (graphSlice.ts:317-323) to match `onEdgesChange`.",
+ "user_benefit": "Eliminates the class of 'I hit Backspace and Ctrl+Z won't bring it back' losses, and makes Delete/Backspace behave identically — deletions of wiring are structural edits to a preset and must always be undoable.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\App.tsx",
+   "lines": "363-396",
+   "note": "no deleteKeyCode override on ReactFlow"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\node_modules\\@xyflow\\react\\dist\\esm\\index.mjs",
+   "lines": "3586",
+   "note": "deleteKeyCode = 'Backspace' default in installed v12.10.1"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\graphSlice.ts",
+   "lines": "243-344, 478-483, 629-631",
+   "note": "RF-routed removals: no pushSnapshot, node removals no isDirty; selectedEdgeIds never synced from edge select changes; selectNodes doesn't set node.selected"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\hooks\\useKeyboardShortcuts.ts",
+   "lines": "84-94",
+   "note": "app's own delete path (snapshotting) only sees the store Sets"
+  }
+ ]
+}

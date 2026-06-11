@@ -1,0 +1,26 @@
+{
+ "id": "BUG-056",
+ "title": "Vault KV-version auto-detect defaults to V2 on a double-404, breaking restricted KV v1 mounts",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "integrations",
+ "lens": "correctness",
+ "existing_state": "When KvVersion is AutoDetect and the sys/mounts/{mount}/tune probe is forbidden or inconclusive, DetectKvVersionByHeuristicAsync probes `v1/{mount}/data/detect-kv-version-probe` then `v1/{mount}/detect-kv-version-probe`; if BOTH return 404 it unconditionally sets DetectedKvVersion = V2 (Services/Vault/VaultService.cs:664-665). For a genuine KV v1 mount whose policy does not grant the probe path (or simply has no such secret), both probes legitimately return 404, so the mount is then driven with V2 `data/`-prefixed read/write/list URLs (e.g. WriteSecretAsync VaultService.cs:160-168, ListSecretsAsync :204-207). Every subsequent operation fails or returns a misleading 'No secret found', and the user has no obvious way to know the version was guessed wrong.",
+ "recommendation": "On a double-404, do not silently assume V2. Prefer surfacing an explicit, actionable VaultException ('could not auto-detect KV version for mount X — set KV version explicitly in the profile') so the operator pins V1/V2 in Settings, or weight the heuristic by the mount's behavior (e.g. a 404 with a Vault-style errors body vs a routing 404). At minimum, document that AutoDetect is unreliable for locked-down v1 mounts and make the Settings KV-version dropdown default to an explicit choice.",
+ "user_benefit": "KV v1 users with least-privilege policies stop getting silent, misleading 'No secret found' failures and instead get a clear instruction to pin the KV version.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+   "lines": "645-666",
+   "note": "both-404 path defaults to V2"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+   "lines": "160-168",
+   "note": "V2 assumption injects data/ prefix into write URL"
+  }
+ ]
+}

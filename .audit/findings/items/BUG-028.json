@@ -1,0 +1,41 @@
+{
+ "id": "BUG-028",
+ "title": "Installing an update exits via Environment.Exit, skipping the shutdown save — session state lost and stale shutdown anchor fabricates 'missed run' history",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "cross-startup",
+ "lens": "data-integrity",
+ "existing_state": "UpdateService.LaunchUpdaterAndExit starts the PowerShell updater and calls Environment.Exit(0) (Services/UpdateService.cs:423-424), invoked from UpdateDialog after install confirmation (UpdateDialog.cs:576). Environment.Exit does not raise FormClosing, so Form1_FormClosing (Form1.cs:3932-3948) never runs: SaveConfiguration is skipped — losing window geometry/splitters, the active environment's grid snapshot, SavedState (host grid/selection/preset), recent files, sort order, username, and the host-password-to-Credential-Manager migration (Form1.cs:14625-14702) — _jobExecutionService.Stop() is never called, and LastAppShutdownUtc is never written (Form1.cs:3946). On the next launch, RecordMissedSchedulerRunsOnStartup (Form1.cs:15258-15283) anchors missed-run detection to the PREVIOUS clean shutdown, and DetectMissedRunSummaries counts every cron occurrence since that anchor with no check that the job actually ran (Services/SchedulingService.cs:148-181) — so every recurring run that genuinely executed during the pre-update session gets a false 'skipped N runs' summary written into job history. The pre-install ConfirmExitWorkflow hook (UpdateDialog.cs:563 -> Form1.cs:14891-14917) only resolves dirty CSV/preset prompts; it does not save config.",
+ "recommendation": "Before calling LaunchUpdaterAndExit in UpdateDialog (or inside the _confirmExitBeforeInstall callback in Form1), run the same shutdown sequence as Form1_FormClosing: stop the job execution service, set LastAppShutdownUtc, and call SaveConfiguration — then exit. Alternatively have LaunchUpdaterAndExit accept a pre-exit callback, or set _exitConfirmed and call the main form's Close() so the normal FormClosing path runs, starting the updater from FormClosed.",
+ "user_benefit": "Updating the app stops silently discarding the session's layout/host-grid state and stops polluting job history with bogus 'skipped run' records for jobs that actually ran.",
+ "mockup_idea": "",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\UpdateService.cs",
+   "lines": "388-425",
+   "note": "LaunchUpdaterAndExit ends with Environment.Exit(0) — FormClosing never fires"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "3932-3948",
+   "note": "the only place LastAppShutdownUtc is set and SaveConfiguration is called on shutdown"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "15258-15283",
+   "note": "RecordMissedSchedulerRunsOnStartup trusts LastAppShutdownUtc as the downtime start"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SchedulingService.cs",
+   "lines": "148-181",
+   "note": "DetectMissedRunSummaries counts every cron occurrence since the anchor with no run-history cross-check"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UpdateDialog.cs",
+   "lines": "563-576",
+   "note": "confirm-exit hook covers only dirty CSV/presets, then LaunchUpdaterAndExit"
+  }
+ ]
+}

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>BUG-039 — swallowed canvas load failure</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .row{display:flex;gap:12px}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{color:#ff5c5c;font-weight:600}.cap i{color:#2bd97c;font-style:normal;font-weight:600}
+  .win{border:1px solid #1c2330;border-radius:8px;overflow:hidden;background:#0d1118}
+  .tb{display:flex;align-items:center;gap:8px;padding:6px 8px;background:#10151e;border-bottom:1px solid #1c2330;font-size:11px}
+  .preset{color:#8294a8}.preset b{color:#4cc9f0;font-weight:600}
+  .btn{margin-left:auto;border:1px solid #1c2330;border-radius:4px;padding:2px 9px;font-size:10px;background:#141a24;color:#c9d4e3}
+  .btn+.btn{margin-left:0}
+  .btn.dis{opacity:.35}
+  .canvas{position:relative;height:188px;background:radial-gradient(#1c2330 1px,transparent 1px) 0 0/16px 16px}
+  .node{position:absolute;width:148px;border:1px solid;border-radius:6px;background:#121823;padding:4px 7px;font-size:10px;line-height:1.35}
+  .node .t{font-size:8px;letter-spacing:.1em;text-transform:uppercase;opacity:.75}
+  .ssh{border-color:#2a6f86;box-shadow:0 0 6px rgba(76,201,240,.18)}.ssh .t{color:#4cc9f0}
+  .cf{border-color:#8a6a2e}.cf .t{color:#ffb454}
+  .node code{color:#c9d4e3}
+  svg.wires{position:absolute;inset:0;width:100%;height:100%}
+  .wire{stroke:#33415a;stroke-width:1.5;fill:none}
+  .tag{position:absolute;font-size:9px;padding:2px 6px;border-radius:4px}
+  .stale{right:8px;top:8px;color:#ff5c5c;border:1px dashed #ff5c5c;background:rgba(255,92,92,.08)}
+  .foot{padding:6px 8px;font-size:10px;border-top:1px solid #1c2330;line-height:1.5}
+  .foot.bad{color:#ff5c5c}.foot.ok{color:#8294a8}
+  .banner{margin:34px 12px 0;border:1px solid #ff5c5c;border-left:3px solid #ff5c5c;border-radius:6px;background:rgba(255,92,92,.07);padding:8px 10px;font-size:10.5px;line-height:1.55}
+  .banner b{color:#ff5c5c}
+  .banner .yaml{display:block;margin-top:4px;color:#8294a8}
+  .banner .yaml em{color:#ffb454;font-style:normal}
+  .retry{color:#4cc9f0;text-decoration:underline;cursor:pointer}
+  .empty{position:absolute;bottom:10px;left:0;right:0;text-align:center;color:#3b4a5e;font-size:10px}
+</style></head><body>
+
+<p class="cap" style="margin-bottom:10px">BUG-039 &middot; Switching preset A &rarr; broken preset B with the canvas open &mdash; <span style="color:#c9d4e3">TextToGraph throws, the catch swallows it, no load-graph message is sent</span></p>
+
+<div class="row">
+  <div class="col">
+    <p class="cap"><b>Before</b> — failure swallowed, stale graph stays live</p>
+    <div class="win">
+      <div class="tb"><span class="preset">Preset: <b>fw-backup-rotate</b></span><span class="btn">Apply</span><span class="btn">&#9654; Run</span></div>
+      <div class="canvas">
+        <svg class="wires"><path class="wire" d="M84,40 V58"/><path class="wire" d="M84,96 V100 H44 V114"/><path class="wire" d="M158,96 V100 H198 V114"/></svg>
+        <div class="node ssh" style="left:10px;top:8px"><span class="t">send</span><br><code>show system status</code></div>
+        <div class="node cf" style="left:10px;top:58px"><span class="t">if</span><br><code>{{exit_code}} == 0</code></div>
+        <div class="node ssh" style="left:6px;top:114px;width:120px"><span class="t">send</span><br><code>get sys perf</code></div>
+        <div class="node ssh" style="left:160px;top:114px;width:120px"><span class="t">log</span><br><code>health FAIL {{Host_IP}}</code></div>
+        <span class="tag stale">still core-health-check's graph</span>
+      </div>
+      <div class="foot bad">Apply / Run export this stale graph &rarr; <u>fw-backup-rotate's YAML is overwritten</u> with core-health-check's script. Save persists it.</div>
+    </div>
+  </div>
+
+  <div class="col">
+    <p class="cap"><i>After</i> — explicit failure state, stale graph cleared</p>
+    <div class="win">
+      <div class="tb"><span class="preset">Preset: <b>fw-backup-rotate</b></span><span class="btn dis">Apply</span><span class="btn dis">&#9654; Run</span></div>
+      <div class="canvas">
+        <div class="banner">&#9888; <b>Could not load &quot;fw-backup-rotate&quot; into the canvas</b><br>
+          YAML parse error at line 14, col 7 &mdash; block mapping expected
+          <span class="yaml">14 | &nbsp;&nbsp;&nbsp;- send <em>execute backup tftp 10.20.4.9</em>&nbsp;&nbsp;&larr; missing key</span>
+          <span class="retry">Retry</span> &middot; fix in the script editor, then reload
+        </div>
+        <div class="empty">canvas cleared &mdash; nothing stale to export</div>
+      </div>
+      <div class="foot ok">LoadGraph([], []) + load-failed banner; Apply / Run disabled until a valid graph loads. Exception logged to SshDebugLog.</div>
+    </div>
+  </div>
+</div>
+
+</body></html>

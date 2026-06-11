@@ -1,0 +1,41 @@
+{
+ "id": "BUG-023",
+ "title": "Scheduled jobs do not block interactive presets — an unattended run pops a terminal window and hangs the job queue",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "terminal",
+ "lens": "reliability",
+ "existing_state": "The single-host-only preflight for `interactive:` only fires when `hostList.Count != 1` (Services/SshExecutionService.cs:564), and the unattended preflight covers LocalCmd confirmation only (SshExecutionService.cs:937-955). `JobExecutionService` runs presets via `sshService.ExecutePresetAsync(..., allowFileSelectionDialogs: false)` (Services/JobExecutionService.cs:687) which routes scripts to `ExecuteScriptAsync` (SshExecutionService.cs:476-478) — so a scheduled job targeting one host with an `interactive:` preset sails past every guard (grep confirms JobExecutionService contains zero interactive checks). At runtime the step marshals onto the main form's UI thread (InteractiveTerminalService.cs:3615-3638) and shows a real terminal window (1775-1907); window mode then awaits `formClosedTcs` with no timeout (1946). An overnight/unattended scheduled run therefore pops a terminal on the desktop and blocks forever until a human closes it — while holding the scheduler's `_concurrencyGate` semaphore (JobExecutionService.cs:84, 342-355), so subsequent scheduled jobs queue behind it indefinitely. Inconsistently, folder-type jobs ARE protected because `ExecuteFolderAsync` blocks interactive presets regardless of host count (SshExecutionService.cs:662-682).",
+ "recommendation": "Add an unattended-run preflight for interactive (and browser-callback) steps, exactly like the existing LocalCmd one: pass an `unattended`/`allowInteractive: false` flag from JobExecutionService through `ExecutePresetAsync`/`ExecuteScriptAsync`, and fail the job up front with a clear message ('interactive steps are not supported in scheduled jobs'). Optionally also warn at job-save time in JobEditorDialog using `ScriptDependencyAnalyzer.UsesInteractive`.",
+ "user_benefit": "A single mis-assigned preset currently wedges the entire scheduler overnight (jobs queue behind a window nobody is there to close). With the guard, the job fails fast with an actionable message instead of silently stalling automation.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "564",
+   "note": "interactive guard gated on hostList.Count != 1 — single-host jobs skip it"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "937-955",
+   "note": "unattended preflight exists but only for LocalCmd confirmation"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "687, 744",
+   "note": "jobs call ExecutePresetAsync/ExecuteFolderAsync with allowFileSelectionDialogs:false; no interactive check anywhere in the file"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "476-478, 662-682",
+   "note": "ExecutePresetAsync routes scripts to ExecuteScriptAsync; folder path blocks interactive regardless of host count (inconsistency)"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "1904-1946, 3615-3638",
+   "note": "window shown on the main form's UI thread; RunWindowLoopAsync awaits form close with no timeout"
+  }
+ ]
+}

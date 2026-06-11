@@ -1,0 +1,59 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;font-family:"Cascadia Code",Consolas,monospace;margin:12px;font-size:11px}
+.cap{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:0 0 5px 2px}
+.panel{border:1px solid #1c2330;border-radius:6px;overflow:hidden;margin-bottom:16px;background:#0d1117}
+.tb{display:flex;align-items:center;gap:2px;padding:0 8px;height:26px;background:#10151d;border-bottom:1px solid #1c2330}
+.sp{flex:1}
+.btn{font-size:10px;font-weight:600;padding:2px 7px;border-radius:5px;color:#8294a8;border:1px solid transparent;white-space:nowrap}
+.btn.on{background:rgba(76,201,240,.12);color:#4cc9f0;border-color:rgba(76,201,240,.4)}
+.btn.add{color:#2bd97c;border-color:rgba(43,217,124,.45);background:rgba(43,217,124,.08)}
+.fb{display:flex;align-items:center;gap:8px;padding:4px 8px;background:#10151d;border-bottom:1px solid #1c2330}
+.fi{flex:1;background:#0b0e13;border:1px solid #1c2330;border-radius:4px;padding:3px 6px;color:#c9d4e3}
+.cnt{font-size:10px;color:#8294a8;white-space:nowrap}
+.nav{font-size:10px;color:#4cc9f0;border:1px solid #1c2330;border-radius:4px;padding:1px 6px;background:#0b0e13}
+.kbd{font-size:9px;color:#8294a8;white-space:nowrap}
+.out{padding:8px;line-height:1.55;white-space:pre;overflow-x:hidden}
+.out div{min-height:17px}
+mark{background:#4cc9f0;color:#0b0e13;border-radius:2px;padding:0 1px}
+mark.cur{background:#ffb454;outline:2px solid rgba(255,180,84,.45)}
+.host{color:#4cc9f0}.err{color:#ff5c5c}.mut{color:#8294a8}
+.trunc{color:#8294a8;font-style:italic;font-size:10px;border-bottom:1px dashed #1c2330;padding-bottom:3px;margin-bottom:3px}
+.pill{font-size:8px;font-weight:700;background:#2bd97c;color:#0b0e13;border-radius:3px;padding:0 4px;margin-left:4px;vertical-align:1px;font-style:normal}
+.note{font-size:10px;color:#8294a8;margin:-6px 0 14px 2px}
+</style></head><body>
+
+<div class="cap">Before — find counts but can't jump; oldest lines silently gone</div>
+<div class="panel">
+ <div class="tb"><span class="sp"></span><span class="btn on">&#8981; Find</span><span class="btn">&#10515; Follow</span><span class="btn">&#8629; Wrap</span><span class="btn">&#127912; Color</span><span class="btn">&#10697; Copy</span><span class="btn">&#10530; Pop out</span></div>
+ <div class="fb"><span class="fi">error</span><span class="cnt">47 matches</span></div>
+ <div class="out">
+<div class="host">========== 10.20.4.17 (core-sw-03) ==========</div>
+<div>core-sw-03# show logging | include <mark>error</mark></div>
+<div class="err">%LINK-3-UPDOWN: <mark>error</mark> on Gi1/0/12: FCS <mark>error</mark>s exceed threshold</div>
+<div class="host">========== 10.20.4.21 (edge-fw-01) ==========</div>
+<div>edge-fw-01 # diagnose debug crashlog read</div>
+<div>[warn] <mark>error</mark> 0x2003: session helper timeout</div>
+<div class="mut">Done: 12 hosts, 2 with <mark>error</mark>s</div>
+ </div>
+</div>
+<div class="note">"47 matches" — then the user scrolls thousands of lines by hand. The first half of the run was dropped at 5000 lines with no trace. Only export: Copy to clipboard.</div>
+
+<div class="cap">After — jump between matches, truncation banner, save to file</div>
+<div class="panel">
+ <div class="tb"><span class="sp"></span><span class="btn on">&#8981; Find</span><span class="btn">&#10515; Follow</span><span class="btn">&#8629; Wrap</span><span class="btn">&#127912; Color</span><span class="btn">&#10697; Copy</span><span class="btn add">&#128190; Save&#8230;<span class="pill">NEW</span></span><span class="btn">&#10530; Pop out</span></div>
+ <div class="fb"><span class="fi">error</span><span class="cnt" style="color:#c9d4e3">3 of 47</span><span class="nav">&#9650;</span><span class="nav">&#9660;</span><span class="pill">NEW</span><span class="kbd">Enter &#8595; &middot; Shift+Enter &#8593;</span></div>
+ <div class="out">
+<div class="trunc">&#8212; output truncated, showing last 5000 lines &#8212;<span class="pill">NEW</span></div>
+<div class="host">========== 10.20.4.17 (core-sw-03) ==========</div>
+<div>core-sw-03# show logging | include <mark>error</mark></div>
+<div class="err">%LINK-3-UPDOWN: <mark>error</mark> on Gi1/0/12: FCS <mark class="cur">error</mark>s exceed threshold</div>
+<div class="host">========== 10.20.4.21 (edge-fw-01) ==========</div>
+<div>edge-fw-01 # diagnose debug crashlog read</div>
+<div>[warn] <mark>error</mark> 0x2003: session helper timeout</div>
+<div class="mut">Done: 12 hosts, 2 with <mark>error</mark>s</div>
+ </div>
+</div>
+<div class="note">Current match in amber, auto-scrolled into view. Save&#8230; posts to the C# host (SaveFileDialog) so a run log can land on a ticket.</div>
+
+</body></html>

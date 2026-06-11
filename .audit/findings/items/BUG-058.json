@@ -1,0 +1,26 @@
+{
+ "id": "BUG-058",
+ "title": "Connection tests cannot be cancelled once started",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "form1-b",
+ "lens": "ux",
+ "existing_state": "TestSelectedConnections creates `_connectionTestCts` and handles OperationCanceledException (Form1.cs:8899-8900, 8949-8953), but a repo-wide search shows no code path ever calls `.Cancel()` — the CTS is only created (8899) and disposed (8958-8959). With all checked rows tested at `config.ConnectionTimeout` seconds each, capped to 5 concurrent (SemaphoreSlim(5), 8910), a fleet of unreachable hosts means e.g. 200 hosts x 10s / 5 = ~7 minutes of unstoppable 'Testing...' overlays, during which `_isTestingConnections` (8877) blocks starting another test, and the main Stop button only stops `_sshService` (StopExecution, Form1.cs:13282-13299), not this run.",
+ "recommendation": "Wire a cancel affordance: morph the status-bar progress area (or grid context menu) into 'Cancel test' while `_isTestingConnections` is true and have it call `_connectionTestCts.Cancel()`; pass the token's cancellation into the per-row visual cleanup so stuck 'Testing...' overlays are cleared. Also guard the result paint at 8935 with the same `hostIpColIndex >= 0` check used at 8922.",
+ "user_benefit": "Accidentally testing a large checked set against a dead network segment currently locks the feature for minutes with no way out except waiting or killing the app.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8875-8961",
+   "note": "CTS created/disposed, OCE handled, but no Cancel() call exists anywhere (verified by repo-wide grep of _connectionTestCts)"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13282-13299",
+   "note": "StopExecution only stops _sshService, not connection tests"
+  }
+ ]
+}

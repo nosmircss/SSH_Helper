@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-028",
+ "title": "Three parallel selection/clipboard extractors and two snapshot builders in the terminal — the duplication already produced the detached-mode color loss",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "terminal",
+ "lens": "perf",
+ "existing_state": "Selection-to-text exists three times: against the live Rebex buffer (BuildSelectionClipboardText, Services/Terminal/InteractiveTerminalService.cs:3497-3541), as a viewport-snapshot fallback (UI/InteractiveTerminalViewportControl.cs:696-736), and as a detached-mode string[] variant (Forms/InteractiveTerminalForm.cs:698-737) — each with its own clamping/padding/TrimEnd rules. Screen-snapshot building also exists twice: the real one with palette/bold/cursor handling (InteractiveTerminalService.cs:3333-3469) and RenderDetachedHistorySnapshot (InteractiveTerminalForm.cs:589-676), a from-scratch reimplementation fed by plain text from BuildClipboardText at detach time (service 1044-1058) that hard-fills monochrome defaults (form 607-610). The visible defect this duplication causes: the instant a capture step detaches (timeout/Ctrl+C/max-lines/natural complete), a fully colored screen snaps to flat gray-on-black because colors were discarded in the text round-trip. CombineHash is also copy-pasted in both files (service 3583-3589, form 678-684).",
+ "recommendation": "At detach time, capture the final live state as a full-buffer TerminalScreenSnapshot (characters + colors for history+screen, built by the existing BuildScreenSnapshot machinery extended to cover the history range) instead of round-tripping through BuildClipboardText text, and have detached mode render/select from that one structure. That deletes RenderDetachedHistorySnapshot's parallel builder and BuildDetachedSelectionText, collapses selection extraction to the buffer-model implementation, and fixes the color loss as a side effect.",
+ "user_benefit": "Detached read-only windows keep the colors users were just looking at, and copy/selection behavior stops being three subtly different implementations that must be fixed in triplicate.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "3497-3541",
+   "note": "live-buffer selection extractor"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/InteractiveTerminalViewportControl.cs",
+   "lines": "696-736",
+   "note": "viewport-snapshot selection extractor (fallback)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Forms/InteractiveTerminalForm.cs",
+   "lines": "698-737",
+   "note": "detached-mode selection extractor over string[]"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Forms/InteractiveTerminalForm.cs",
+   "lines": "589-676",
+   "note": "second snapshot builder; lines 607-610 fill monochrome defaults, losing all color on detach"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "1044-1058",
+   "note": "detach path flattens the colored buffer to plain text via BuildClipboardText"
+  }
+ ],
+ "mockup_idea": "Side-by-side of the same capture window at the moment of detach: left (current) shows the htop/ls --color output collapsed to uniform gray-on-black with the 'Detached (read-only)' title; right (proposed) shows the identical frame with its colors preserved.",
+ "merged_from": 1
+}

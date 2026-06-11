@@ -1,0 +1,26 @@
+{
+ "id": "BUG-049",
+ "title": "assert substitutes variable text into the condition before parsing — quotes/operators in data break or alter the expression (diverges from if)",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-a",
+ "lens": "correctness",
+ "existing_state": "AssertCommand textually substitutes variables into the condition string and then parses the result as an expression (`context.SubstituteVariables(step.Assert.Condition)` then `evaluator.Evaluate(condition)`, Services/Scripting/Commands/AssertCommand.cs:18-24), whereas IfCommand passes the raw condition to the same ExpressionEvaluator, which resolves variable references internally (IfCommand.cs:24-28). Consequence: for `assert: '\"{{output}}\" contains \"up\"'`, any double quote, backslash, or operator-looking text in the device output is spliced into the expression source — typically producing 'Assert condition evaluation failed' (caught at 26-31, fails the step) on data that the logically identical `if:` handles fine; in unlucky cases the spliced text parses as a different expression and the assertion evaluates the wrong thing. Real device output (banners, JSON, quoted strings) hits this routinely, and the same condition string behaves differently between if and assert.",
+ "recommendation": "Have AssertCommand pass step.Assert.Condition raw to ExpressionEvaluator exactly like IfCommand (delete the SubstituteVariables call at line 18; keep substitution for the `message` only). If some existing scripts rely on {{var}} splicing inside assert conditions, support both: try raw evaluation first and only fall back to substituted text when the raw parse references no resolvable form — but converging on the if semantics is the clean fix.",
+ "user_benefit": "Assertions stop failing spuriously (or evaluating the wrong predicate) whenever device output contains quotes or operator characters, and if/assert finally agree on what the same condition string means.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\AssertCommand.cs",
+   "lines": "18-31",
+   "note": "substitute-then-parse; parse exception fails the step"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\IfCommand.cs",
+   "lines": "24-28",
+   "note": "if passes the raw condition; evaluator resolves variables itself"
+  }
+ ]
+}

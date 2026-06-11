@@ -1,0 +1,36 @@
+{
+ "id": "BUG-067",
+ "title": "HostConnection.Parse silently mangles IPv6 addresses into wrong hosts; explicit port 22 is overridden by ssh-config",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "models-samples-build",
+ "lens": "correctness",
+ "existing_state": "HostConnection.Parse splits the Host_IP value on ':' and takes parts[0] as the address (Models/HostConnection.cs:45-51). Any IPv6 literal is silently truncated — `2001:db8::1` becomes host \"2001\" port 22, and `[::1]:2222` becomes host \"[\" — with no error; the app then attempts an SSH connection to the garbage hostname. This is on real execution paths: the main-form run (Form1.cs:13317, 14201) and scheduled jobs (Services/JobExecutionService.cs:497). It compounds in jobs: TryGetExplicitPortFromHostValue at JobExecutionService.cs:500 treats any ':'-containing Host_IP as having an explicit port, so the per-row `port` column override is also skipped for IPv6 entries. Related defect in the same file: ApplySshConfig only honors the grid port when it equals 22 (`if (Port == 22 && config.Port.HasValue)`, HostConnection.cs:75-77), so a user who deliberately enters `host:22` to pin the standard port gets it silently replaced by a different Port directive from ~/.ssh/config when EnableSshConfig is on.",
+ "recommendation": "In Parse, first try System.Net.IPAddress.TryParse on the whole string (bare IPv6 -> address, port 22), support bracket syntax `[v6]:port`, and only then fall back to the single-colon host:port split (e.g. treat inputs with more than one ':' and no brackets as a bare IPv6 address). Mirror the same recognition in JobExecutionService.TryGetExplicitPortFromHostValue. For ApplySshConfig, track whether the port was explicitly supplied (e.g. a nullable backing field or a flag set by Parse when ':port' was present) instead of comparing against the default 22.",
+ "user_benefit": "IPv6-managed fleets currently cannot be targeted at all — entries fail with misleading connect errors against a truncated hostname — and ssh-config users can have a deliberately pinned port silently changed.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HostConnection.cs",
+   "lines": "38-54",
+   "note": "Split(':') truncates IPv6 literals to the first hextet; no bracket handling"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HostConnection.cs",
+   "lines": "75-77",
+   "note": "Port==22 used as 'not explicitly set' sentinel in ssh-config merge"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "494-506",
+   "note": "Parse consumed for job hosts; ':' in value also suppresses the port column override"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13317, 14201",
+   "note": "Main-form execution paths parse Host_IP through the same code"
+  }
+ ]
+}

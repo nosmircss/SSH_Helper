@@ -1,0 +1,31 @@
+{
+ "id": "ENH-042",
+ "title": "All 71 expression functions are invisible to the script editor's autocomplete",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "samples-docs",
+ "lens": "cross",
+ "existing_state": "The engine registers 71 unique built-in functions across 8 categories (verified by extracting every Register() call in Services/Scripting/Functions/*.cs), and FunctionRegistry already exposes them programmatically via RegisteredNames (FunctionRegistry.cs:90). The Scintilla editor's ScriptAutocompleteProvider never touches any of this: a grep for 'function' in ScriptAutocompleteProvider.cs returns zero hits. Interpolation completion (the `${`/`{{` context, ScriptAutocompleteProvider.cs:44-45, 319, 450-456) offers only the 10 hardcoded BuiltInSymbols (lines 92-104), variables scraped from the script text, and host-grid columns — so typing `${jso` or writing a `set:` expression gets no help for json.get, regex_match, date_add, ip_in_cidr, etc. Users must keep SCRIPTING.md open to recall names and arity. Related but distinct: FLOW_CANVAS_ENHANCEMENTS.md:254-256 ('Engine Codex') proposes a bundled function catalog with signature help for the React canvas's code fields — that roadmap item explicitly notes the metadata (arity/help/examples) is not machine-readable today, and it does not cover the WinForms Scintilla editor at all.",
+ "recommendation": "Phase 1 (cheap): inject FunctionRegistry.RegisteredNames into the interpolation and set-expression completion contexts in ScriptAutocompleteProvider — names-only completion with the category as the Detail string, mirroring how CommandDescriptions feeds command completion (lines 116-161). Phase 2: extend the IFunctionCategory registration API with signature/description metadata (the exact prerequisite the Engine Codex roadmap item needs), then surface calltips in Scintilla and reuse the same generated catalog for the canvas — one metadata investment serving both editors.",
+ "user_benefit": "The expression library is the engine's power feature, and right now it is discoverable only by reading a 6,400-line markdown file; name completion alone would let users find string/JSON/network helpers at the moment they need them.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptAutocompleteProvider.cs",
+   "lines": "92-104, 319, 450-456",
+   "note": "interpolation completion = 10 hardcoded symbols + scraped variables + host columns; zero function references in file"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\FunctionRegistry.cs",
+   "lines": "90",
+   "note": "RegisteredNames already exposes all 71 names — unused by the editor"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FLOW_CANVAS_ENHANCEMENTS.md",
+   "lines": "31, 254-256",
+   "note": "roadmap covers the React-canvas side only and flags the missing metadata; Scintilla editor not in scope there"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

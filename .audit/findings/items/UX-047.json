@@ -1,0 +1,26 @@
+{
+ "id": "UX-047",
+ "title": "Execution Details dialog can never be resized despite being built for it",
+ "category": "UX",
+ "severity": "low",
+ "effort": "S",
+ "area": "dialogs-jobs-history",
+ "lens": "ux",
+ "existing_state": "ExecutionDetailsDialog sets Size 980x680, a MinimumSize of 760x520, and anchors its tab control on all four sides (ExecutionDetailsDialog.cs:58-71) — all resize plumbing — but FormBorderStyle is FixedDialog with MaximizeBox=false (ExecutionDetailsDialog.cs:60-62), so none of it can ever engage. Long command text on the Summary tab, wide per-host Context variable values, and Interactive-session transcripts are permanently confined to a 980x680 window with internal scrollbars; the only escape is Save to File and reading the .txt externally.",
+ "recommendation": "Change FormBorderStyle to Sizable and set MaximizeBox=true in ExecutionDetailsDialog's constructor (ExecutionDetailsDialog.cs:60-62). The MinimumSize and anchor layout already present make this safe; mirror the sibling RunOutputViewerDialog which is already Sizable with MaximizeBox=true (RunOutputViewerDialog.cs:38-39).",
+ "user_benefit": "Forensic review of long transcripts and wide variable snapshots gets the full monitor instead of a fixed window — a one-line change that removes daily squinting for anyone using execution history.",
+ "evidence": [
+  {
+   "file": "ExecutionDetailsDialog.cs",
+   "lines": "58-71",
+   "note": "MinimumSize + four-way anchors prepared for resize, but FixedDialog + MaximizeBox=false prevent it"
+  },
+  {
+   "file": "RunOutputViewerDialog.cs",
+   "lines": "36-39",
+   "note": "Sibling history viewer is Sizable with MaximizeBox=true — the intended pattern"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

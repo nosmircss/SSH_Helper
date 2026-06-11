@@ -1,0 +1,36 @@
+{
+ "id": "ENH-013",
+ "title": "Breakpoints evaporate on every canvas reload or preset switch (disabled blocks survive, breakpoints don't)",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "flowcanvas-bridge",
+ "lens": "ux",
+ "existing_state": "Breakpoint toggles are stored in Form1's _pendingBreakpoints HashSet keyed by React node id (Form1.cs:182, 6756-6771). Node ids are regenerated as node-{counter} on every TextToGraph import (Services/FlowCanvasBridge.cs:330-331), so any reload — reopening the canvas, switching presets, the run-start re-map — invalidates them. At run start they are filtered against the fresh map fail-quiet (Form1.cs:12344-12356) and the set is cleared in PrepareFlowCanvasExecutionStateForRunStart (Form1.cs:13811-13824). Disabled blocks and expanded state DO persist per-preset via CanvasLayoutData and are re-applied by MergeAuxiliaryLayout (FlowCanvasBridge.cs:5444-5463), but breakpoints have no equivalent: they are absent from ExtractLayout/CanvasLayoutData entirely. The project memory also notes the React-side breakpoints Set isn't cleared across preset switches, so stale red dots can render while C# ignores them. Net effect: a user who sets breakpoints, closes the canvas, reopens it, and runs gets no pause — debugger state that VS Code-class tools always persist.",
+ "recommendation": "Persist breakpoints the same way disabled blocks already persist: add BreakpointNodeIds (stored as stepPath:blockType tuples like positions, so they survive structural-safe edits) to CanvasLayoutData, capture them in ExtractLayout/ApplyLayoutAutosave, re-key them to the fresh node ids in MergeAuxiliaryLayout during LoadCurrentScriptIntoCanvas, seed _pendingBreakpoints from the merge result, and include them in the load-graph payload so the React store replaces (not unions) its breakpoints Set on load.",
+ "user_benefit": "Debugging a 30-step provisioning script across sessions stops requiring the user to re-find and re-click every breakpoint each time they reopen the canvas or flip between presets; it also kills the confusing 'red dot shown but never pauses' state.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "182, 6756-6771",
+   "note": "Node-id-keyed pending breakpoint set"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12344-12356, 13811-13824",
+   "note": "Fail-quiet filtering at run start; set cleared on every run"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "330-331",
+   "note": "Ids regenerate per import"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "5444-5463",
+   "note": "MergeAuxiliaryLayout restores disabled/expanded — no breakpoint equivalent"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>PERF-001 — Run freezes on UI-thread Vault resolution</title>
+<style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px/1.45 "Cascadia Code",Consolas,monospace}
+h1{font-size:12px;font-weight:600;margin:0 0 3px}
+.sub{font-size:10px;color:#8294a8;margin:0 0 8px}
+.cap{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:11px 0 5px}
+.dr{color:#ff5c5c}.dg{color:#2bd97c}
+.win{border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden}
+.tbar{display:flex;align-items:center;gap:8px;background:#10151d;border-bottom:1px solid #1c2330;padding:4px 9px;font-size:10px}
+.tbar .btns{margin-left:auto;color:#8294a8;letter-spacing:3px}
+.nr{color:#ffb454}
+.tools{display:flex;align-items:center;gap:7px;padding:5px 9px;border-bottom:1px solid #1c2330;font-size:10px}
+.btn{border:1px solid #1c2330;background:#10151d;border-radius:3px;padding:1px 9px}
+.run{color:#03222e;background:#4cc9f0;border-color:#4cc9f0}
+table{border-collapse:collapse;width:100%;font-size:10px}
+th{color:#8294a8;font-weight:400;text-align:left;border-bottom:1px solid #1c2330;padding:2px 9px}
+td{padding:2px 9px;border-bottom:1px solid #141a25;white-space:nowrap}
+td.v{color:#4cc9f0}
+.more td{color:#8294a8;border-bottom:none}
+.frozen .grid,.frozen .tools{opacity:.42;filter:saturate(.4)}
+.ovl{position:relative}
+.ovl .hang{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#0b0e13a8}
+.hang span{border:1px solid #ff5c5c55;background:#1a0d10;color:#ff5c5c;border-radius:4px;padding:4px 12px;font-size:10px}
+.stack{font-size:9.5px;color:#8294a8;border:1px solid #1c2330;border-left:3px solid #ff5c5c;border-radius:4px;background:#0e1219;padding:6px 10px;margin:6px 0 0}
+.stack b{color:#c9d4e3;font-weight:600}
+.stack .x{color:#ff5c5c}
+.strip{display:flex;align-items:center;gap:9px;padding:5px 9px;border-bottom:1px solid #1c2330;font-size:10px;background:#0d1f29}
+.spin{color:#4cc9f0}
+.bar{flex:1;max-width:200px;height:6px;background:#10151d;border:1px solid #1c2330;border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;width:19%;background:#4cc9f0}
+.cancel{border:1px solid #ff5c5c66;color:#ff5c5c;background:#10151d;border-radius:3px;padding:0 9px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0;font-size:9px}
+.tag{border:1px solid #2bd97c44;background:#2bd97c12;color:#2bd97c;border-radius:3px;padding:1px 7px}
+.foot{margin-top:11px;font-size:10px;color:#8294a8;border-top:1px solid #1c2330;padding-top:6px}
+.foot b{font-weight:600}
+</style></head><body>
+<h1>PERF-001 · Run blocks the UI thread on per-host Vault resolution — cold cache = permanent deadlock</h1>
+<p class="sub">GetHostConnections().ToList() runs before any await; each vault_path row calls .GetAwaiter().GetResult() on an async HTTPS read.</p>
+
+<div class="cap"><span class="dr">●</span> Before — Run pressed on a 200-row grid with vault_path (cold cache)</div>
+<div class="win frozen ovl">
+ <div class="tbar">SSH Helper — Production <span class="nr">(Not Responding)</span><span class="btns">— ▢ ✕</span></div>
+ <div class="tools"><span class="btn run">▶ Run</span><span class="btn">Stop</span><span class="btn">Preset: fw-baseline.yaml</span></div>
+ <div class="grid"><table>
+  <tr><th>Host_IP</th><th>username</th><th>vault_path</th></tr>
+  <tr><td>10.20.4.11</td><td>admin</td><td class="v">secret/network/fw-edge-01</td></tr>
+  <tr><td>10.20.4.12</td><td>admin</td><td class="v">secret/network/fw-edge-02</td></tr>
+  <tr><td>10.20.7.30</td><td>svc-net</td><td class="v">secret/network/core-sw-01</td></tr>
+  <tr class="more"><td colspan="3">… 197 more rows — window frozen, no progress, no cancel ⌛</td></tr>
+ </table></div>
+ <div class="hang"><span>UI thread blocked — repaint, Stop and ✕ all dead</span></div>
+</div>
+<div class="stack">
+ <b>UI thread:</b> Run → GetHostConnections().ToList() <i>(Form1.cs:12277)</i> → row 1 vault_path → TryGetPassword → <span class="x">.GetAwaiter().GetResult()</span> <i>(VaultCredentialProvider.cs:48)</i><br>
+ <b>HTTP:</b> ReadSecretKeysAsync → first await posts continuation to the <span class="x">blocked WinForms context → deadlock, forever</span>. No ConfigureAwait(false) in VaultService.<br>
+ Warm cache (≤300 s after a background job) merely freezes: 200 sequential HTTPS round-trips; an expired OIDC token runs a 180 s browser login inside the block.
+</div>
+
+<div class="cap"><span class="dg">●</span> After — credentials resolve in the background, UI stays live</div>
+<div class="win">
+ <div class="tbar">SSH Helper — Production<span class="btns">— ▢ ✕</span></div>
+ <div class="strip"><span class="spin">◐</span> Resolving credentials… <b>37/200</b> · vault: 12 pending, 4 in flight
+  <span class="bar"><i></i></span><span class="cancel">Cancel</span></div>
+ <div class="tools"><span class="btn run">▶ Run</span><span class="btn">Stop</span><span class="btn">Preset: fw-baseline.yaml</span></div>
+ <table>
+  <tr><th>Host_IP</th><th>username</th><th>vault_path</th></tr>
+  <tr><td>10.20.4.11</td><td>admin</td><td class="v">secret/network/fw-edge-01 <span style="color:#2bd97c">✓</span></td></tr>
+  <tr><td>10.20.4.12</td><td>admin</td><td class="v">secret/network/fw-edge-02 <span style="color:#2bd97c">✓</span></td></tr>
+  <tr><td>10.20.7.30</td><td>svc-net</td><td class="v">secret/network/core-sw-01 <span style="color:#4cc9f0">◐</span></td></tr>
+  <tr class="more"><td colspan="3">… grid scrolls, repaints, and cancels while resolution runs</td></tr>
+ </table>
+</div>
+<div class="tags">
+ <span class="tag">snapshot cells on UI thread, then await ResolveHostConnectionsAsync</span>
+ <span class="tag">200 rows → 23 distinct vault paths, deduped</span>
+ <span class="tag">SemaphoreSlim(4) concurrent fetches</span>
+ <span class="tag">single-flight auth — one OIDC browser, ever</span>
+ <span class="tag">CredWrite moved out of the row loop</span>
+</div>
+
+<p class="foot">Cold cache today: <b class="dr">permanent hang — kill the process</b>. After: <b class="dg">~23 deduped fetches, 4-way parallel ≈ seconds</b>, with visible progress and Cancel. Same fix covers preset, folder, and connection-test entry points.</p>
+</body></html>

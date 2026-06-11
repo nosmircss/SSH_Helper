@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-005",
+ "title": "Function dispatch is split across three unsynchronized layers — the most-used built-ins bypass the registry, creating a silent-shadowing trap and blocking function tooling",
+ "category": "ARCH",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-functions",
+ "lens": "perf",
+ "existing_state": "The ~112-name callable function surface is dispatched through three independent layers. (1) FunctionRegistry registers 8 category classes = 71 functions (Services/Scripting/FunctionRegistry.cs:92-102) and is the only enumerable layer (Count/RegisteredNames, FunctionRegistry.cs:85-90). (2) Twenty legacy functions — including the most-used ones: length, trim, upper, lower, replace, split, join, sort, first, last, indexof, concat, substring — live in a hardcoded switch in JsonUtilities.TryEvaluateFunctionExpression (Services/Scripting/JsonUtilities.cs:347-564), reached only after a registry miss (JsonUtilities.cs:343-345); StringFunctions registers contains/startswith/pad/regex_*/format/uuid etc. but NOT those core names, so they live permanently outside the Functions/ category architecture CLAUDE.md guideline 3 designates for built-ins. (3) The json.* family is a third hardcoded switch (JsonUtilities.cs:679-770). Concrete consequences verified: (a) because the registry is consulted FIRST and Register() silently overwrites duplicates (FunctionRegistry.cs:37-43), registering any new function whose name collides with a legacy one (e.g. adding 'replace' to StringFunctions with the library's usual ignore-case semantics, while legacy replace is case-SENSITIVE Ordinal at JsonUtilities.cs:394, vs the OrdinalIgnoreCase string operators in conditions at ExpressionEvaluator.cs:124-148) silently changes the behavior of every existing script — no error, no warning; (b) unknown-function behavior is inconsistent by call position: in condition context ExpressionParser.ResolveFunction throws FormatException 'Unknown function' (Services/Scripting/ExpressionParser.cs:422-436), but in value context ResolveJsonValue silently falls through to variable lookup and finally returns the typo as a literal string (JsonUtilities.cs:307-333), so `set: x = uper(host)` assigns the text 'uper(host)'. Finally, Services/Editor/ScriptAutocompleteProvider.cs contains zero references to FunctionRegistry or any function name (verified by grep), so the editor offers no completion for any of the ~112 functions — and it cannot be built correctly today because RegisteredNames under-reports the surface by ~40%.",
+ "recommendation": "Consolidate to one dispatch table. Port the 20 legacy switch cases into a category class registered in FunctionRegistry.RegisterBuiltInCategories (behavior-preserving — keep replace case-sensitive unless explicitly decided otherwise); route json.* through the registry as dotted names (TryParseFunctionCall already accepts '.' in names, JsonUtilities.cs:584), reducing TryEvaluateFunctionExpression to registry-only dispatch. Make Register throw (or Debug.Assert) on duplicate names to convert the silent-shadowing trap into a build-time failure. Then make ResolveJsonValue's fall-through explicit: if TryParseFunctionCall succeeds but the name is unknown, emit a script warning instead of resolving the call text as a literal. This unblocks editor autocomplete and parser-time function-name validation as follow-ups.",
+ "user_benefit": "Eliminates a trap where adding any new built-in can silently change the meaning of existing fleet scripts, makes function typos visible instead of producing literal garbage values, and unblocks editor autocomplete/validation for the whole function surface.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/JsonUtilities.cs",
+   "lines": "343-564",
+   "note": "registry-first dispatch then 20-case legacy switch; case-sensitive replace at :394"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/JsonUtilities.cs",
+   "lines": "307-333, 679-770",
+   "note": "silent literal fall-through for unknown functions in value context; json.* third dispatch switch"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ExpressionParser.cs",
+   "lines": "422-437",
+   "note": "condition context throws FormatException for the same unknown name"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/FunctionRegistry.cs",
+   "lines": "25, 37-43, 85-102",
+   "note": "Register overwrites silently; RegisteredNames only sees 71 of ~112 names"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptAutocompleteProvider.cs",
+   "lines": "",
+   "note": "grep for FunctionRegistry / function names returns zero matches — no editor support exists or can be built on the current registry"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

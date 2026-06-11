@@ -1,0 +1,31 @@
+{
+ "id": "PERF-037",
+ "title": "Embedded Flow Canvas dist extractions accumulate forever — already 91 copies / 49 MB on this machine",
+ "category": "PERF",
+ "severity": "low",
+ "effort": "S",
+ "area": "cross-startup",
+ "lens": "perf",
+ "existing_state": "FlowCanvasDistLocator extracts the embedded React bundle to a per-BuildTimestamp directory under flow-canvas-dist in AppData (Utilities/FlowCanvasDistLocator.cs:114-119) — a fresh directory for every distinct build — and nothing anywhere deletes prior version directories. Verified live: this machine currently holds 91 timestamped directories totaling 49 MB, growing ~0.5 MB per build/release; since the app self-updates via GitHub releases, end users accumulate one copy per update indefinitely. The same pattern exists for scintilla-native per packageVersion (Utilities/ScintillaNativeBootstrap.cs:61-72; 2.3 MB here, slower-growing). Additionally, extraction skips any file that already exists without size/integrity check (FlowCanvasDistLocator.cs:136-137, ScintillaNativeBootstrap.cs:115-118), so a partially-written file from a crashed first extraction is trusted forever.",
+ "recommendation": "After a successful extraction in ExtractEmbeddedDistToAppData, enumerate sibling directories under flow-canvas-dist and best-effort Directory.Delete(recursive:true) every one except the current version segment (swallow IOException for dirs locked by a concurrent instance). Apply the same sweep to scintilla-native. While there, replace the bare File.Exists skip with a length comparison against the resource stream so truncated extractions self-heal.",
+ "user_benefit": "Stops silent unbounded AppData growth on every release for every user (already ~50 MB on the dev machine) and removes the corrupt-canvas-until-AppData-is-manually-deleted failure mode from interrupted extractions.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/FlowCanvasDistLocator.cs",
+   "lines": "103-148",
+   "note": "per-BuildTimestamp extraction dir; no cleanup of old versions; File.Exists skip at 136-137"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/ScintillaNativeBootstrap.cs",
+   "lines": "56-72, 113-118",
+   "note": "same versioned-extraction pattern, same no-cleanup and existence-only skip"
+  },
+  {
+   "file": "C:/Users/nos/AppData/Local/SSH_Helper/flow-canvas-dist",
+   "lines": "",
+   "note": "live evidence: 91 version directories, 49 MB total"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,31 @@
+{
+ "id": "BUG-043",
+ "title": "int()/float() return 0 on unparseable input, making 'parse failed' indistinguishable from a genuine zero in threshold logic",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-functions",
+ "lens": "correctness",
+ "existing_state": "TypeFunctions.ToInt returns 0 when the input cannot be parsed as a number (Services/Scripting/Functions/TypeFunctions.cs:27-46 — the final `return 0;` at line 45 covers any non-numeric string); ToFloat returns 0.0 the same way (TypeFunctions.cs:48-62). Combined with regex_match returning \"\" on no-match (StringFunctions.cs:197), a common monitoring pattern like `if: int(regex_match(output, \"(\\\\d+)% used\", 1)) > 90` silently evaluates to `0 > 90` = false whenever the device output format shifts — the alert branch simply never fires, on every host, with no signal. Conversely `if: int(x) == 0` fires the zero-branch on garbage input. There is no way for a script to distinguish these cases today.",
+ "recommendation": "Return null on parse failure instead of 0 (the engine already handles null values distinctly throughout ValueResolver/comparison logic), and/or add an optional second argument `int(x, default)` so scripts can opt into a fallback explicitly. If backward compatibility forbids changing the return, at minimum emit a runtime warning through the step output so multi-host runs show that a conversion failed.",
+ "user_benefit": "Threshold and health-check scripts are this app's bread and butter; today a format change in device output silently disables alerts fleet-wide. Distinguishing parse failure from zero makes those scripts trustworthy.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\TypeFunctions.cs",
+   "lines": "27-46",
+   "note": "ToInt: non-numeric string falls through to `return 0;`"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\TypeFunctions.cs",
+   "lines": "48-62",
+   "note": "ToFloat: same pattern, returns 0.0"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\StringFunctions.cs",
+   "lines": "194-208",
+   "note": "regex_match returns \"\" on no-match — composes with int() into a silent false condition"
+  }
+ ]
+}

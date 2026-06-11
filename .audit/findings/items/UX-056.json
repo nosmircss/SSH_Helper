@@ -1,0 +1,26 @@
+{
+ "id": "UX-056",
+ "title": "Default sample presets are unlabeled FortiGate CLI commands",
+ "category": "UX",
+ "severity": "low",
+ "effort": "S",
+ "area": "cross-startup",
+ "lens": "ux",
+ "existing_state": "CreateDefaultConfiguration (Services/ConfigurationService.cs:427-440) seeds exactly two presets: 'Custom' → 'get system status' and 'Get external-address-resource list' → 'dia sys external-address-resource list'. Both are FortiGate-specific CLI, presented in the preset tree with no folder, no '(sample)' label, and no comment — a new user pointing the app at Linux or Cisco hosts who runs the pre-selected preset just gets command-not-found errors. The same two presets are also re-created after every corruption fallback (Load() returns CreateDefaultConfiguration at ConfigurationService.cs:99-101), so they can reappear and shadow a user's mental model.",
+ "recommendation": "Replace the defaults with a 'Samples' folder containing vendor-neutral, clearly named entries — e.g. 'Sample: show system info' with a YAML script that uses send + a comment header explaining variables ({{Host_IP}}), and one tiny YAML sample demonstrating if/foreach so the scripting engine is discoverable. Prefix names with 'Sample:' or put them in a 'Samples' folder so they are visibly deletable boilerplate. ScriptSamples/ already has material to draw from.",
+ "user_benefit": "First-run presets become a teaching aid instead of a vendor-specific trap; users on non-FortiGate fleets stop hitting confusing failures from the only two buttons the app gives them.",
+ "evidence": [
+  {
+   "file": "Services/ConfigurationService.cs",
+   "lines": "427-440",
+   "note": "Hardcoded FortiGate commands as the only default presets, no sample labeling"
+  },
+  {
+   "file": "Services/ConfigurationService.cs",
+   "lines": "99-101",
+   "note": "Corruption fallback re-seeds the same presets"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

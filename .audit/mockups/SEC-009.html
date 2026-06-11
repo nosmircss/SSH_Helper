@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SEC-009 — Tooltip secret echo</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .cols{display:flex;gap:12px}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 6px;color:#8294a8}
+  .cap b{font-weight:600}
+  .cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+  .editor{background:#0e131b;border:1px solid #1c2330;border-radius:6px;padding:8px 10px;line-height:1.55;white-space:pre;overflow:hidden}
+  .ln{color:#3a4659;display:inline-block;width:18px;text-align:right;margin-right:10px;user-select:none}
+  .k{color:#4cc9f0}.s{color:#9fb5cc}.v{color:#ffb454}
+  .hov{position:relative;border-radius:3px;outline:1px solid #4cc9f0;background:rgba(76,201,240,.10);padding:0 1px}
+  .cur{position:absolute;right:-11px;bottom:-9px;font-size:11px;color:#c9d4e3;text-shadow:0 0 3px #000}
+  .tip{margin:8px 0 0 46px;display:inline-block;background:#161d29;border:1px solid #2a3547;border-radius:4px;padding:5px 9px;box-shadow:0 4px 10px rgba(0,0,0,.45);position:relative}
+  .tip::before{content:"";position:absolute;top:-5px;left:16px;width:8px;height:8px;background:#161d29;border-left:1px solid #2a3547;border-top:1px solid #2a3547;transform:rotate(45deg)}
+  .leak{color:#ff5c5c;font-weight:600}
+  .mask{color:#2bd97c}
+  .meta{color:#8294a8;font-size:10px;margin-top:3px}
+  .chips{margin-top:8px}
+  .chips .h{font-size:10px;color:#8294a8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em}
+  .chip{display:block;background:#10151e;border:1px solid #1c2330;border-radius:4px;padding:3px 8px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ok{color:#c9d4e3}
+  .foot{margin-top:10px;border-top:1px solid #1c2330;padding-top:7px;color:#8294a8;font-size:10.5px;line-height:1.5}
+  .foot code{color:#4cc9f0}
+</style>
+</head>
+<body>
+<div class="cols">
+
+  <div class="col">
+    <p class="cap"><b class="bad">Before</b> — dwell 250 ms, secret on screen for 3 s</p>
+    <div class="editor"><span class="ln">12</span><span class="k">- name:</span><span class="s"> Set admin password</span>
+<span class="ln">13</span><span class="k">  send:</span><span class="s"> |</span>
+<span class="ln">14</span><span class="s">    config system admin</span>
+<span class="ln">15</span><span class="s">    edit admin</span>
+<span class="ln">16</span><span class="s">    set password </span><span class="hov v">${_password}</span><span class="cur">&#10148;</span></div>
+    <div class="tip">${_password} = <span class="leak">Sup3rS3cret!</span><div class="meta">host 10.20.4.17 &middot; visible in screen shares</div></div>
+    <div class="chips">
+      <div class="h">Same hover, other tokens</div>
+      <span class="chip">{{password}} = <span class="leak">r00t/EnGage!</span></span>
+      <span class="chip">${VAULT_TOKEN} = <span class="leak">hvs.CAESIJk3f9Qx2…</span></span>
+      <span class="chip">{{Host_IP}} = <span class="ok">10.20.4.17</span></span>
+    </div>
+  </div>
+
+  <div class="col">
+    <p class="cap"><b class="good">After</b> — sensitive names masked in resolvers</p>
+    <div class="editor"><span class="ln">12</span><span class="k">- name:</span><span class="s"> Set admin password</span>
+<span class="ln">13</span><span class="k">  send:</span><span class="s"> |</span>
+<span class="ln">14</span><span class="s">    config system admin</span>
+<span class="ln">15</span><span class="s">    edit admin</span>
+<span class="ln">16</span><span class="s">    set password </span><span class="hov v">${_password}</span><span class="cur">&#10148;</span></div>
+    <div class="tip">${_password} = <span class="mask">[set — hidden]</span><div class="meta">12 chars &middot; from host grid</div></div>
+    <div class="chips">
+      <div class="h">Same hover, other tokens</div>
+      <span class="chip">{{password}} = <span class="mask">[set — hidden]</span></span>
+      <span class="chip">${VAULT_TOKEN} = <span class="mask">[set — hidden]</span></span>
+      <span class="chip">{{Host_IP}} = <span class="ok">10.20.4.17</span> <span class="meta" style="display:inline">&larr; non-sensitive stays useful</span></span>
+    </div>
+  </div>
+
+</div>
+<div class="foot">
+  Mask when the variable/column name matches <code>password | passwd | secret | token | key | vault</code>, plus <code>${_password}</code> always.
+  Applied in Form1 + JobEditorDialog tooltip resolvers — script execution is untouched; only the on-screen echo changes.
+</div>
+</body>
+</html>

@@ -1,0 +1,36 @@
+{
+ "id": "BUG-054",
+ "title": "Shared-session exit/logout guard is trivially bypassed, killing the pooled shell mid-script while the step reports success",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "terminal",
+ "lens": "reliability",
+ "existing_state": "In shared mode, typing `exit`/`logout` is supposed to detach the window instead of terminating the pooled shell the rest of the script depends on. But `ShouldBlockSharedShellCommand` matches only the exact trimmed strings \"exit\" and \"logout\" (Services/Terminal/InteractiveTerminalService.cs:2952-2960), and the guard's local line buffer resets to empty on any navigation/control key (3160-3165, with a comment acknowledging it). So `exit 0`, `exit;`, `;exit`, or pressing an arrow key before typing `exit` all reach the host and terminate the shared shell. The disconnect then closes the window with reason `disconnected`, which `RunSharedAsync` still returns as success (line 310, see BUG-030), and every subsequent SSH step in the script fails against the dead pooled session with unrelated-looking connection errors. `SyncAfterInteractive` no-ops because the client is no longer connected (SshShellSession.cs:346-347).",
+ "recommendation": "Stop trying to reconstruct the command line client-side. Either (a) extend the match to a regex like ^\\s*(exit|logout)\\b on the buffer and additionally treat shared-mode shell termination as a step failure with a clear message ('shared session terminated from interactive window'), or (b) accept the bypass but detect the shared session's death on window close (sharedSession.IsConnected) and fail/flag the step there so the run stops with an accurate error instead of cascading confusing failures.",
+ "user_benefit": "A user habitually typing `exit 0` in the shared window currently nukes the script's SSH session and gets a wall of misleading errors from later steps; this makes the failure immediate, accurate, and attributable.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "2952-2960",
+   "note": "exact-match exit/logout only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "3160-3165",
+   "note": "guard buffer resets on any nav/control key — acknowledged in comment"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "310",
+   "note": "shared window closing as 'disconnected' still returns Ok to the script step"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshShellSession.cs",
+   "lines": "346-347",
+   "note": "SyncAfterInteractive silently no-ops once the shared client is dead"
+  }
+ ]
+}

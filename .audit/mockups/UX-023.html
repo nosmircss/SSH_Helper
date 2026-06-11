@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX-023 — confirm gets a real Cancel</title>
+<style>
+  body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{font-weight:600}
+  .cap .bad{color:#ff5c5c}.cap .good{color:#2bd97c}
+  .grid{display:flex;gap:14px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .win{border:1px solid #1c2330;border-radius:6px;background:#121723;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+  .tb{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#0e1320;border-bottom:1px solid #1c2330;border-radius:6px 6px 0 0;color:#8294a8;font-size:11px}
+  .tb .x{color:#8294a8}
+  .bd{padding:12px 12px 11px}
+  .prompt{line-height:1.45;margin:0 0 14px;min-height:48px}
+  .ip{color:#4cc9f0}
+  .btns{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+  .btn{padding:5px 16px;border:1px solid #2a3447;border-radius:3px;background:#1a2130;color:#c9d4e3;white-space:nowrap}
+  .btn.primary{border-color:#4cc9f0;color:#4cc9f0;background:rgba(76,201,240,.08)}
+  .btn.cancel{margin-right:auto;border-color:#1c2330;color:#8294a8;background:transparent}
+  .btn.cancel:hover{border-color:#ff5c5c;color:#ff5c5c}
+  .note{margin:8px 2px 0;font-size:11px;line-height:1.5;color:#8294a8}
+  .note .k{display:inline-block;padding:0 5px;border:1px solid #2a3447;border-radius:3px;background:#11151d;color:#c9d4e3;font-size:10px}
+  .note .bad{color:#ff5c5c}.note .good{color:#2bd97c}.note .var{color:#ffb454}
+  .contract{margin-top:14px;border:1px solid #1c2330;border-radius:6px;background:#0e1320;padding:9px 12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  .contract .t{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8}
+  .pair{font-size:11px;white-space:nowrap}
+  .pair .arr{color:#46556b}
+  pre{margin:8px 0 0;padding:8px 10px;background:#0e1320;border:1px solid #1c2330;border-radius:4px;font-size:11px;line-height:1.5;color:#c9d4e3;overflow-x:auto}
+  pre .key{color:#4cc9f0}pre .str{color:#2bd97c}pre .new{color:#ffb454}
+</style>
+</head>
+<body>
+
+<div class="grid">
+  <div class="col">
+    <p class="cap"><b>Before</b> — <span class="bad">ESC / close = answers "No"</span></p>
+    <div class="win">
+      <div class="tb"><span>Script Confirmation</span><span class="x">&#10005;</span></div>
+      <div class="bd">
+        <p class="prompt">Reboot core switch <span class="ip">sw-core-01 (10.20.4.11)</span>?<br>All 14 access switches lose uplink for ~90s.</p>
+        <div class="btns">
+          <span class="btn primary">Yes</span>
+          <span class="btn">No</span>
+        </div>
+      </div>
+    </div>
+    <p class="note"><span class="k">Esc</span> or <span class="k">&#10005;</span> silently maps to <b>No</b> &rarr; <span class="var">reboot_ok = "false"</span> and the script <span class="bad">keeps running</span>. An operator who wants to abort the whole run here has no way to say so.</p>
+  </div>
+
+  <div class="col">
+    <p class="cap"><b>After</b> — <span class="good">allow_cancel: true</span></p>
+    <div class="win">
+      <div class="tb"><span>Script Confirmation</span><span class="x">&#10005;</span></div>
+      <div class="bd">
+        <p class="prompt">Reboot core switch <span class="ip">sw-core-01 (10.20.4.11)</span>?<br>All 14 access switches lose uplink for ~90s.</p>
+        <div class="btns">
+          <span class="btn cancel">Cancel run</span>
+          <span class="btn primary">Yes</span>
+          <span class="btn">No</span>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>No</b> still answers the question (<span class="var">reboot_ok = "false"</span>, script continues). <span class="k">Esc</span> / <span class="k">&#10005;</span> now hit <b>Cancel run</b>: the step fails with <i>"cancelled by user"</i> routed through <span class="good">on_error</span>, and <span class="var">reboot_ok_cancelled = true</span> is set for branching.</p>
+  </div>
+</div>
+
+<div class="contract">
+  <span class="t">One contract, all prompts</span>
+  <span class="pair">Yes <span class="arr">&rarr;</span> <span style="color:#2bd97c">"true", continue</span></span>
+  <span class="pair">No <span class="arr">&rarr;</span> <span style="color:#c9d4e3">"false", continue</span></span>
+  <span class="pair">Cancel <span class="arr">&rarr;</span> <span style="color:#ff5c5c">step fails &rarr; on_error / on_cancel</span></span>
+</div>
+
+<pre>- <span class="key">confirm</span>:
+    <span class="key">prompt</span>: <span class="str">"Reboot core switch {{Host_IP}}?"</span>
+    <span class="key">into</span>: reboot_ok
+    <span class="new">allow_cancel: true</span>      <span style="color:#46556b"># new — distinct from No</span>
+  <span class="new">on_cancel: exit</span>          <span style="color:#46556b"># same contract for input / choose / multiselect / readfile / writefile</span></pre>
+
+</body>
+</html>

@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-047",
+ "title": "Dead drift-tracking machinery still hashes every preset on every job save",
+ "category": "ARCH",
+ "severity": "low",
+ "effort": "S",
+ "area": "jobs-scheduling",
+ "lens": "perf",
+ "existing_state": "TargetContentHash, FolderPresetHashes, and HasDriftWarning are explicitly documented as legacy compatibility fields that execution no longer consults (Models/JobDefinition.cs:144-153, 198-201), yet JobEditorDialog.ValidateAndSave still recomputes them on every save: it SHA-hashes the target preset's content, and for folder jobs hashes every preset in the folder (JobEditorDialog.cs:2076-2099), then resets HasDriftWarning (line 2133). A repo-wide search shows zero production readers — the only other production touch is JobExportService clearing HasDriftWarning on export (Services/JobExportService.cs:146); everything else is tests (including a test named RunNowAsync_IgnoresLegacyDriftWarning confirming the executor ignores it, SSH_Helper.Tests/Services/JobExecutionServiceTests.cs:318). The hashes bloat jobs.json (a 50-preset folder job stores 50 hashes that are rewritten on every RunningState save, per the jobs.json finding) and mislead anyone reading the code into thinking drift detection is live.",
+ "recommendation": "Delete the hash computation block from ValidateAndSave (JobEditorDialog.cs:2076-2099) and the HasDriftWarning reset; keep the three model properties for one release so old jobs.json files still deserialize (or mark them [Obsolete] / JsonIgnore-on-write), then remove them and the legacy-semantics tests. Per the project's own 'Delete Before You Build' directive this is a standalone cleanup commit.",
+ "user_benefit": "Smaller, faster job saves and a jobs.json that contains only data the app actually uses; future maintainers stop reasoning about a drift feature that no longer exists.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobEditorDialog.cs",
+   "lines": "2076-2099, 2133",
+   "note": "Hashes recomputed for target preset and every folder preset on every save; only production writer"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/JobDefinition.cs",
+   "lines": "144-153, 198-201",
+   "note": "All three fields documented as legacy compatibility"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobExportService.cs",
+   "lines": "146",
+   "note": "Only other production reference: clearing the flag on export"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

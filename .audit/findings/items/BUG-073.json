@@ -1,0 +1,31 @@
+{
+ "id": "BUG-073",
+ "title": "Flow Canvas layout autosave races preset switches: the previous preset's positions and sticky notes overwrite the newly active preset",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-bridge",
+ "lens": "data-integrity",
+ "existing_state": "React debounces layout-autosave by 300ms (FlowCanvas/src/utils/layoutAutosave.ts:14-17) and nothing cancels the pending timer when a new graph loads. On the C# side, ApplyLayoutAutosave resolves the destination preset from `_activePresetName` AT MESSAGE-ARRIVAL TIME with no identity check in the payload (Form1.cs:2419-2424). Switching presets sets `_activePresetName` first and then reloads the canvas (LoadPresetIntoEditor, Form1.cs:2156-2160). So: drag a block (or toggle expand/disable — debugSlice.ts:75-104 also autosaves), switch presets within ~300ms, and the stale autosave lands on the NEW preset — Positions are cleared and replaced with the old preset's node positions (Form1.cs:2433-2443), and layout.Comments is cleared and replaced with the old preset's canvas notes (Form1.cs:2450-2472). Sticky-kind notes live ONLY in CanvasLayoutData, so the new preset's notes are destroyed and the old preset's notes appear on it; because node ids are deterministically `node-{counter}` for every preset, the corrupted positions also pass the Manual-mode structure-hash merge on the next load.",
+ "recommendation": "Tag the canvas session with the preset identity: when Form1 sends load-graph, include the active preset name (or a session token), have React echo it back on every layout-autosave/set-layout-mode, and have ApplyLayoutAutosave drop payloads whose preset doesn't match `_activePresetName`. Cheaper stopgap: capture `_activePresetName` into a field when LoadCurrentScriptIntoCanvas sends the graph and route autosaves to that captured name instead of the live one.",
+ "user_benefit": "Manual layouts and canvas sticky notes are user-authored work; a routine preset switch can currently scramble one preset's arrangement and permanently delete its notes with no error.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "2419-2472",
+   "note": "ApplyLayoutAutosave keys off live _activePresetName, clears+replaces Positions and Comments from the payload"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\layoutAutosave.ts",
+   "lines": "8-23",
+   "note": "300ms debounce; flush only on layout-mode switch, not on load-graph/preset switch"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "2148-2160",
+   "note": "preset switch updates _activePresetName then reloads the canvas — the race window"
+  }
+ ]
+}

@@ -1,0 +1,31 @@
+{
+ "id": "BUG-050",
+ "title": "input validate regex runs with no timeout on the UI thread — a pathological pattern freezes the whole app",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-a",
+ "lens": "reliability",
+ "existing_state": "InputCommand compiles the user-supplied `validate:` pattern with `new Regex(step.Input.Validate, RegexOptions.Compiled)` and no match timeout (Services/Scripting/Commands/InputCommand.cs:41). The match executes in the dialog's OK handler on the UI thread (`_validationRegex.IsMatch(_txtInput.Text)` in BtnOk_Click, InputCommand.cs:209). A backtracking-prone pattern (e.g. `^(\\w+\\s?)*$`) combined with a longish non-matching input hangs the entire WinForms message pump indefinitely — no Stop button, no recovery except killing the process. The codebase already has the fix pattern: ScriptRegexDefaults.UserPatternTimeout (5s, Services/Scripting/ScriptRegexDefaults.cs:10) is used for the same class of user-authored patterns in ExtractCommand.cs:60 and ExpressionEvaluator.cs:98 — input validation is the one place it was missed.",
+ "recommendation": "Pass ScriptRegexDefaults.UserPatternTimeout as the third Regex constructor argument at InputCommand.cs:41, and catch RegexMatchTimeoutException in BtnOk_Click (treat as validation failure with a 'pattern timed out' message). Optionally drop RegexOptions.Compiled, which buys nothing for a few interactive matches.",
+ "user_benefit": "A typo'd validation regex in a script can no longer hard-freeze the app mid-fleet-run at an interactive prompt, taking the unsent work of the whole run with it.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\InputCommand.cs",
+   "lines": "36-47",
+   "note": "Regex compiled without timeout"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\InputCommand.cs",
+   "lines": "204-217",
+   "note": "IsMatch on the UI thread in BtnOk_Click"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptRegexDefaults.cs",
+   "lines": "8-10",
+   "note": "5s UserPatternTimeout exists and is used by extract and the expression evaluator"
+  }
+ ]
+}

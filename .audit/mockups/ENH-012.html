@@ -1,0 +1,78 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.dlg{border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden;margin-bottom:14px}
+.tbar{background:#11161f;border-bottom:1px solid #1c2330;padding:5px 10px;color:#8294a8;font-size:11px}
+.bar{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #1c2330}
+.btn{border:1px solid #1c2330;background:#141a25;color:#c9d4e3;border-radius:4px;padding:3px 10px;font-size:11px}
+.btn.go{border-color:#2bd97c;color:#2bd97c}
+.combo{border:1px solid #1c2330;background:#141a25;border-radius:4px;padding:3px 8px;width:220px;display:flex;justify-content:space-between}
+.out{padding:8px 10px;white-space:pre;overflow:hidden;font-size:11px;line-height:1.5}
+.mut{color:#8294a8}.red{color:#ff5c5c}.grn{color:#2bd97c}.amb{color:#ffb454}.cyn{color:#4cc9f0}
+.note{font-size:10px;color:#ffb454;padding:0 10px 8px}
+.split{display:flex;min-height:240px}
+.side{width:200px;border-right:1px solid #1c2330;background:#0c1018;flex:none}
+.chips{display:flex;gap:5px;padding:7px 8px 4px}
+.chip{border:1px solid #1c2330;border-radius:9px;padding:1px 8px;font-size:10px;color:#8294a8}
+.chip.on{border-color:#4cc9f0;color:#4cc9f0;background:rgba(76,201,240,.08)}
+.filt{margin:4px 8px 6px;border:1px solid #1c2330;border-radius:4px;padding:2px 7px;color:#8294a8;font-size:10px}
+.hl{list-style:none;margin:0;padding:0;font-size:11px}
+.hl li{display:flex;align-items:center;gap:6px;padding:3px 10px}
+.hl li.sel{background:rgba(76,201,240,.1);border-left:2px solid #4cc9f0;padding-left:8px}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.d-r{background:#ff5c5c}.d-a{background:#ffb454}
+.st{margin-left:auto;font-size:9px}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.hdr{color:#ff5c5c;background:rgba(255,92,92,.07)}
+.foot{font-size:10px;color:#8294a8;margin-top:2px}
+</style></head><body>
+
+<p class="cap">Before — RunOutputViewerDialog today (combobox is the only navigation)</p>
+<div class="dlg">
+ <div class="tbar">Run Output — nightly-backup-check &nbsp;·&nbsp; 2026-06-10 02:00 &nbsp;·&nbsp; 200 hosts</div>
+ <div class="bar"><span class="mut">Host:</span>
+  <span class="combo"><span>10.0.3.41 &nbsp;|&nbsp; <span class="red">FAIL</span></span><span class="mut">▾</span></span>
+  <span class="btn">Find</span><span class="btn">Copy All</span>
+ </div>
+ <div class="out"><span class="red">[10.0.3.41] ERROR: write /var/backups/db.tar.gz: No space left on device</span>
+<span class="mut">exit status 1</span></div>
+ <div class="note">▲ 7 of 200 hosts failed overnight — finding them = opening the dropdown and scanning 200 entries. “Copy All” copies only this host. No Save to File (manual-run viewer has one).</div>
+</div>
+
+<p class="cap">After — host sidebar + failed filter + combined view + Save All</p>
+<div class="dlg">
+ <div class="tbar">Run Output — nightly-backup-check &nbsp;·&nbsp; 2026-06-10 02:00 &nbsp;·&nbsp; <span class="grn">193 OK</span> · <span class="red">7 FAIL</span></div>
+ <div class="split">
+  <div class="side">
+   <div class="chips"><span class="chip">All 200</span><span class="chip on">Failed 7</span><span class="chip">Cancelled 0</span></div>
+   <div class="filt">filter hosts…</div>
+   <ul class="hl">
+    <li class="sel"><span class="cyn">▣ All failed hosts (7)</span></li>
+    <li><span class="dot d-r"></span>10.0.3.41<span class="st red">FAIL</span></li>
+    <li><span class="dot d-r"></span>10.0.3.87<span class="st red">FAIL</span></li>
+    <li><span class="dot d-r"></span>10.0.4.12<span class="st red">FAIL</span></li>
+    <li><span class="dot d-r"></span>edge-fw-02<span class="st red">FAIL</span></li>
+    <li><span class="dot d-r"></span>edge-fw-09<span class="st red">FAIL</span></li>
+    <li><span class="dot d-r"></span>10.0.6.30<span class="st red">FAIL</span></li>
+    <li><span class="dot d-a"></span>10.0.6.31<span class="st red">FAIL</span></li>
+   </ul>
+  </div>
+  <div class="main">
+   <div class="bar"><span class="btn">Find</span><span class="btn">Copy Host</span><span class="btn go">Save All…</span><span class="mut" style="margin-left:auto;font-size:10px">combined report: header + status + output per host</span></div>
+   <div class="out"><span class="hdr">=== 10.0.3.41 (FAIL) ===================================</span>
+$ df -h /var/backups
+<span class="red">ERROR: write /var/backups/db.tar.gz: No space left on device</span>
+<span class="mut">exit status 1</span>
+
+<span class="hdr">=== 10.0.3.87 (FAIL) ===================================</span>
+<span class="red">ssh: connect to host 10.0.3.87 port 22: Connection timed out</span>
+
+<span class="hdr">=== edge-fw-02 (FAIL) ==================================</span>
+$ execute backup memory disk
+<span class="red">Command fail. Return code -61 (disk full)</span></div>
+  </div>
+ </div>
+</div>
+<p class="foot">UI-only change — JobRunPayload.HostOutputs already carries every host’s output + status. Status colors reuse JobListDialog result palette.</p>
+</body></html>

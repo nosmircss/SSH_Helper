@@ -1,0 +1,26 @@
+{
+ "id": "ENH-053",
+ "title": "vault() and vault_list() functions fail silently — no _last_error, inconsistent with the other two Vault scripting surfaces",
+ "category": "ENH",
+ "severity": "low",
+ "effort": "S",
+ "area": "integrations",
+ "lens": "ux",
+ "existing_state": "The three ways to read Vault from a script disagree on error surfacing. The vault: step fails the step (or sets _last_error with on_error: continue); inline {{vault:path#key}} sets _last_error and resolves to empty string on every failure path (Services/Scripting/ScriptContext.cs:711, 722, 742, 753); but the vault(path, key) and vault_list(prefix) functions catch VaultException and return null while setting nothing (Services/Scripting/Functions/VaultFunctions.cs:38-41 and :65-68), and also return null for config problems like a missing profile (:31-32, :58-59). A script using functions in expressions cannot distinguish 'secret has no such key' from 'Vault is sealed/unreachable' from 'no profile configured' — all are an undifferentiated null.",
+ "recommendation": "In both catch blocks (and the no-profile early returns), set context's _last_error with the VaultException message, matching ResolveVaultExpression's contract — a two-line change per site in VaultFunctions.cs. Document the convention (null + _last_error) in the function reference so script authors can branch on it: if(vault(...) == null) { print(_last_error) }.",
+ "user_benefit": "Script authors get one consistent error contract across all three Vault surfaces, making vault-dependent scripts debuggable instead of failing with bare nulls.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\VaultFunctions.cs",
+   "lines": "31-41, 58-68",
+   "note": "null returns with no _last_error on any failure"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+   "lines": "707-756",
+   "note": "inline {{vault:}} sets _last_error on every failure path — the contract the functions should match"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

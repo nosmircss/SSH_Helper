@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-041",
+ "title": "SettingsDialog is a 2,812-line god class bound together by stringly-typed control lookups",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "L",
+ "area": "dialogs-general",
+ "lens": "perf",
+ "existing_state": "SettingsDialog.cs is a single 2,812-line class containing six CreateXxxTab builder methods, two full profile-manager subsystems, the appearance preview engine, and one monolithic BtnSave_Click that writes ~60 settings across every tab (2657-2755). Its ~60 control fields are hydrated after construction by 34 recursive name-string lookups — FindControl<T>(tab, \"chkRememberState\") etc. (bindings from line 276) — where FindControl returns null! on a miss (2308-2317): renaming a control's Name string compiles cleanly and produces a NullReferenceException at first use, far from the cause, with zero compile-time safety. The form is hard-fixed at 544x620 FixedDialog (212-213) with dead resize anchors (223) — symptomatic of a class nobody can safely restructure. This is the same structure that let the Vault/Notification twins drift apart unnoticed (separate finding): with everything in one file there is no seam that forces shared behavior or per-tab review.",
+ "recommendation": "Split each tab into a typed UserControl (controls assigned to fields directly at construction — delete FindControl entirely) exposing a small contract: Load(AppConfiguration), Apply(AppConfiguration), Validate(). SettingsDialog becomes a shell that composes the six tab controls and orchestrates Save by calling Validate/Apply in order inside one _configService.Update. Do it one tab at a time (General and Updates are trivial starters); the existing SettingsDialogVaultTests/AppearanceTests exercising the internal ctor keep the refactor honest.",
+ "user_benefit": "Settings work stops being high-risk: new options become localized, compile-checked changes instead of edits to a 2,800-line form where a renamed string detonates at runtime — and it unblocks making the dialog resizable.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "2308-2317",
+   "note": "FindControl<T> returns null! on miss — stringly-typed binding with no compile-time safety"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "276-344",
+   "note": "34 name-string lookups hydrate the control fields post-construction"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "2657-2755",
+   "note": "Single BtnSave_Click writes every tab's ~60 settings"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SettingsDialog.cs",
+   "lines": "212-224",
+   "note": "Fixed 544x620 FixedDialog; tab control's resize anchors are dead code"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

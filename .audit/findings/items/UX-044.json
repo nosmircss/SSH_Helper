@@ -1,0 +1,31 @@
+{
+ "id": "UX-044",
+ "title": "Help menu is online-only: docs open GitHub master in a browser, nothing works offline or matches the installed version",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "samples-docs",
+ "lens": "cross",
+ "existing_state": "The entire in-app help surface is four Help-menu items (Form1.Designer.cs:1642-1661): Documentation and Scripting Documentation launch the default browser at https://github.com/nosmircss/SSH_Helper and .../blob/master/SCRIPTING.md (Form1.cs:6465-6489), plus Check for Updates and About. Both URLs point at the master branch, not the installed release's tag, so users on an older build read docs for features they don't have. There is no offline path at all: SCRIPTING.md is published as a separate release asset (.github/workflows/build-release.yml:126-135) that a user who downloads only the exe never gets, and even when it sits beside the exe the app never opens the local copy. A multi-host SSH fleet tool is exactly the kind of software run from jump boxes and air-gapped management networks where github.com is unreachable. WebView2 is already a hard dependency (Flow Canvas), and no markdown/doc viewer exists in the app (only UpdateDialog touches markdown, for release notes).",
+ "recommendation": "Embed SCRIPTING.md (and the samples README) as assembly resources at build time, and add Help > Command Reference that renders it in a themed WebView2 dialog with a search box and a per-command TOC sidebar — reuse the FlowCanvasForm hosting pattern and DialogTheme. Keep the GitHub links but point them at the build's tag (the assembly already carries version metadata used by About/update checks) with master as fallback. The embedded copy is by construction the right version for the binary.",
+ "user_benefit": "Operators on restricted or offline networks — a core audience for an SSH fleet tool — currently have zero access to the 6,400-line command reference from inside the app, and online users can be misled by master-branch docs that don't match their installed version.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "6465-6489",
+   "note": "both doc handlers Process.Start a github.com URL; scripting docs pinned to blob/master"
+  },
+  {
+   "file": "Form1.Designer.cs",
+   "lines": "1642-1661",
+   "note": "Help menu = Documentation, Scripting Documentation, Check for Updates, About — nothing local"
+  },
+  {
+   "file": ".github/workflows/build-release.yml",
+   "lines": "126-135",
+   "note": "SCRIPTING.md is a separate release asset; exe-only downloads have no docs"
+  }
+ ],
+ "mockup_idea": "Before: Help menu firing a browser tab to GitHub. After: an in-app 'Command Reference' window — left sidebar listing all 43 commands grouped by family with a filter box, right pane showing the rendered SCRIPTING.md section, dark-themed to match the app.",
+ "merged_from": 1
+}

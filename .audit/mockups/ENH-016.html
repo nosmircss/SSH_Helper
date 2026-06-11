@@ -1,0 +1,80 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap b{color:#ffb454;font-weight:600}.cap b.g{color:#2bd97c}
+.sec{margin-bottom:16px}
+.pane{position:relative;border:1px solid #1c2330;border-radius:6px;background:#0d1118;overflow:hidden}
+pre{margin:0;padding:30px 12px 10px;font:11px/1.65 "Cascadia Code",Consolas,monospace;color:#c9d4e3;overflow-x:hidden}
+.h{color:#4cc9f0}.m{color:#8294a8}.ok{color:#2bd97c}
+.sel{background:rgba(76,201,240,.32);outline:1px solid rgba(76,201,240,.6)}
+.hit{background:rgba(255,180,84,.18);color:#ffd9a0}
+.cur{background:rgba(255,180,84,.45);outline:1px solid #ffb454;color:#fff}
+.bar{position:absolute;top:6px;right:8px;display:flex;align-items:center;gap:4px;background:#141a24;border:1px solid #1c2330;border-radius:4px;padding:4px 6px;box-shadow:0 3px 10px rgba(0,0,0,.5)}
+.inp{display:flex;align-items:center;gap:8px;background:#0b0e13;border:1px solid #283143;border-radius:3px;padding:3px 7px}
+.inp .q{color:#c9d4e3}.inp .n{color:#8294a8;font-size:10px}
+.tg{width:20px;height:18px;line-height:18px;text-align:center;border-radius:3px;color:#8294a8;font-size:10px;cursor:default}
+.tg.on{background:rgba(76,201,240,.22);color:#4cc9f0;border:1px solid rgba(76,201,240,.5);line-height:16px}
+.tg.nav{color:#c9d4e3}
+.ghost{opacity:.25;text-decoration:line-through}
+.note{font-size:10px;color:#8294a8;margin-top:5px;line-height:1.5}
+.res{border-top:1px solid #1c2330;background:#10151d;font-size:10.5px}
+.res .hd{padding:4px 10px;color:#8294a8;border-bottom:1px solid #1c2330;font-size:9.5px;letter-spacing:.06em}
+.row{display:flex;gap:10px;padding:2.5px 10px;cursor:default}
+.row:hover,.row.act{background:rgba(76,201,240,.08)}
+.row .ln{color:#8294a8;width:34px;text-align:right;flex:none}
+.row .hc{color:#4cc9f0;width:80px;flex:none}
+.lite{display:inline-flex;align-items:center;gap:4px;background:#f3f3f3;border:1px solid #c8c8c8;border-radius:4px;padding:3px 6px;color:#333;vertical-align:middle}
+.lite .li{background:#fff;border:1px solid #bbb;border-radius:3px;padding:2px 6px;color:#333}
+.lite .li .n{color:#777;font-size:10px}
+.lite .tg{color:#555}.lite .tg.on{background:rgba(0,90,180,.12);color:#005a9e;border-color:#7ab0d8}
+</style></head><body>
+
+<div class="sec">
+<div class="cap">Before — <b>one match at a time</b>, regex / whole-word toggles built but hidden</div>
+<div class="pane">
+  <div class="bar">
+    <span class="inp"><span class="q">down</span><span class="n">3/41</span></span>
+    <span class="tg on">Aa</span><span class="tg ghost">ab</span><span class="tg ghost">.*</span>
+    <span class="tg nav">&#9650;</span><span class="tg nav">&#9660;</span><span class="tg nav">&#10005;</span>
+  </div>
+<pre><span class="h">=== 10.20.4.11 (sw-core-01) — show interface status ===</span>
+Gi1/0/1   uplink-fw      <span class="ok">connected</span>   trunk
+Gi1/0/7   cam-lobby      notconnect  12
+<span class="h">=== 10.20.4.12 (sw-edge-03) ===</span>
+Gi0/3     ap-floor2      <span class="sel">down</span>        err-disabled
+Gi0/9     idf2-uplink    down        10
+<span class="h">=== 10.20.4.13 (sw-edge-04) ===</span>
+Gi0/11    voip-gw        down        err-disabled
+<span class="m">… 197 more hosts below — press F3 38 more times …</span></pre>
+</div>
+<div class="note">Plain IndexOf scan, case toggle only. The other 40 “down” hits are invisible until F3 lands on them. Find bar is hard-coded VS&nbsp;Code dark — floats as a dark slab in light mode.</div>
+</div>
+
+<div class="sec">
+<div class="cap g">After — <b class="g">regex + whole word + highlight-all</b>, results strip indexes the fleet</div>
+<div class="pane">
+  <div class="bar">
+    <span class="inp"><span class="q">(down|err-disabled)</span><span class="n">12 results</span></span>
+    <span class="tg on">Aa</span><span class="tg">ab</span><span class="tg on">.*</span>
+    <span class="tg nav">&#9650;</span><span class="tg nav">&#9660;</span><span class="tg nav">&#10005;</span>
+  </div>
+<pre><span class="h">=== 10.20.4.12 (sw-edge-03) ===</span>
+Gi0/3     ap-floor2      <span class="cur">down</span>        <span class="hit">err-disabled</span>
+Gi0/9     idf2-uplink    <span class="hit">down</span>        10
+<span class="h">=== 10.20.4.13 (sw-edge-04) ===</span>
+Gi0/11    voip-gw        <span class="hit">down</span>        <span class="hit">err-disabled</span></pre>
+  <div class="res">
+    <div class="hd">12 matches &middot; 4 of 200 hosts &middot; click to jump</div>
+    <div class="row act"><span class="ln">1042</span><span class="hc">sw-edge-03</span><span>Gi0/3   ap-floor2   <span class="cur">down</span>  <span class="hit">err-disabled</span></span></div>
+    <div class="row"><span class="ln">1048</span><span class="hc">sw-edge-03</span><span>Gi0/9   idf2-uplink <span class="hit">down</span></span></div>
+    <div class="row"><span class="ln">1187</span><span class="hc">sw-edge-04</span><span>Gi0/11  voip-gw     <span class="hit">down</span>  <span class="hit">err-disabled</span></span></div>
+    <div class="row"><span class="ln">2310</span><span class="hc">sw-acc-17</span><span>Gi0/2   lab-bench   <span class="hit">down</span></span></div>
+  </div>
+</div>
+<div class="note">All matches tinted amber in the pane, current one boxed. Results strip doubles as a per-host error index.
+&nbsp;Light mode follows the app theme:&nbsp;
+<span class="lite"><span class="li">down <span class="n">3/41</span></span><span class="tg on">Aa</span><span class="tg">ab</span><span class="tg on">.*</span></span></div>
+</div>
+
+</body></html>

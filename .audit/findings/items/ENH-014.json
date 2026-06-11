@@ -1,0 +1,31 @@
+{
+ "id": "ENH-014",
+ "title": "Test Connection only checks TCP reachability — passes with wrong credentials or a non-SSH service",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "ssh-execution",
+ "lens": "ux",
+ "existing_state": "The grid right-click \"Test connection\" feature (Form1.cs:8875-8947, 5-way concurrent, paints per-cell pass/fail) calls SshExecutionService.TestConnectionAsync which is a raw TcpClient connect-and-close (SshExecutionService.cs:2304-2339; the comment at 2300-2303 says this is deliberate \"since hosts may not be SSH servers\"). It therefore shows green for any open port 22 — a captive portal, a telnet listener, or an SSH server that will reject the user's credentials or key algorithms. Authentication failures, algorithm-mismatch fallback (the three-tier ladder at 2365+), and per-host credential resolution problems (vault_path, Credential Manager, ssh-config) are only discovered mid-run, host by host, during a real execution.",
+ "recommendation": "Add a second test tier — e.g., a \"Test SSH login\" item next to the existing TCP test — that reuses the production connect path (CreateConnectedClientWithFallback + the same key/password login used in ExecuteSingleHost) with the same per-host credential resolution as a real run, then disconnects immediately. Return a richer ConnectionTestResult distinguishing Port-open / SSH-negotiated / Authenticated, and on failure include the already-built negotiation diagnostics (AppendSshNegotiationDiagnostics, SshExecutionService.cs:2628) in the cell tooltip.",
+ "user_benefit": "Lets the user validate credentials and SSH compatibility across the whole fleet in seconds before a change window, instead of discovering auth failures one timeout at a time during the actual run.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "2300-2339",
+   "note": "TestConnectionAsync is TcpClient connect/close only, by design comment"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "8875-8947",
+   "note": "UI test feature: concurrency-limited per-row test painting cell states — natural place for an SSH-tier mode"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+   "lines": "2365, 2628",
+   "note": "Production fallback connect path and negotiation diagnostics already exist for reuse in a real SSH test"
+  }
+ ],
+ "mockup_idea": "Host grid cells with a three-state indicator after test: gray dot 'port open', blue dot 'SSH OK', green check 'login OK'; a failed row shows a red X with tooltip 'Authentication failed for admin (password rejected)'.",
+ "merged_from": 1
+}

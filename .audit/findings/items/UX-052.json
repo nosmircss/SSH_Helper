@@ -1,0 +1,31 @@
+{
+ "id": "UX-052",
+ "title": "Flow Canvas window forgets its position across app restarts (size is remembered, location isn't)",
+ "category": "UX",
+ "severity": "low",
+ "effort": "S",
+ "area": "flowcanvas-bridge",
+ "lens": "ux",
+ "existing_state": "FlowCanvasForm caches its location only in a static session field (UI/FlowCanvasForm.cs:31-32, 46-50, 77-81); SavePersistedSize persists width/height alone, and only from Dispose (518-534). Models/AppConfiguration.cs:499-500 has FlowCanvasWidth/Height but no Left/Top. So a user who parks the canvas on a second monitor gets it re-centered on the parent every app launch. The newer RunOutputWindowForm already does this right: it persists both size and location from FormClosing using last-Normal-state values (UI/RunOutputWindowForm.cs:45-47, 73, 215-240). Neither form clamps the restored position to current monitor bounds.",
+ "recommendation": "Mirror RunOutputWindowForm in FlowCanvasForm: add WindowState.FlowCanvasLeft/Top, restore them in the ctor (session cache > persisted > CenterParent), and save geometry in FormClosing instead of Dispose. While there, add a Screen.AllScreens bounds clamp to both forms' restore paths so a saved position on a disconnected monitor snaps back on-screen.",
+ "user_benefit": "Daily users with a two-monitor setup (the explicit target of the detachable Run Output work) stop re-dragging the canvas to its spot every session — table-stakes behavior for professional tools.",
+ "evidence": [
+  {
+   "file": "UI/FlowCanvasForm.cs",
+   "lines": "31-32, 46-50, 518-534",
+   "note": "Session-only location; size-only persistence written in Dispose"
+  },
+  {
+   "file": "UI/RunOutputWindowForm.cs",
+   "lines": "45-47, 73, 215-240",
+   "note": "Reference implementation: size+location persisted from FormClosing"
+  },
+  {
+   "file": "Models/AppConfiguration.cs",
+   "lines": "499-500",
+   "note": "Only FlowCanvasWidth/Height exist in WindowState"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

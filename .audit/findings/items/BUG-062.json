@@ -1,0 +1,31 @@
+{
+ "id": "BUG-062",
+ "title": "Duplicate profile names are trivially created (profile-N collision) and duplicated profiles silently share one credential-store slot",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-general",
+ "lens": "correctness",
+ "existing_state": "Both Add buttons generate names as `profile-{Count + 1}` (SettingsDialog.cs:821 vault, 1426 notifications). Sequence: Add, Add (profile-1, profile-2), remove profile-1, Add -> Count is 1 so the new profile is also named \"profile-2\". Nothing prevents typing a duplicate name either: ValidateVaultProfiles only checks for empty names (2762-2768) and notifications have no name validation at all. Two same-named profiles read and write the identical CredentialTargets target — selecting one and letting persist fire (1011-1017 / 1577-1581) overwrites the other profile's token/webhook/password with no warning, and default-profile resolution picks whichever matches first (1169-1171, 1685-1687). The user ends up with two visually distinct profiles whose secrets clobber each other.",
+ "recommendation": "Generate unique names by scanning existing names (e.g. increment until `profile-N` is free), and add a duplicate-name check (OrdinalIgnoreCase, matching the lookup semantics used everywhere) to ValidateVaultProfiles plus an equivalent notification validation before SaveNotificationSettings — block Save with a themed prompt naming the collision.",
+ "user_benefit": "Prevents two profiles from invisibly sharing and corrupting each other's stored secrets, and removes an ambiguity that also confuses default-profile resolution.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "821, 1426",
+   "note": "Name = profile-{Count+1}; collides after any deletion"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "2762-2768",
+   "note": "Validation checks only IsNullOrWhiteSpace(Name); no duplicate guard; notifications validate nothing"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+   "lines": "1011-1017, 1169-1174",
+   "note": "Same-named profiles write the same VaultAuthTarget; default resolution takes first name match"
+  }
+ ]
+}

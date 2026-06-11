@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-009",
+ "title": "Lambda parameters are bound by mutating the shared ScriptContext — collection functions produce wrong results under parallel:",
+ "category": "ARCH",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-functions",
+ "lens": "perf",
+ "existing_state": "LambdaExpression.Evaluate implements lambda parameters (map/filter/reduce/find/any/all/count) by writing the parameter into the script's global variable table via context.SetVariable, evaluating the body, then restoring the saved value (Services/Scripting/LambdaExpression.cs:60-90). There is no scoped evaluation environment — the single shared Dictionary<string,object?> in ScriptContext (Services/Scripting/ScriptContext.cs:99, 513) is the only binding mechanism; its per-operation locks (ScriptContext.cs:528-599) prevent dictionary corruption but not logical races. ParallelCommand runs child steps concurrently on the SAME context — the comment at Services/Scripting/Commands/ParallelCommand.cs:45 says 'Steps share one context; script context/session enforce internal synchronization' (Task.Run per step at :40-50). So two parallel branches that each evaluate a lambda using the same parameter name (the idiomatic `x`) interleave SetVariable('x', ...) calls: branch A's body can read branch B's element mid-iteration, and the save/restore in the finally block can resurrect or delete the wrong value. Results are intermittently wrong with no error. The same mechanism also means a lambda parameter silently shadows any same-named script/CSV variable for the duration of each element evaluation — on a single thread that is restored correctly, but it is the structural reason the parallel case cannot be fixed locally.",
+ "recommendation": "Introduce a scoped variable overlay instead of mutating shared state: give ExpressionParser (and ValueResolver lookups it performs) an optional overlay dictionary checked before context.GetVariable, and have LambdaExpression.Evaluate pass {param: value} as that overlay (Services/Scripting/LambdaExpression.cs:74-78 already constructs the parser per call, so threading an overlay through is contained). Alternatively, have ParallelCommand hand each branch a child context that copy-on-writes variables — but the overlay is smaller and also fixes lambdas invoked from any future concurrent path. Add a regression test: parallel: with two foreach+map branches over distinct lists using parameter `x`, assert per-branch results.",
+ "user_benefit": "Scripts that combine two advertised features — parallel: blocks and collection lambdas — currently can compute intermittently wrong values (e.g. wrong host lists) with zero diagnostics; this makes the combination safe.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/LambdaExpression.cs",
+   "lines": "60-90",
+   "note": "parameters written into shared context via SetVariable with save/restore"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ParallelCommand.cs",
+   "lines": "40-50",
+   "note": "child steps run via Task.Run on the same shared context (comment at :45)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptContext.cs",
+   "lines": "99, 513, 528-599",
+   "note": "single OrdinalIgnoreCase dictionary; per-op locks prevent corruption, not lost-binding races"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

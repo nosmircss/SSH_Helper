@@ -1,0 +1,36 @@
+{
+ "id": "FEAT-004",
+ "title": "No find, replace, or go-to-line in the script editor — Ctrl+F always targets the output pane",
+ "category": "FEAT",
+ "severity": "high",
+ "effort": "M",
+ "area": "editor",
+ "lens": "ux",
+ "existing_state": "Form1.ProcessCmdKey routes Ctrl+F unconditionally to ShowFindDialog (Form1.cs:14462-14464) regardless of whether the script editor has focus, and that dialog is hardwired to the output box: the seed comes from txtOutput.SelectedText (Form1.cs:14484), it anchors to txtOutput (Form1.cs:14492), and BuildMatchList scans txtOutput.Text only (Form1.cs:14583-14599). F3/Shift+F3 likewise navigate output matches only (Form1.cs:14472-14477). FindDialog itself is search-only — a find textbox, prev/next, match-case/whole-word/regex toggles, no replace field, and it takes Form1 directly in its constructor (FindDialog.cs:21-38). There is no editor search anywhere: grep finds no SearchInTarget/Scintilla find usage in Services/Editor or elsewhere. Result: while editing a multi-hundred-line YAML preset there is zero way to search the script, replace a variable name used 30 times, or jump to the line number a validation error cites — the user scrolls manually or round-trips through an external editor. The same gap applies to the second editor host in JobEditorDialog. Meanwhile RunOutputViewerDialog already ships its own local Ctrl+F search bar (RunOutputViewerDialog.cs:200-204, 328-365), so the app has set the expectation that Ctrl+F is context-local.",
+ "recommendation": "Add an in-editor find/replace to ScintillaScriptEditorControl itself (so both Form1's txtCommand and JobEditorDialog's custom-preset editor get it for free): handle Ctrl+F/Ctrl+H/Ctrl+G in the control, show a small overlay strip in the editor's top-right (copy the existing FindDialog visual language), and implement search via Scintilla's TargetStart/TargetEnd/SearchInTarget plus an indicator to highlight all matches (indicator indexes 8/9 are taken by squiggles; use a free one). Replace uses ReplaceTarget wrapped in one undo action like AcceptCurrentCompletion does (UI/ScintillaScriptEditorControl.cs:1344-1357). In Form1.ProcessCmdKey, route Ctrl+F to the editor when txtCommand.Focused, else keep the existing output find; F3/Shift+F3 should follow whichever target was last searched (extracting the Form1-specific callbacks into a small IFindTarget interface keeps both paths sharing one implementation).",
+ "user_benefit": "Editing real-world presets (200-device runbooks easily exceed 300 lines) becomes practical inside the app: rename a variable, find every 'send:' touching an interface, jump to the line an error message names — and Ctrl+F stops doing the wrong thing when the editor is focused. This is the single largest gap versus VS Code/SecureCRT-class editors.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "14462-14477",
+   "note": "Ctrl+F/F3/Shift+F3 always target output find, no editor-focus check"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "14482-14599",
+   "note": "ShowFindDialog/BuildMatchList/HighlightCurrentMatch all operate on txtOutput exclusively"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FindDialog.cs",
+   "lines": "21-38",
+   "note": "Search-only dialog (no replace UI), constructor takes Form1 — not reusable against the editor"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\RunOutputViewerDialog.cs",
+   "lines": "200-204, 328-365",
+   "note": "Existing precedent: viewer dialog has its own local Ctrl+F find"
+  }
+ ],
+ "mockup_idea": "Before/after split: left shows current behavior (cursor in script editor, Ctrl+F pops the find bar anchored over the OUTPUT pane, script untouched); right shows a VS Code-style find/replace strip overlaid in the script editor's top-right corner with match count '3 of 17', all matches highlighted amber in the YAML, and a replace row expanded below it.",
+ "merged_from": 2
+}

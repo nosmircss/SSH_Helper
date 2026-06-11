@@ -1,0 +1,31 @@
+{
+ "id": "BUG-077",
+ "title": "Flow Canvas timeline grows unbounded with a full, unsanitized variable snapshot per step execution — long loop runs degrade and can freeze the canvas",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-state",
+ "lens": "performance",
+ "existing_state": "Every `execution-update` with state 'running' appends a timeline entry carrying a complete copy of all script variables (stores/messageBridge.ts:250-262). `addTimelineEntry` has no cap and rebuilds the entire array on every append (stores/slices/timelineSlice.ts:35-42 — O(N) copy per event, O(N squared) over a run), and entries are only cleared at the start of the next run (messageBridge.ts:216-217). Unlike the iteration log — which strips the heavy `_outputwindow`/`_output` keys, truncates values at 2000 chars, and evicts beyond a user-tunable 500-record cap (stores/slices/iterationSlice.ts:12-32, 222-231) — timeline snapshots are raw: variables holding accumulated command output are cloned in full into every entry. A foreach over a large host list executing a few steps per iteration produces thousands of entries, each duplicating the entire (possibly multi-megabyte) variable map on the WebView2 UI thread mid-run. Secondary defect in the same slice: `updateTimelineEntry` patches every open entry matching the nodeId (timelineSlice.ts:44-50), not the most recent one.",
+ "recommendation": "Reuse iterationSlice's sanitizer for the snapshot stored on each entry, and add a hard cap (e.g. 1000 entries, evict oldest) in `addTimelineEntry` — or capture variables only on a sampled/last-N basis. Switch `updateTimelineEntry` to patch the latest open entry for the node.",
+ "user_benefit": "Loop-heavy fleet runs are this tool's core use case; today the canvas gets progressively slower during exactly those runs and can become unresponsive, with the cost invisible until it happens.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\messageBridge.ts",
+   "lines": "250-262",
+   "note": "full variables map cloned into a new timeline entry on every running event"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\timelineSlice.ts",
+   "lines": "35-50",
+   "note": "no cap, full-array copy per append, all-open-entries patch"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\iterationSlice.ts",
+   "lines": "12-32, 222-231",
+   "note": "the sanitization + eviction pattern that already exists but is not applied to the timeline"
+  }
+ ]
+}

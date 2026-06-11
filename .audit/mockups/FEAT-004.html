@@ -1,0 +1,88 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{background:#0b0e13;color:#c9d4e3;margin:12px;font:11px "Cascadia Code",Consolas,monospace}
+.row{display:flex;gap:12px}
+.col{flex:1;min-width:0}
+.cap{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:0 0 5px}
+.cap b{font-weight:700}
+.cap.bad b{color:#ff5c5c}.cap.good b{color:#2bd97c}
+.win{border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden}
+.tb{padding:4px 8px;font-size:9px;color:#8294a8;background:#10151e;border-bottom:1px solid #1c2330}
+.ed{position:relative;padding:6px 0;height:148px;overflow:hidden}
+.ln{display:flex;white-space:pre;font-size:10px;line-height:15px}
+.ln em{font-style:normal;width:24px;flex:none;text-align:right;padding-right:7px;color:#3a4558}
+.k{color:#4cc9f0}.s{color:#2bd97c}.c{color:#8294a8}
+.hl{background:rgba(255,180,84,.18);outline:1px solid rgba(255,180,84,.4);border-radius:2px}
+.cur{background:rgba(255,180,84,.45);outline:1px solid #ffb454;border-radius:2px;color:#0b0e13}
+.caret{display:inline-block;width:2px;height:12px;background:#4cc9f0;vertical-align:-2px;box-shadow:0 0 4px #4cc9f0}
+.olbl{padding:3px 8px;font-size:9px;color:#8294a8;background:#10151e;border-top:1px solid #1c2330;border-bottom:1px solid #1c2330}
+.out{position:relative;padding:5px 8px;height:58px;font-size:10px;line-height:15px;color:#8294a8;white-space:pre;overflow:hidden}
+.fb{position:absolute;top:4px;right:6px;background:#141b26;border:1px solid #2a3447;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,.5);font-size:9px;padding:4px}
+.fb .r{display:flex;gap:4px;align-items:center}
+.fb .r+.r{margin-top:4px}
+.in{background:#0b0e13;border:1px solid #2a3447;border-radius:3px;padding:2px 5px;color:#c9d4e3;min-width:74px}
+.bt{border:1px solid #2a3447;border-radius:3px;padding:2px 5px;color:#8294a8;background:#10151e}
+.bt.on{color:#4cc9f0;border-color:#4cc9f0}
+.cnt{color:#8294a8;white-space:nowrap}
+.note{margin-top:6px;font-size:9.5px;line-height:1.45;color:#8294a8}
+.note b{color:#c9d4e3}
+.bad-edge{border-color:#3a1c22}
+.tag{font-size:8px;border:1px solid #ff5c5c;color:#ff5c5c;border-radius:3px;padding:0 3px;margin-left:5px}
+.tag.g{border-color:#2bd97c;color:#2bd97c}
+</style></head><body>
+<div class="row">
+
+<div class="col">
+<p class="cap bad"><b>Before</b> — Ctrl+F while editing the script</p>
+<div class="win">
+<div class="tb">SSH Helper — preset: fortigate_vlan_rollout.yaml &nbsp;·&nbsp; caret in editor, line 15<span class="tag">Ctrl+F</span></div>
+<div class="ed">
+<div class="ln"><em>12</em><span class="k">- name:</span> Tag mgmt VLAN on uplinks</div>
+<div class="ln"><em>13</em>  <span class="k">send:</span> <span class="s">"config system interface"</span></div>
+<div class="ln"><em>14</em>  <span class="k">set:</span> { vlan: <span class="s">"{{mgmt_vlan}}"</span> }</div>
+<div class="ln"><em>15</em><span class="k">- if:</span> <span class="s">"{{mgmt_vlan}} != 30"</span><span class="caret"></span></div>
+<div class="ln"><em>16</em>  <span class="k">then:</span></div>
+<div class="ln"><em>17</em>    <span class="k">- send:</span> <span class="s">"set vlanid {{mgmt_vlan}}"</span></div>
+<div class="ln"><em>18</em>    <span class="k">- send:</span> <span class="s">"set allowaccess ping"</span></div>
+<div class="ln"><em>19</em><span class="k">- foreach:</span> host in {{targets}}</div>
+<div class="ln"><em>20</em>  <span class="k">do:</span></div>
+<div class="ln"><em>21</em>    <span class="k">- send:</span> <span class="s">"diag switch vlan {{mgmt_vlan}}"</span></div>
+</div>
+<div class="olbl">Output</div>
+<div class="out">[10.20.4.11 | fgt-edge-01] set <span class="cur">vlan</span>id 30
+[10.20.4.12 | fgt-edge-02] set <span class="hl">vlan</span>id 30
+[10.20.4.13 | sw-core-01 ] error near '<span class="hl">vlan</span>'
+<div class="fb bad-edge"><div class="r"><span class="in">vlan</span><span class="bt">‹</span><span class="bt">›</span><span class="cnt" style="color:#ff5c5c">output only</span></div></div>
+</div>
+</div>
+<p class="note">Find dialog opens <b>anchored to the output pane</b> — it scans txtOutput.Text no matter where focus is. The 17 matches in the script are unreachable; no replace, no go-to-line.</p>
+</div>
+
+<div class="col">
+<p class="cap good"><b>After</b> — in-editor find/replace strip (proposed)</p>
+<div class="win">
+<div class="tb">SSH Helper — preset: fortigate_vlan_rollout.yaml<span class="tag g">Ctrl+F / Ctrl+H / Ctrl+G</span></div>
+<div class="ed">
+<div class="fb"><div class="r"><span class="in"><span class="cur">mgmt_vlan</span></span><span class="cnt">3 of 17</span><span class="bt">‹</span><span class="bt">›</span><span class="bt on">Aa</span><span class="bt">ab</span><span class="bt">.*</span><span class="bt">×</span></div>
+<div class="r"><span class="in">core_vlan</span><span class="bt">Replace</span><span class="bt">All</span></div></div>
+<div class="ln"><em>12</em><span class="k">- name:</span> Tag mgmt VLAN on uplinks</div>
+<div class="ln"><em>13</em>  <span class="k">send:</span> <span class="s">"config system interface"</span></div>
+<div class="ln"><em>14</em>  <span class="k">set:</span> { vlan: <span class="s">"{{<span class="hl">mgmt_vlan</span>}}"</span> }</div>
+<div class="ln"><em>15</em><span class="k">- if:</span> <span class="s">"{{<span class="hl">mgmt_vlan</span>}} != 30"</span></div>
+<div class="ln"><em>16</em>  <span class="k">then:</span></div>
+<div class="ln"><em>17</em>    <span class="k">- send:</span> <span class="s">"set vlanid {{<span class="cur">mgmt_vlan</span>}}"</span></div>
+<div class="ln"><em>18</em>    <span class="k">- send:</span> <span class="s">"set allowaccess ping"</span></div>
+<div class="ln"><em>19</em><span class="k">- foreach:</span> host in {{targets}}</div>
+<div class="ln"><em>20</em>  <span class="k">do:</span></div>
+<div class="ln"><em>21</em>    <span class="k">- send:</span> <span class="s">"diag switch vlan {{<span class="hl">mgmt_vlan</span>}}"</span></div>
+</div>
+<div class="olbl">Output</div>
+<div class="out">[10.20.4.11 | fgt-edge-01] set vlanid 30
+[10.20.4.12 | fgt-edge-02] set vlanid 30
+[10.20.4.13 | sw-core-01 ] error near 'vlan'</div>
+</div>
+<p class="note">Strip lives in <b>ScintillaScriptEditorControl</b>, so Form1's editor and JobEditorDialog get it for free. All matches lit amber, current match solid; Ctrl+H expands replace, Ctrl+G jumps to a line. Ctrl+F still finds in output when the output pane has focus; F3 follows the last-searched target.</p>
+</div>
+
+</div>
+</body></html>

@@ -1,0 +1,36 @@
+{
+ "id": "UX-012",
+ "title": "Checked hosts with invalid Host_IP values are silently dropped from runs — no error, no result, mismatched counts",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "ssh-execution",
+ "lens": "ux",
+ "existing_state": "Invalid hosts are dropped silently at two layers. Form1.GetHostConnections skips any grid row whose Host_IP is blank or fails InputValidator.IsValidHostOrIp with a bare `continue` (Form1.cs:13313-13315). The service then skips again: ExecuteAsync continues past invalid hosts producing no ExecutionResult (SshExecutionService.cs:394-395 and 439-443, the latter logging only to debug), the script path does the same (:589-591), and ExecuteFolderAsync filters them out up front (hosts.Where(h => h.IsValid()), :634) even after the user explicitly checked those hosts in the run dialog. Status text is built from the already-filtered count ('Executing on N selected hosts...', Form1.cs:12771-12775; completion count at 12673-12677), so the user's only signal is arithmetic: 'Executing on 200 hosts...' followed by 'Completed execution on 198 hosts', with nothing identifying which two rows were skipped or why. The history entry contains no trace of those hosts.",
+ "recommendation": "Surface skips instead of swallowing them: in GetHostConnections collect skipped row identifiers and show one upfront warning ('2 rows skipped — invalid Host_IP: row 37 \"10.1.1.x \", row 88 \"\"'), and/or have the service synthesize a failed ExecutionResult with ErrorMessage 'Invalid host address' for each invalid HostConnection so the result count always matches the selection and the failure lands in output and history with a red X. The synthesized-failure option keeps run summaries truthful with minimal UI work.",
+ "user_benefit": "A typo in one of 200 grid rows currently means that device silently never gets the change — discovered days later. With explicit skip reporting the user sees and fixes it immediately, and run summaries become trustworthy: every host you selected is accounted for.",
+ "evidence": [
+  {
+   "file": "Form1.cs",
+   "lines": "13313-13315",
+   "note": "GetHostConnections: silent continue on blank/invalid Host_IP"
+  },
+  {
+   "file": "Services/SshExecutionService.cs",
+   "lines": "394-395, 439-443, 589-591",
+   "note": "Service-level silent skips produce no ExecutionResult (debug-only log in one path)"
+  },
+  {
+   "file": "Services/SshExecutionService.cs",
+   "lines": "634",
+   "note": "Folder run filters invalid hosts even after explicit selection in the dialog"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "12673-12677, 12771-12775",
+   "note": "Status text reports post-filter counts; checked-vs-ran never reconciled"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

@@ -1,0 +1,26 @@
+{
+ "id": "ENH-009",
+ "title": "send has no failure detection for network appliances — fail_on_nonzero is POSIX-shell-only",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-b",
+ "lens": "ux",
+ "existing_state": "The only built-in way to make a 'send' step fail on command error is fail_on_nonzero, which rewrites the command as eval '<cmd>'; __ssh_helper_send_status=$?; printf '\\n<sentinel>:%s\\n' ... (Services/Scripting/Commands/SendCommand.cs:134-138) and regex-extracts the status afterwards (:89-100, 140-167). That mechanism only works on POSIX shells; on FortiGate/Cisco/Juniper CLIs — and FortiGate is literally the only parse format the tool ships (ParserFactory.cs:14-15) — it sends garbage commands to the device. There is no pattern-based alternative: to catch '% Invalid input detected' or 'Command fail.' the user must add capture + a separate if/contains step after every single send. Validation only rejects fail_on_nonzero combined with expect (:41-47); combined with respond it is silently allowed.",
+ "recommendation": "Add fail_pattern (and optionally success_pattern) regex options to the send step, evaluated against the echo/prompt-stripped output (after :86-87) exactly where the existing post-execution fail_on_nonzero check runs (:89-100), routed through the same ApplyOnError path so on_error: continue works. Validate mutual exclusivity with fail_on_nonzero, and also reject fail_on_nonzero+respond. Per Development Guideline 8, surface the new field in the Flow Canvas send block properties and the YAML autocomplete.",
+ "user_benefit": "One line per step ('fail_pattern: \"% Invalid|Command fail\"') replaces a capture+if+exit triplet after every device command — the difference between a 10-step and a 30-step script when pushing config to appliances, and errors stop slipping through unnoticed mid-fleet.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SendCommand.cs",
+   "lines": "134-138, 89-100, 41-47",
+   "note": "eval/printf sentinel wrapper; post-exec status check (natural insertion point); only expect is validated against fail_on_nonzero"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Parsers\\ParserFactory.cs",
+   "lines": "14-15",
+   "note": "FortiGate is the flagship device family — exactly where fail_on_nonzero cannot work"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

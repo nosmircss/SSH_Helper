@@ -1,0 +1,31 @@
+{
+ "id": "BUG-029",
+ "title": "Renaming an environment silently breaks script environment pins and folder overrides — presets then run against whatever environment is active",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "persistence-config",
+ "lens": "correctness",
+ "existing_state": "EnvironmentService.RenameEnvironment (Services/EnvironmentService.cs:216-255) re-keys the map and follows the active/base pointers, but nothing cascades to the two other places environment names are stored: YAML scripts' `environment:` headers (preset content) and per-folder FolderInfo.BaseEnvironment overrides (Models/FolderInfo.cs:12). After a rename, loading a preset that declares the old name hits the missing-environment branch in ApplyPresetEnvironmentOnPresetLoad (Form1.cs:2186-2192): a status-bar message is shown, the auto-switch is skipped, and the preset remains loaded against the CURRENTLY ACTIVE environment's host grid. In a multi-host fleet tool this means a script pinned to e.g. \"staging\" can be executed against the production host list with only a transient status-bar hint, and folder base-environment overrides dangle silently.",
+ "recommendation": "On rename, cascade: update FolderInfo.BaseEnvironment entries matching the old name (Services/PresetManager folders via the same config Update), and scan preset Commands for a YAML `environment:` header equal to the old name, offering a one-click rewrite (the parser already exposes TryGetScriptDeclaredEnvironment, Form1.cs:2201+). Independently, harden the failure mode: when a preset's declared environment is missing, raise a modal/blocking confirmation before run rather than a status-bar note.",
+ "user_benefit": "Eliminates a wrong-target hazard: renaming an environment can currently cause environment-pinned scripts to run against the wrong host fleet with effectively no warning.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\EnvironmentService.cs",
+   "lines": "216-255",
+   "note": "rename updates only the map + active/base pointers"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\FolderInfo.cs",
+   "lines": "8-12",
+   "note": "folder BaseEnvironment override stores the name, never rewritten"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "2186-2192",
+   "note": "missing environment -> status-bar message only; preset stays loaded on active environment"
+  }
+ ]
+}

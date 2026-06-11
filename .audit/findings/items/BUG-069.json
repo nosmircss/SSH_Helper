@@ -1,0 +1,31 @@
+{
+ "id": "BUG-069",
+ "title": "'Comment Selected Lines' inside a command block scalar doesn't disable anything — it mutates what gets sent to remote hosts",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "editor",
+ "lens": "correctness",
+ "existing_state": "The context-menu Comment/Uncomment actions (Form1.cs:5827-5835) call a purely textual per-line transform that inserts `#` after the leading indent of every selected line with no YAML structure awareness (UI/ScintillaScriptEditorControl.cs:406-443, TransformSelectedLines at 1579-1631). Inside a `command: |` / `content: |` block scalar, `#` is NOT a YAML comment — it is literal payload. So a user who selects a few command lines inside a send step and clicks \"Comment Selected Lines\" believes those commands are disabled, but the step still executes and now sends `#show version`-style lines verbatim to every targeted host. On shells that's usually benign; on network appliances (Cisco/FortiGate CLIs where `#` is not a comment leader) the device receives and reacts to garbage input across the whole fleet. The misleading syntax highlighting compounds it: the highlighter colors the `#...` payload line green like a real comment (YamlSshSyntaxHighlighter.cs:87-88, 148-151 — FindCommentStartIndex has no block-scalar state), visually confirming the wrong mental model.",
+ "recommendation": "Detect block-scalar regions in CommentSelectedLines/UncommentSelectedLines (same region detection as proposed for the hygiene lints in BUG-070, ideally shared). When the selection is inside a payload, either (a) show a status hint and refuse (\"these lines are command payload — '#' would be sent to the host\"), or (b) offer to comment out the enclosing step instead. Also stop the highlighter from styling `#` as a comment inside block-scalar bodies so the editor doesn't visually lie about it.",
+ "user_benefit": "Prevents accidentally shipping '#'-prefixed junk lines to an entire host fleet while believing those commands were disabled.",
+ "mockup_idea": "Side-by-side: a send step with two payload lines '#commented' shown green (current, looks disabled) vs the proposed warning state where the payload lines stay payload-colored and a hint explains '#' will be sent to the host.",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs",
+   "lines": "406-443",
+   "note": "CommentSelectedLines/UncommentSelectedLines: blind per-line '#' insert/remove, no YAML context"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\YamlSshSyntaxHighlighter.cs",
+   "lines": "87-88, 148-151",
+   "note": "per-line comment detection with no block-scalar state — payload '#' lines render as comments"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "5827-5835",
+   "note": "context-menu wiring for comment/uncomment"
+  }
+ ]
+}

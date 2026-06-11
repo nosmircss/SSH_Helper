@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>PERF-002 — Parallel multi-host execution</title>
+<style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px/1.45 "Cascadia Code",Consolas,monospace}
+h1{font-size:12px;font-weight:600;margin:0 0 3px}
+.sub{font-size:10px;color:#8294a8;margin:0 0 8px}
+.cap{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:11px 0 5px}
+.dr{color:#ff5c5c}.dg{color:#2bd97c}
+.panel{border:1px solid #1c2330;border-radius:6px;background:#0e1219;padding:8px 10px}
+.row{display:flex;align-items:center;gap:8px;margin:5px 0}
+.lab{width:62px;flex:none;font-size:9px;color:#8294a8;text-align:right}
+.lane{flex:1;display:flex;height:17px;border-radius:3px;overflow:hidden;background:#10151d}
+.seg{height:100%;flex:none;display:flex;align-items:center;justify-content:center;font-size:9px;color:#03222e;background:#4cc9f0;border-right:1px solid #0b0e13;white-space:nowrap;overflow:hidden}
+.dead{background:#ff5c5c;color:#330909}
+.idle{background:repeating-linear-gradient(45deg,#221806 0 5px,#171005 5px 10px);color:#ffb454}
+.dim{background:#1d3d4d;color:#7fb6cc}
+.more{flex:1;background:repeating-linear-gradient(90deg,#17202d 0 8px,#0e1219 8px 11px);color:#8294a8;display:flex;align-items:center;justify-content:center;font-size:9px}
+.tot{flex:none;width:58px;font-size:10px}
+.tr{color:#ff5c5c}.ta{color:#ffb454}.tg{color:#2bd97c}.tc{color:#4cc9f0}
+.note{font-size:9px;color:#8294a8;margin:2px 0 0 70px}
+.dlg{display:flex;align-items:center;flex-wrap:wrap;gap:8px;border:1px solid #1c2330;border-radius:4px;background:#0b0e13;padding:5px 9px;margin:6px 0;font-size:10px}
+.tb{border:1px solid #1c2330;background:#10151d;border-radius:3px;padding:0 8px}
+.badge{font-size:9px;border-radius:3px;padding:1px 6px}
+.bw{color:#ffb454;border:1px solid #ffb45444;background:#ffb45414}
+.bg{color:#2bd97c;border:1px solid #2bd97c44;background:#2bd97c14}
+.slider{position:relative;width:130px;height:4px;background:#1c2330;border-radius:2px}
+.fill{display:block;width:60%;height:100%;background:#4cc9f0;border-radius:2px}
+.thumb{position:absolute;left:60%;top:50%;transform:translate(-50%,-50%);width:9px;height:9px;border-radius:50%;background:#4cc9f0;box-shadow:0 0 7px #4cc9f088}
+.foot{margin-top:11px;font-size:10px;color:#8294a8;border-top:1px solid #1c2330;padding-top:6px}
+</style></head><body>
+<h1>PERF-002 · Multi-host runs are effectively sequential</h1>
+<p class="sub">Toolbar Execute awaits one host at a time; the folder dialog resets Parallel hosts to 1; batch barriers stall on the slowest host.</p>
+
+<div class="cap"><span class="dr">●</span> Before — Execute over a 100-row grid</div>
+<div class="panel">
+ <div class="row"><span class="lab">execute</span>
+  <div class="lane">
+   <span class="seg" style="width:88px">10.40.12.21 8s</span>
+   <span class="seg" style="width:44px">.22</span>
+   <span class="seg" style="width:44px">.23</span>
+   <span class="seg dead" style="width:116px">✕ .37 30s timeout</span>
+   <span class="more">… 96 more hosts, one at a time …</span>
+  </div><span class="tot tr">~13:24</span></div>
+ <div class="dlg">Folder run — Parallel hosts <span class="tb">1</span> <span class="badge bw">↺ resets to 1 on every open — re-type ×10 each run</span></div>
+ <div class="row"><span class="lab">folder ×10</span>
+  <div class="lane">
+   <span class="seg" style="width:62px">batch 1</span>
+   <span class="seg" style="width:62px">batch 2</span>
+   <span class="seg dead" style="width:56px">✕ .37</span>
+   <span class="seg idle" style="width:112px">9 slots idle 30s</span>
+   <span class="seg" style="width:62px">batch 4</span>
+   <span class="more">… 10 batches …</span>
+  </div><span class="tot ta">~1:58</span></div>
+ <div class="note">Task.WhenAll barrier — batch 4 can't start until every host in batch 3 finishes; each dead host adds a full timeout to its batch.</div>
+</div>
+
+<div class="cap"><span class="dg">●</span> After — sliding window, setting persisted</div>
+<div class="panel">
+ <div class="dlg">Execution options — 100 hosts &nbsp;·&nbsp; Parallel hosts
+  <span class="slider"><span class="fill"></span><span class="thumb"></span></span>
+  <b class="tc">10</b>
+  <span class="badge bg">✓ remembered from last run</span></div>
+ <div class="row"><span class="lab">slot 1</span><div class="lane">
+   <span class="seg" style="width:86px">10.40.12.21</span><span class="seg" style="width:54px">.31</span><span class="seg" style="width:58px">.41</span><span class="seg" style="width:52px">.51</span><span class="seg" style="width:56px">.61</span><span class="more">…</span></div><span class="tot tg">~1:28</span></div>
+ <div class="row"><span class="lab">slot 2</span><div class="lane">
+   <span class="seg" style="width:56px">.22</span><span class="seg" style="width:60px">.32</span><span class="seg" style="width:52px">.42</span><span class="seg" style="width:58px">.52</span><span class="seg" style="width:54px">.62</span><span class="more">…</span></div><span class="tot"></span></div>
+ <div class="row"><span class="lab">slot 3</span><div class="lane">
+   <span class="seg" style="width:54px">.23</span><span class="seg dead" style="width:120px">✕ .37 30s — own slot only</span><span class="seg" style="width:56px">.57</span><span class="more">…</span></div><span class="tot"></span></div>
+ <div class="row"><span class="lab">slot 4</span><div class="lane">
+   <span class="seg" style="width:58px">.24</span><span class="seg" style="width:54px">.34</span><span class="seg" style="width:60px">.44</span><span class="seg" style="width:52px">.54</span><span class="seg" style="width:58px">.64</span><span class="more">…</span></div><span class="tot"></span></div>
+ <div class="row"><span class="lab">slots 5–10</span><div class="lane"><span class="seg dim" style="width:100%;flex:1">… 6 more slots, continuously busy …</span></div><span class="tot"></span></div>
+ <div class="note">SemaphoreSlim(10): the next host starts the moment any slot frees — no batch barrier, results re-ordered by grid index for history.</div>
+</div>
+
+<p class="foot">100 hosts × ~8 s connect+auth+run: <b class="tr">13 min 24 s</b> serial → <b class="tg">~1 min 28 s</b> at ×10 (≈9× faster). One shared scheduler serves Execute, scripts, and folder runs; ParallelHostCount persists in config.json.</p>
+</body></html>

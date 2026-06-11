@@ -1,0 +1,26 @@
+{
+ "id": "BUG-064",
+ "title": "UpdateDialog: retrying a failed download detaches the progress handler, showing a frozen bar that invites the user to kill a healthy download",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-general",
+ "lens": "ux",
+ "existing_state": "On a retryable download error, the catch block unsubscribes DownloadProgressChanged and re-invokes BtnYes_Click directly (UpdateDialog.cs:643-645). BtnYes_Click is `async void`, so the recursive call returns to the caller at its first await (the DownloadUpdateAsync await at 536) right after re-subscribing the handler at 525 — and then the OUTER invocation's `finally` runs (660-663) and unsubscribes the handler the retry just registered. The retried download proceeds with the bar stuck at 0% under \"Downloading update...\" with no byte counts. Because UpdateDialog_FormClosing cancels the download CTS (457-460), a user who concludes the update hung and closes the dialog aborts a download that was actually progressing fine.",
+ "recommendation": "Replace the recursive re-invocation with a loop: wrap the download/verify/install body in `while (true) { try { ... break; } catch (retryable) { if (user declines) break; } }` with subscribe/unsubscribe hoisted outside the loop — or simply move the subscribe into the try and skip the recursion by extracting the body into a private async Task method awaited in a loop.",
+ "user_benefit": "Retried update downloads show real progress instead of appearing hung, so users stop cancelling working updates.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UpdateDialog.cs",
+   "lines": "640-663",
+   "note": "Recursive async-void call at 644; outer finally at 662 unsubscribes the handler the inner call subscribed at 525"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UpdateDialog.cs",
+   "lines": "457-460",
+   "note": "Closing the seemingly-frozen dialog cancels the CTS and aborts the in-flight retry"
+  }
+ ]
+}

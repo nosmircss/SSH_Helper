@@ -1,0 +1,36 @@
+{
+ "id": "BUG-040",
+ "title": "History lies after a crash: the interrupted run vanishes, and the next startup logs false 'Skipped' entries for runs that actually executed",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "jobs-scheduling",
+ "lens": "correctness",
+ "existing_state": "Two crash-path defects compound. (1) Crash recovery in Initialize() finds orphaned RunningState and raises only a transient JobStateChanged(Failed, 'Application crashed during execution') (Services/JobExecutionService.cs:153-168); it never raises JobCompleted, and JobHistoryService persists runs only from JobCompleted (Services/JobHistoryService.cs:36-47). The crashed run therefore leaves zero trace in run history — a cron job that dies mid-run every night shows a clean history, and the Job List 'Last Result' column (JobListDialog.cs:755-763 reads the newest history record) keeps showing the previous night's 'OK (n/n)'. (2) LastAppShutdownUtc is written only in the graceful FormClosing path (Form1.cs:3946). After a crash, the next launch anchors missed-run detection to the PREVIOUS graceful shutdown (Form1.cs:15265-15272), so the detection window swallows the entire crashed session — every recurring run that genuinely executed during that session is re-counted and written into history as 'Skipped (N runs)' (Form1.cs:15276-15282, rendered orange in JobListDialog). Together, after any crash the history both omits the run that died and fabricates misses for runs that succeeded.",
+ "recommendation": "(1) In Initialize(), synthesize a failed JobRunResult (Success=false, ErrorMessage='Application crashed during execution', StartedUtc from RunningState.StartedUtc, CompletedUtc now, empty HostOutputs — mirror the OnJobFailed shape at JobExecutionService.cs:909-927) and raise JobCompleted so the existing history pipeline records it. (2) Heartbeat the downtime anchor: update LastAppShutdownUtc (or a dedicated LastSchedulerEvaluationUtc) at the end of each 30-second evaluation pass — or at minimum exclude occurrences older than the orphaned RunningState timestamps — so post-crash missed-run detection only covers true downtime.",
+ "user_benefit": "After a crash or forced reboot during the nightly window, the morning review shows an honest 'FAIL — application crashed' row instead of yesterday's success, and the 'Skipped' rows stop lying about runs that actually executed — exactly the moments when accurate history matters most.",
+ "mockup_idea": "",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "153-168",
+   "note": "Crash recovery raises JobStateChanged only; no JobCompleted, so nothing reaches history"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobHistoryService.cs",
+   "lines": "36-47",
+   "note": "History persists exclusively via the JobCompleted subscription"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "3946, 15265-15282",
+   "note": "Shutdown timestamp written only on graceful close; missed-run window anchored to it at startup"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs",
+   "lines": "755-763",
+   "note": "Last Result column reads the newest history record — crash leaves it stale"
+  }
+ ]
+}

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ENH-021 — Multi-select bulk operations</title>
+<style>
+  :root{
+    --bg:#0b0e13; --text:#c9d4e3; --muted:#8294a8; --border:#1c2330;
+    --cyan:#4cc9f0; --green:#2bd97c; --amber:#ffb454; --red:#ff5c5c;
+    --ssh-b:oklch(62% .13 255); --ssh-bg:oklch(20% .06 255);
+    --tim-b:oklch(62% .03 275); --tim-bg:oklch(20% .02 275);
+  }
+  *{box-sizing:border-box}
+  body{margin:12px;background:var(--bg);color:var(--text);
+    font:11px "Cascadia Code",Consolas,monospace}
+  h1{font-size:12px;font-weight:600;margin:0 0 8px}
+  .cols{display:flex;gap:12px}
+  .col{flex:1;min-width:0}
+  .col.before{flex:0 0 292px}
+  .cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:5px}
+  .cap b{font-weight:600}
+  .cap .bad{color:var(--red)} .cap .good{color:var(--green)}
+  .frame{display:flex;border:1px solid var(--border);border-radius:8px;
+    overflow:hidden;height:236px;background:#0d1118}
+  .canvas{flex:1;position:relative;
+    background-image:radial-gradient(#1c2330 1px,transparent 1px);
+    background-size:16px 16px}
+  .props{width:96px;border-left:1px solid var(--border);background:#0e131b;
+    display:flex;flex-direction:column}
+  .props .ph{font-size:9px;color:var(--muted);padding:5px 7px;
+    border-bottom:1px solid var(--border)}
+  .props .empty{flex:1;display:flex;align-items:center;justify-content:center;
+    color:var(--muted);font-size:9.5px;text-align:center;padding:6px}
+  .blk{position:absolute;width:148px;border-radius:8px;padding:5px 8px;
+    border:1px solid var(--ssh-b);background:var(--ssh-bg)}
+  .blk.tim{border-color:var(--tim-b);background:var(--tim-bg)}
+  .blk.sel{outline:1.5px solid var(--cyan);outline-offset:2px}
+  .blk .t{font-size:8px;color:var(--muted);letter-spacing:.08em;
+    text-transform:uppercase}
+  .blk .c{font-size:10px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis}
+  .wire{position:absolute;width:2px;background:#3a4656}
+  .marquee{position:absolute;border:1px dashed var(--cyan);border-radius:4px;
+    background:rgba(76,201,240,.07)}
+  .bar{position:absolute;display:flex;gap:2px;align-items:center;
+    background:#11161f;border:1px solid #2a3950;border-radius:99px;
+    padding:3px 5px;box-shadow:0 4px 14px rgba(0,0,0,.55);white-space:nowrap}
+  .bar button{all:unset;font:8.5px "Cascadia Code",Consolas,monospace;
+    color:var(--text);padding:2px 5px;border-radius:99px;cursor:pointer}
+  .bar button:hover{background:#1c2839}
+  .dot{display:inline-block;width:6px;height:6px;border-radius:50%;
+    margin-right:4px;vertical-align:.5px}
+  .dis .dot{background:var(--amber)} .bp .dot{background:var(--red)}
+  .dup .dot{background:var(--cyan)} .al .dot{background:var(--green)}
+  .bar .del{color:var(--red)}
+  .bar i{width:1px;height:12px;background:#2a3950;flex:none}
+  .note{margin-top:8px;color:var(--muted);font-size:10px}
+  .note b{color:var(--text);font-weight:600}
+</style>
+</head>
+<body>
+<h1>ENH-021 — Multi-select: bulk actions instead of a dead-end placeholder</h1>
+<div class="cols">
+
+  <div class="col before">
+    <div class="cap">Before — <b class="bad">only Delete works</b></div>
+    <div class="frame">
+      <div class="canvas">
+        <div class="marquee" style="left:6px;top:14px;width:164px;height:200px"></div>
+        <div class="blk sel" style="left:14px;top:26px">
+          <div class="t">send · ssh</div><div class="c">get system status</div>
+        </div>
+        <div class="wire" style="left:87px;top:64px;height:22px"></div>
+        <div class="blk sel" style="left:14px;top:86px">
+          <div class="t">send · ssh</div><div class="c">diagnose sys top 5</div>
+        </div>
+        <div class="wire" style="left:87px;top:124px;height:22px"></div>
+        <div class="blk tim sel" style="left:14px;top:146px">
+          <div class="t">wait · timing</div><div class="c">2 s</div>
+        </div>
+      </div>
+      <div class="props">
+        <div class="ph">Properties</div>
+        <div class="empty">3 blocks<br>selected</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap">After — <b class="good">floating action bar on multi-select</b></div>
+    <div class="frame">
+      <div class="canvas">
+        <div class="marquee" style="left:12px;top:42px;width:172px;height:200px"></div>
+        <div class="blk sel" style="left:24px;top:54px">
+          <div class="t">send · ssh</div><div class="c">get system status</div>
+        </div>
+        <div class="wire" style="left:97px;top:92px;height:22px"></div>
+        <div class="blk sel" style="left:24px;top:114px">
+          <div class="t">send · ssh</div><div class="c">diagnose sys top 5</div>
+        </div>
+        <div class="wire" style="left:97px;top:152px;height:22px"></div>
+        <div class="blk tim sel" style="left:24px;top:174px">
+          <div class="t">wait · timing</div><div class="c">2 s</div>
+        </div>
+        <div class="bar" style="left:6px;top:8px">
+          <button class="dis"><span class="dot"></span>Disable 3</button><i></i>
+          <button class="bp"><span class="dot"></span>Breakpoints</button><i></i>
+          <button class="dup"><span class="dot"></span>Duplicate</button><i></i>
+          <button class="al"><span class="dot"></span>Align</button><i></i>
+          <button class="del">Delete 3</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<div class="note">Today, “disable these three blocks” = three right-click round-trips;
+the only bulk gesture is <b>Delete</b>. The bar turns disable / breakpoint /
+duplicate / align into <b>one click per selection</b> — already on the roadmap
+(Multi-Select Action Bar, Impact 4 / Effort M).</div>
+</body>
+</html>

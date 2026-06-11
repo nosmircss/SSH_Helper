@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>FEAT-005 — Open Terminal from host grid</title>
+<style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:11px "Cascadia Code",Consolas,monospace}
+.cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.row{display:flex;gap:14px;align-items:flex-start}
+.col{flex:0 0 auto}
+.arrow{align-self:center;color:#4cc9f0;font-size:16px;padding-top:14px}
+.grid{border:1px solid #1c2330;border-radius:3px;overflow:hidden;margin-bottom:8px}
+.grid table{border-collapse:collapse;font-size:10px}
+.grid th{background:#11151d;color:#8294a8;font-weight:normal;padding:3px 8px;text-align:left;border-bottom:1px solid #1c2330}
+.grid td{padding:3px 8px;border-bottom:1px solid #151b26}
+.grid tr.sel td{background:#16202e;color:#e6eefb}
+.dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;vertical-align:1px}
+.ok{background:#2bd97c}.bad{background:#ff5c5c}
+.menu{width:185px;background:#141923;border:1px solid #2a3345;border-radius:3px;padding:3px 0;box-shadow:0 6px 18px rgba(0,0,0,.55)}
+.mi{padding:3px 12px;color:#c9d4e3;white-space:nowrap}
+.mi.dim{color:#5d6c80}
+.mi.new{color:#4cc9f0;background:rgba(76,201,240,.10);font-weight:bold}
+.mi.new .ic{color:#2bd97c;margin-right:6px}
+.sep{border-top:1px solid #232c3c;margin:3px 8px}
+.term{width:268px;border:1px solid #2a3345;border-radius:4px;overflow:hidden;box-shadow:0 8px 22px rgba(0,0,0,.6)}
+.tbar{background:#161b24;padding:4px 8px;display:flex;justify-content:space-between;border-bottom:1px solid #1c2330}
+.tbar b{color:#c9d4e3;font-weight:normal;font-size:10px}
+.tbar span{color:#8294a8;letter-spacing:3px}
+.tbody{background:#0a0d12;padding:7px 9px;font-size:10px;line-height:1.5;color:#9ad1a8}
+.tbody .p{color:#4cc9f0}.tbody .o{color:#8294a8}
+.cur{background:#9ad1a8;color:#0a0d12}
+.note{margin-top:10px;color:#8294a8;font-size:10px}
+.note code{color:#ffb454}
+h1{font-size:12px;margin:0 0 10px;color:#e6eefb;font-weight:normal}
+h1 em{color:#ffb454;font-style:normal}
+</style></head><body>
+<h1>FEAT-005 — the built-in terminal exists, but <em>only a YAML `interactive:` step can open it</em></h1>
+<div class="row">
+  <div class="col">
+    <p class="cap">Before — right-click on a failed host</p>
+    <div class="grid"><table>
+      <tr><th>Host_IP</th><th>device_name</th><th>username</th></tr>
+      <tr class="sel"><td><span class="dot bad"></span>10.0.0.5</td><td>edge-fw-01</td><td>admin</td></tr>
+      <tr><td><span class="dot ok"></span>10.0.0.12</td><td>core-sw-02</td><td>netops</td></tr>
+      <tr><td><span class="dot ok"></span>192.168.1.20</td><td>dist-sw-04</td><td>netops</td></tr>
+    </table></div>
+    <div class="menu">
+      <div class="mi dim">Add Column</div>
+      <div class="mi dim">Delete Column</div>
+      <div class="sep"></div>
+      <div class="mi dim">Insert Row</div>
+      <div class="mi dim">Delete Row</div>
+      <div class="sep"></div>
+      <div class="mi dim">Select All Hosts</div>
+      <div class="mi dim">Invert Selection</div>
+      <div class="sep"></div>
+      <div class="mi">Clear Test Results</div>
+      <div class="mi">Test Connection(s)</div>
+    </div>
+    <div class="note" style="color:#ff5c5c">No shell here &rarr; alt-tab to PuTTY.</div>
+  </div>
+  <div class="arrow">&#9654;</div>
+  <div class="col">
+    <p class="cap">After — same menu</p>
+    <div class="menu">
+      <div class="mi new"><span class="ic">&gt;_</span>Open Terminal on 10.0.0.5</div>
+      <div class="sep"></div>
+      <div class="mi dim">Add Column</div>
+      <div class="mi dim">Delete Column</div>
+      <div class="sep"></div>
+      <div class="mi dim">Insert Row</div>
+      <div class="mi dim">Delete Row</div>
+      <div class="sep"></div>
+      <div class="mi dim">Select All Hosts</div>
+      <div class="mi dim">Invert Selection</div>
+      <div class="sep"></div>
+      <div class="mi">Clear Test Results</div>
+      <div class="mi">Test Connection(s)</div>
+    </div>
+  </div>
+  <div class="arrow">&#9654;</div>
+  <div class="col">
+    <p class="cap">&hellip;opens the existing terminal</p>
+    <div class="term">
+      <div class="tbar"><b>10.0.0.5 - Interactive (separate)</b><span>&#8211; &#9633; &#10005;</span></div>
+      <div class="tbody">
+<span class="o">Connected to 10.0.0.5:22 (admin)</span><br>
+<span class="p">edge-fw-01 #</span> get system status<br>
+Version: FortiGate-100F v7.4.5,build2702<br>
+Hostname: edge-fw-01<br>
+HA mode: standalone<br>
+<span class="p">edge-fw-01 #</span> diag sys session stat<br>
+session_count=8421  setup_rate=12<br>
+<span class="p">edge-fw-01 #</span> <span class="cur">&nbsp;</span>
+      </div>
+    </div>
+    <div class="note">Cheapest path: synthesize a one-step script<br><code>- interactive: {session: separate}</code><br>through the single-host run path &mdash; per-host creds (username / password / vault_path columns), timeouts, and the history "Interactive" tab come free.</div>
+  </div>
+</div>
+</body></html>

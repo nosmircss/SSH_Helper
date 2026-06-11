@@ -1,0 +1,31 @@
+{
+ "id": "PERF-013",
+ "title": "EnvironmentDialog writes the full config (with GZip of the app-state blob) to disk on every list click",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-general",
+ "lens": "perf",
+ "existing_state": "Every selection change in the environments list calls PersistCurrentEnvironmentDetails unconditionally — no dirty check (EnvironmentDialog.cs:403-414, persist at 408; also before New at 418, Duplicate at 441, and on Save at 641). That flows through EnvironmentService.UpdateEnvironmentDetails (Services/EnvironmentService.cs:301-327), which first deep-clones the entire environment map via LoadEnvironmentState (Services/ConfigurationService.cs:174-179), then ConfigurationService.Save (108-151) copies config.json to .bak, GZip-compresses the entire SavedState blob, re-serializes the whole AppConfiguration with Formatting.Indented, and File.WriteAllText's it — all synchronously on the UI thread inside the SelectedIndexChanged handler. Arrow-keying through N environments performs N complete save cycles even when nothing was edited. Any failure is silently swallowed (EnvironmentDialog.cs:819-822). For a user with many presets and a large remembered host/app state, each list click costs gzip CPU plus rewriting a multi-hundred-KB-to-MB config file, felt as list-navigation lag, and each rewrite widens the exposure of the non-atomic WriteAllText.",
+ "recommendation": "Add a dirty check in PersistCurrentEnvironmentDetails: snapshot the loaded description/color/variables/vault-profile in LoadEnvironmentDetails and skip the service call when nothing changed (S). Better: stage edits in an in-memory environment map inside the dialog and commit once in BtnSave_Click — which also gives Cancel real semantics for free.",
+ "user_benefit": "Browsing environments stops costing a full config save per click — no UI hitches with big configs, far less disk churn, and fewer windows for a half-written config.json.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/EnvironmentDialog.cs",
+   "lines": "403-414, 802-823",
+   "note": "unconditional persist on every selection change; exceptions swallowed at 819-822"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/EnvironmentService.cs",
+   "lines": "301-327",
+   "note": "UpdateEnvironmentDetails -> full SaveEnvironmentState each call"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+   "lines": "108-151, 174-197",
+   "note": "each save: .bak copy + GZip of SavedState + full indented JSON serialize + WriteAllText; LoadEnvironmentState deep-clones the map"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

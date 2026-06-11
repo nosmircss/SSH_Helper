@@ -1,0 +1,26 @@
+{
+ "id": "ENH-051",
+ "title": "Detached read-only capture window drops all terminal colors",
+ "category": "ENH",
+ "severity": "low",
+ "effort": "S",
+ "area": "terminal",
+ "lens": "ux",
+ "existing_state": "When a capture step detaches (timeout/Ctrl+C/max-lines/natural completion) the window stays open showing a history snapshot, but RenderDetachedHistorySnapshot rebuilds it from the plain-text transcript and fills every cell with the default gray-on-black (Forms/InteractiveTerminalForm.cs:607-610: Array.Fill with single fore/back colors) — syntax-colored device output, diff colors, and alarm highlighting that were on screen one frame earlier all flatten to monochrome the instant the step detaches.",
+ "recommendation": "Instead of re-rendering from the text transcript, capture the last live TerminalScreenSnapshot stream: have the service build the detached view from the Rebex screen + history cells (the same per-cell color path BuildScreenSnapshot already implements at InteractiveTerminalService.cs:3333-3469) at detach time, falling back to the monochrome text path only when no snapshot exists (e.g., headless capture promoted to a window).",
+ "user_benefit": "The post-detach review window — the whole point of leaving it open — keeps the color cues (errors in red, status in green) that operators actually scan for.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Forms\\InteractiveTerminalForm.cs",
+   "lines": "601-610",
+   "note": "Detached snapshot fills uniform default fore/back colors for every cell"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+   "lines": "3333-3469",
+   "note": "BuildScreenSnapshot already produces per-cell colored snapshots that could seed the detached view"
+  }
+ ],
+ "mockup_idea": "Side-by-side: live capture window with colored 'show interfaces' output vs. the current detached view of the same content in flat gray; the 'after' shows the detached view retaining colors with the 'Detached (read-only)' title.",
+ "merged_from": 1
+}

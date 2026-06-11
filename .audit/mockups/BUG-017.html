@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>BUG-017 — multi-host run roll-up</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;font:11px/1.5 "Cascadia Code",Consolas,monospace;margin:12px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 4px}
+  .cap b{color:#ff5c5c;font-weight:600}.cap.good b{color:#2bd97c}
+  .pane{border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden}
+  .out{padding:7px 9px;height:176px;overflow-y:auto;white-space:pre-wrap}
+  .out div{min-height:1.5em}
+  .dim{color:#8294a8}.ok{color:#2bd97c}.err{color:#ff5c5c}.cy{color:#4cc9f0}.amb{color:#ffb454}
+  .status{border-top:1px solid #1c2330;background:#11161f;padding:4px 9px;display:flex;gap:8px;align-items:center;font-size:10.5px}
+  .dot{width:7px;height:7px;border-radius:50%;flex:none}
+  .note{font-size:10px;color:#8294a8;margin:5px 1px 0}
+  .note b{color:#c9d4e3;font-weight:600}
+  .sum{border-top:1px dashed #2a3445;margin-top:5px;padding-top:5px}
+  .ghost{color:#586a7e;font-style:italic}
+  .foot{margin-top:10px;font-size:10px;color:#8294a8;border-top:1px solid #1c2330;padding-top:7px}
+</style></head><body>
+
+<div class="cols">
+  <div>
+    <p class="cap">Before — <b>failures &amp; skips invisible</b></p>
+    <div class="pane">
+      <div class="out"><div class="dim">&gt; Executing preset "ntp-rollout" on 8 hosts...</div>
+<div class="cy">Connected to 10.20.4.11 (pooled)</div>
+<div>[edge-fw-01] config system ntp .. <span class="ok">OK</span></div>
+<div class="cy">Connected to 10.20.4.12 (pooled)</div>
+<div>[edge-fw-02] config system ntp .. <span class="ok">OK</span></div>
+<div class="err">Failed to connect to 10.20.4.18: timed out after 15s</div>
+<div class="cy">Connected to 10.20.4.13 (pooled)</div>
+<div>[edge-fw-03] config system ntp .. <span class="ok">OK</span></div>
+<div class="err">Authentication failed for 10.20.4.21</div>
+<div class="cy">Connected to 10.20.4.16 (pooled)</div>
+<div>[edge-fw-06] config system ntp .. <span class="ok">OK</span></div>
+<div class="ghost">(10.20.4.1x5 — row 7 of the grid — never appears)</div></div>
+      <div class="status"><span class="dot" style="background:#8294a8"></span>Completed execution on 8 hosts</div>
+    </div>
+    <p class="note"><b>9 hosts selected</b> in the grid. The typo'd <b>10.20.4.1x5</b> fails IsValid() and is dropped by a bare <b>continue</b> — no result, no history entry. The 2 failures are only findable by scrolling the transcript.</p>
+  </div>
+
+  <div>
+    <p class="cap good">After — <b>roll-up + skip surfaced</b></p>
+    <div class="pane">
+      <div class="out"><div class="dim">&gt; Executing preset "ntp-rollout" on 9 hosts...</div>
+<div class="cy">Connected to 10.20.4.11 (pooled)</div>
+<div>[edge-fw-01] config system ntp .. <span class="ok">OK</span></div>
+<div class="dim">... 5 more hosts succeed ...</div>
+<div class="err">Failed to connect to 10.20.4.18: timed out after 15s</div>
+<div class="err">Authentication failed for 10.20.4.21</div>
+<div class="amb">Skipped: invalid host address '10.20.4.1x5'</div>
+<div class="sum"><span class="dim">──── Run summary ─────────────────────</span>
+<span class="ok">6 succeeded</span>  <span class="err">2 failed</span>  <span class="amb">1 skipped (invalid)</span>
+<span class="err">✗ 10.20.4.18</span>   <span class="dim">connect timed out (15s)</span>
+<span class="err">✗ 10.20.4.21</span>   <span class="dim">authentication failed</span>
+<span class="amb">⊘ 10.20.4.1x5</span>  <span class="dim">invalid host address</span></div></div>
+      <div class="status"><span class="dot" style="background:#ff5c5c"></span>Completed: <span class="ok">&nbsp;6 succeeded</span>, <span class="err">2 failed</span>, <span class="amb">1 skipped (invalid)</span></div>
+    </div>
+    <p class="note">Skips become failed ExecutionResults (visible in output, counts, <b>and history</b>); status bar matches the folder-run path's existing "N succeeded, M failed" pattern.</p>
+  </div>
+</div>
+
+<p class="foot">Fleet-tool failure mode: a host that silently never received the change while the run reports "Completed". The roll-up makes every selected host accounted for at a glance.</p>
+
+</body></html>

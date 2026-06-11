@@ -1,0 +1,36 @@
+{
+ "id": "FEAT-008",
+ "title": "IPv6 hosts cannot be used anywhere — literals are mangled at parse, rejected by validation, and silently skipped in multi-host runs",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "M",
+ "area": "ui-utilities",
+ "lens": "ux",
+ "existing_state": "HostConnection.Parse splits the host string on ':' (Models/HostConnection.cs:45-51), so an IPv6 literal like 2001:db8::1 becomes IpAddress \"2001\" with the rest discarded; there is no bracket syntax ([addr]:port) handling, and ToString() (HostConnection.cs:92) would emit an ambiguous addr:port for IPv6. Validation is equally closed: InputValidator.IsValidHostOrIp uses LastIndexOf(':') and then accepts only UriHostNameType.IPv4 or Dns, with an in-code comment 'no IPv6 support here' (Utilities/InputValidator.cs:49-82); HostConnection.IsValid (HostConnection.cs:59-65) routes to the same validator. This validator gates every execution entry point: single-host runs refuse with 'No valid host selected' (Form1.cs:12738, 12805), Flow Canvas test-step refuses (Form1.cs:7110), and — worst — the multi-host connection builder silently `continue`s past the row (Form1.cs:13314), so in a 200-device run an IPv6 row simply produces no result and no error. For a fleet SSH tool aimed at network operators this is a missing capability as dual-stack and v6-only management networks become common — entries are silently mis-parsed rather than rejected with a message.",
+ "recommendation": "Add bracket-aware parsing: in HostConnection.Parse, treat '[...]' as the host (with optional ':port' suffix) and treat a bare string containing 2+ colons as a portless IPv6 literal (Uri.CheckHostName already classifies these as IPv6); update IsValidHostOrIp to accept UriHostNameType.IPv6 for both forms; make ToString() emit [addr]:port when Port != 22. Verify pass-through at the two client layers (Rebex session setup and SSH.NET) and the connection-pool key — both libraries accept IPv6 strings natively, so the work concentrates in the model/utility files plus grid validation messages. Independently of IPv6, change the silent skip at Form1.cs:13314 to emit a per-row 'skipped: invalid host' line into the run output so rows can never vanish from a fleet run unannounced.",
+ "user_benefit": "Unblocks IPv6/dual-stack environments entirely (increasingly the default in service-provider and modern enterprise gear), and guarantees that no host row can silently disappear from a 200-host run.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HostConnection.cs",
+   "lines": "38-65, 92",
+   "note": "Split(':') parsing mangles IPv6 literals; IsValid delegates to IsValidHostOrIp; ToString emits ambiguous IPv6:port"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\InputValidator.cs",
+   "lines": "49-82",
+   "note": "LastIndexOf(':') port split + explicit 'no IPv6 support here' rejection of UriHostNameType.IPv6"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13314-13315",
+   "note": "multi-host run: invalid host row silently `continue`d — no result, no error"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "12738, 12805, 7110",
+   "note": "single-host and canvas paths refuse with generic message"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

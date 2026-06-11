@@ -1,0 +1,31 @@
+{
+ "id": "ENH-027",
+ "title": "Scheduler tuning knobs (max concurrent jobs, history retention defaults) exist only as hand-edited config.json fields; concurrency change needs a restart",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "jobs-scheduling",
+ "lens": "ux",
+ "existing_state": "Four scheduler-wide settings live in AppConfiguration — MaxConcurrentJobs (default 3), DefaultMaxHistoryRuns (50), DefaultHistoryRetentionDays (30), MaxJobOutputCharsPerHost (1 MiB) (Models/AppConfiguration.cs:140-158) — but a project-wide grep shows zero references from SettingsDialog.cs or any other settings UI; the only way to change them is editing %LocalAppData%\\SSH_Helper\\config.json by hand. The per-job overrides do have editor UI (JobEditorDialog.cs:1670-1679, 2126-2128), which makes the missing global counterparts feel like an oversight rather than a decision. Additionally, MaxConcurrentJobs is read once in the JobExecutionService constructor to size the SemaphoreSlim (Services/JobExecutionService.cs:140-142), so even a hand-edit takes effect only after an app restart — with no indication of that anywhere.",
+ "recommendation": "Add a 'Scheduler' group to SettingsDialog with the four numeric fields (NumericUpDown with the same bounds the resolver normalizes to; note next to MaxConcurrentJobs explaining queueing). For live application, either recreate the semaphore on ConfigurationService save when the value changed (drain-then-swap, or simply Release/Wait the delta), or — minimum viable — show 'takes effect after restart' beside the field. SchedulerHistoryPolicyResolver already consumes config at run-time (Services/SchedulerHistoryPolicyResolver.cs:17-19), so the three history fields apply live for free.",
+ "user_benefit": "A power user scheduling many jobs against a 200-device fleet can raise concurrency or tighten history retention from the Settings dialog like every other option in the app, instead of discovering undocumented JSON fields and guessing why edits don't take effect.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs",
+   "lines": "140-158",
+   "note": "Four scheduler knobs defined; grep across all .cs files shows consumers are only services and tests — no settings UI"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "140-142",
+   "note": "MaxConcurrentJobs read once at construction into SemaphoreSlim — restart required"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs",
+   "lines": "1670-1679, 2126-2128",
+   "note": "Per-job history overrides have full editor UI; global defaults have none"
+  }
+ ],
+ "mockup_idea": "Settings dialog screenshot sketch: existing settings tree with a new 'Scheduler' section containing 'Max concurrent jobs [3]', 'Default history: keep [50] runs / [30] days', 'Max output per host [1024] KB', with a grey hint 'Jobs beyond the limit are queued, not skipped'.",
+ "merged_from": 1
+}

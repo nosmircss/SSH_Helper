@@ -1,0 +1,31 @@
+{
+ "id": "SEC-007",
+ "title": "browser_callback_capture loopback listener accepts forged captures — no nonce/state binding on the fixed local port",
+ "category": "SEC",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-commands-a",
+ "lens": "bugs",
+ "existing_state": "The command binds an HttpListener to http://127.0.0.1:{port}/ on a fixed default port 8086 (CreateListener, Services/Scripting/Commands/BrowserCallbackCaptureCommand.cs:219-224) and completes the step from ANY local request: a GET to the callback path with query params short-circuits capture when capture_mode=query (:249-260); a POST to the callback path or to <path>/capture followed by <path>/complete finalizes the first non-empty payload (:272-305). There is no nonce, state token, or Origin/Referer validation — no binding between the browser session the command launched and the request that completes the capture; the served capture page (BuildCaptureHtml) posts to well-known paths with no secret. Any local process, or a malicious web page already open in the user's browser (a form-encoded POST to 127.0.0.1 is a CORS 'simple request' that fires without preflight; no-cors blocks reading the response but the injection lands), can race or replace the legitimate payload with attacker-chosen values during the step's window (timeout default 300s). Those values are persisted into script variables (into / into_<key>, PersistCapture :436-451) that scripts typically use as OAuth tokens/credentials for subsequent http/ssh steps against the fleet. Contrast: the app's own Vault OIDC flow DOES validate state (Services/Vault/VaultService.cs:522-523) — the capture flow skipped the same protection.",
+ "recommendation": "Generate a cryptographically random per-step nonce when the listener starts; embed it in the served capture page as a hidden field/query param on the /capture and /complete POSTs, and reject any request in CaptureAsync whose nonce doesn't match (respond 403, keep waiting) — accept the first VALID payload, not the first non-empty one. For query-mode short-circuit captures, support standard OAuth `state` validation when the user supplies one in start_url. Additionally validate that Origin/Referer is absent or loopback, and support local_port: 0 (bind an ephemeral port and substitute it into start_url) so two app instances can't collide on 8086.",
+ "user_benefit": "Stops local malware or a hostile background browser tab from silently injecting forged OAuth codes/tokens into a running script, which would otherwise flow straight into SSH/HTTP operations against the whole host fleet.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\BrowserCallbackCaptureCommand.cs",
+   "lines": "219-224",
+   "note": "Fixed loopback prefix, default port 8086"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\BrowserCallbackCaptureCommand.cs",
+   "lines": "239-308, 436-451",
+   "note": "Any local GET/POST finalizes the step (first non-empty payload wins); captured values persisted into script variables consumed downstream"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+   "lines": "522-523",
+   "note": "The Vault OIDC flow validates state — the capture flow does not"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 3
+}

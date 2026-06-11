@@ -1,0 +1,31 @@
+{
+ "id": "BUG-070",
+ "title": "YAML hygiene lints flag block-scalar payloads: false tab/duplicate-key warnings on valid scripts",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "M",
+ "area": "editor",
+ "lens": "correctness",
+ "existing_state": "The hygiene lints run line-by-line over the whole script with zero block-scalar awareness (ScriptEditorValidationService.cs:259-354 — the loop never tracks `|`/`>` literal blocks). Consequences: (1) any tab inside a `command: |` / `content: |` payload (a Makefile written via writefile, tab-indented heredoc/Python sent via send) draws \"Tab indentation detected; use spaces for YAML indentation\" plus a second \"Mixed indentation\" warning on every such line (lines 267-301) — and a user who 'fixes' it corrupts the payload (Makefiles require tabs); (2) repeated `word: value`-shaped lines at the same indent inside a payload (e.g. two `description: ...` lines in a device config block, or YAML/config content written via writefile) trigger \"Duplicate key\" warnings (lines 304-354) even though the script is valid YAML — the real parser accepts it, only the lint complains. Additionally duplicate detection uses OrdinalIgnoreCase (line 337) although YAML keys are case-sensitive, so distinct keys like `Path:`/`path:` are falsely flagged. EnableYamlHygieneWarnings is on by default (Models/AppConfiguration.cs:182), so these squiggles persist on perfectly valid production scripts and train users to ignore warnings.",
+ "recommendation": "In BuildYamlHygieneDiagnostics, pre-compute block-scalar regions (a line whose value ends with `|`, `|-`, `|+`, `>` etc. starts a body covering all subsequent lines indented deeper than the key) and skip both lints inside those regions. Switch the duplicate-key HashSet to StringComparer.Ordinal. ~40 lines in ScriptEditorValidationService.cs plus unit cases in SSH_Helper.Tests/Editor.",
+ "user_benefit": "Warning squiggles only appear on real problems; users stop being told to 'fix' tabs that are part of the payload they're shipping to remote hosts.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptEditorValidationService.cs",
+   "lines": "267-301",
+   "note": "tab/mixed-indent lint inspects leading whitespace of every line, including block-scalar bodies"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptEditorValidationService.cs",
+   "lines": "304-354",
+   "note": "duplicate-key lint matches `key:`-shaped payload lines; case-insensitive comparer at line 337"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs",
+   "lines": "182",
+   "note": "EnableYamlHygieneWarnings defaults to true"
+  }
+ ]
+}

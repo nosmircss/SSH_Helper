@@ -1,0 +1,36 @@
+{
+ "id": "ENH-041",
+ "title": "Accepting a command completion inserts only 'name: ' — required-option metadata the provider already has is never scaffolded, and commands have no documentation hover",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "editor",
+ "lens": "ux",
+ "existing_state": "ScriptAutocompleteProvider hand-maintains RequiredOptionKeysByCommand for 35 commands — e.g. sftp requires action/local_path/remote_path, extract requires from/pattern/into (Services/Editor/ScriptAutocompleteProvider.cs:180-217) — but this data is only used to badge and sort option keys in a later popup. Accepting a command inserts the bare key plus ': ' (BuildCompletionInsertText, UI/ScintillaScriptEditorControl.cs:1365-1386); the user must then recall and type each required option, triggering autocomplete once per key. Command descriptions are terse 1-3 word strings ('Selection', 'Case match' — ScriptAutocompleteProvider.cs:116-161) drawn right-aligned in the popup and hidden entirely when width is tight, and the dwell tooltip covers only diagnostics and variables — hovering a command name shows nothing (Editor_DwellStart, UI/ScintillaScriptEditorControl.cs:810-844). The hand-maintained maps have also already drifted: the parser knows 14 top-level keys including 'preconnect' (Services/Scripting/ScriptParser.cs:70-86) but TopLevelKeyDescriptions has 13 — preconnect appears in the list with no description (ScriptAutocompleteProvider.cs:163-178).",
+ "recommendation": "(1) Snippet scaffolding: when a StepCommand completion is accepted, expand RequiredOptionKeysByCommand into an indented body ('- sftp:' newline '    action: ' newline '    local_path: ' ...) and place the caret at the first value — the Enter-accept path already chains a Smart Enter (UI/ScintillaScriptEditorControl.cs:911-926), so this replaces that chain for commands with required options; make it a CommandEditorSettings toggle. (2) Add a StepCommand branch to ResolveVariableTooltip/Editor_DwellStart that shows the command description plus its required/optional keys on hover. (3) While there, single-source the metadata: move descriptions and required-key lists next to ScriptParser's KnownStepKeys/KnownTopLevelKeys so a new command registered in the parser cannot silently lack editor metadata (fixes the existing preconnect drift).",
+ "user_benefit": "New users stop guessing YAML shapes ('what does sftp need again?') and power users author steps in one accept instead of four autocomplete round-trips. Single-sourcing also stops the editor quietly falling behind every time a script command is added.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptAutocompleteProvider.cs",
+   "lines": "180-217",
+   "note": "Required options per command already encoded but unused at insert time"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs",
+   "lines": "1365-1386",
+   "note": "Insert text is label + ': ' only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs",
+   "lines": "810-844",
+   "note": "Dwell tooltip covers diagnostics + variables only; no command help"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Editor\\ScriptAutocompleteProvider.cs",
+   "lines": "163-178",
+   "note": "TopLevelKeyDescriptions missing 'preconnect' vs ScriptParser.cs:70-86 — proof the hand-maintained maps drift"
+  }
+ ],
+ "mockup_idea": "Before/after: left shows today — popup accepts 'sftp', buffer reads '- sftp: ' with a blinking caret and nothing else; right shows the accepted snippet '- sftp:' with 'action: ', 'local_path: ', 'remote_path: ' pre-indented beneath, caret on the action value, plus a small hover card over 'sftp' reading 'SFTP transfer — required: action, local_path, remote_path'.",
+ "merged_from": 1
+}

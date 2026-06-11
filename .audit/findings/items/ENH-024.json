@@ -1,0 +1,41 @@
+{
+ "id": "ENH-024",
+ "title": "Run and Stop — the app's most frequent actions — have no keyboard path on the main form",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "keyboard-access",
+ "lens": "cross",
+ "existing_state": "Executing on hosts and stopping a run are mouse-only from the main window. ProcessCmdKey handles only Ctrl+S/Ctrl+F/Ctrl+Z/F3 (Form1.cs:14450-14480); the menu shortcut inventory is limited to file ops, find, and validate (Form1.Designer.cs:1503-1607 — Ctrl+O/Ctrl+S/Ctrl+Shift+S/Ctrl+F/Ctrl+Shift+V); there is no Run/Execute menu at all, and 'Run Selected'/'Stop' buttons carry no mnemonic (Designer:1055, 1073). Escape is handled nowhere at form level (only the preset-search box clears on Esc, Form1.cs:9021). Meanwhile the Flow Canvas window DOES bind F5 to run (useKeyboardShortcuts.ts:133), so the same app teaches F5=run in one window and ignores it in the other. Compounding it, the Stop button is a FlatVisualButton whose OnPaint draws no focus rectangle (UI/FlatVisualButton.cs:86-118) — even a user tabbing to Stop gets no visual cue it is focused.",
+ "recommendation": "Add F5 -> btnExecuteSelected.PerformClick() and Shift+F5 or Esc-while-executing -> StopExecution() in Form1.ProcessCmdKey (guard Esc on _executionCoordinator.IsRunning so it doesn't swallow normal Esc usage), matching the Flow Canvas F5 convention. Optionally add a 'Run' top-level menu (Run Selected / Run Checked / Stop / Test Connection) so the shortcuts are discoverable. In FlatVisualButton.OnPaint, draw ControlPaint.DrawFocusRectangle when Focused && ShowFocusCues.",
+ "user_benefit": "Fleet operators iterating command-tweak/run cycles can keep hands on the keyboard, and can abort a multi-host run instantly without mousing to the Stop button.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "14450-14480",
+   "note": "ProcessCmdKey: no F5/Esc/run/stop handling"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.Designer.cs",
+   "lines": "1503-1607",
+   "note": "Full ShortcutKeys inventory — nothing execution-related"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.Designer.cs",
+   "lines": "1055, 1073",
+   "note": "'Run Selected'/'Stop' button text without mnemonics"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\FlatVisualButton.cs",
+   "lines": "86-118",
+   "note": "OnPaint draws background/border/text only — no focus rectangle (used by btnStopAll, Designer:132)"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\hooks\\useKeyboardShortcuts.ts",
+   "lines": "133-146",
+   "note": "Canvas already establishes F5=run convention"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

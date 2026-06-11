@@ -1,0 +1,160 @@
+[
+ {
+  "id": "BUG-033",
+  "title": "Flow Canvas \"Test this step\" on a nested block executes ALL later blocks inside its container — the scope-disable logic is vacuous (and once fixed, the disables would leak into later full runs)",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "flowcanvas-bridge",
+  "lens": "correctness",
+  "existing_state": "ExecuteCanvasTestStep truncates the script only at TOP-LEVEL granularity (Form1.cs:7072, 7084; TryBuildYamlThroughTopLevelStep at 7356-7394 keeps the entire top-level step containing the target). Out-of-scope nested blocks are supposed to be disabled via BuildTestStepAllowedRoots + IsStepPathAllowed (Form1.cs:7131-7142). But BuildTestStepAllowedRoots adds the target's whole top-level step path as a root (`roots.Add(currentStepPath)` with currentStepPath = \"steps/{topLevelStepIndex}\", Form1.cs:7409-7410), and IsStepPathAllowed treats every root as a PREFIX (`stepPath.StartsWith(root + \"/\")`, Form1.cs:7451). Therefore every descendant of that step — sibling branches AND all siblings AFTER the selected block — is 'allowed', `testScopeDisabledNodes` is always empty, and the careful per-branch root computation at 7415-7438 is dead code (verified by tracing the code: for target steps/2/then/1 the roots set contains steps/2, which prefix-matches everything beneath it). Net effect: testing a block nested in a foreach/do or if/then runs the entire container against the live SSH host, including destructive steps placed after the one being tested. A second latent defect sits in the same method: the test-scope disables are merged into the persistent `_pendingDisabledBlocks` staging set (Form1.cs:7133-7142) and the `existingDisabledNodes` snapshot taken at 7137 is never used to restore it — the finally only resets the prompt anchor (7156-7159), and post-run cleanup deliberately leaves `_pendingDisabledBlocks` alone (Form1.cs:13826-13837) while the next full run re-applies every staged id (Form1.cs:12322-12361). Today this leak is masked only because the disable set is always empty; the moment the scoping bug is fixed, sibling branches disabled for a test would stay silently disabled for subsequent full runs.",
+  "recommendation": "Make intermediate container paths exact-match-only: in IsStepPathAllowed, only the FINAL target path (and fully-allowed prerequisite top-level steps steps/0..N-1) should be prefix roots; the chain of enclosing containers (steps/N, steps/N/do/2, ...) must match exactly so untargeted descendants stay disallowed. Keep the existing `{listScope}/0..targetIndexInScope` roots for earlier siblings. In the same change, restore `_pendingDisabledBlocks` to the pre-merge snapshot in the finally block (the snapshot already exists at Form1.cs:7137) — or pass the test-scope disables to ExecutePresetOnRowsAsync as an explicit parameter unioned only for that one run — so the now-real disables cannot leak into later full runs. Add a unit test asserting testScopeDisabledNodes is non-empty for a nested target with a later sibling, and that _pendingDisabledBlocks is unchanged after the test completes.",
+  "user_benefit": "\"Test this step\" is the safety feature users rely on to poke one command at a real device; today it can fire every subsequent command in the loop/branch (e.g. a config-write right after the show command you wanted to test). Fixing it without the restore would instead silently skip sibling branches in later full runs — this closes both holes together.",
+  "mockup_idea": "",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "7396-7442", "note": "BuildTestStepAllowedRoots adds steps/{topLevelStepIndex} as a root at 7409-7410, defeating the nested scoping below it"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "7444-7456", "note": "IsStepPathAllowed prefix-matches every root, so all descendants of the target's top-level step pass"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "7131-7159", "note": "testScopeDisabledNodes merged into _pendingDisabledBlocks; snapshot at 7137 never restored; finally resets only the prompt anchor"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "13826-13837, 12322-12361", "note": "post-run cleanup leaves _pendingDisabledBlocks; next run re-applies staged ids via ConfigureFlowCanvasDebugStateForRun"}
+  ]
+ },
+ {
+  "id": "BUG-034",
+  "title": "Deleting one wire silently drops every downstream block from the exported YAML — only the first orphan gets a warning",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "flowcanvas-bridge",
+  "lens": "data-integrity",
+  "existing_state": "Export order is built by walking edges from the Start block (FlowCanvasBridge.cs:1126-1137, BuildChain at 1696-1705); any node not reached is excluded from the YAML. The 'unreachable node' warning at FlowCanvasBridge.cs:1140-1152 only fires when the node ALSO has zero incoming edges (`!visited.Contains(nid) && !incomingCount.ContainsKey(nid)` at line 1145). So if a user deletes the wire between step 3 and step 4 of a 10-step preset and hits Run/Apply, only the orphan-chain head (step 4) gets a warning; steps 5-10 have incoming edges (from other orphans) and are dropped with NO diagnostic at all. The diagnostic is Warning-level, so export still succeeds (Success = no errors, FlowCanvasBridge.cs:1382-1385) and Form1.ApplyFlowCanvasGraph overwrites the editor text with the truncated YAML (Form1.cs:6932, 6966-6969). The preset layout saved at Form1.cs:6989-7001 stores only positions/comments — block content lives in the YAML snippets — so once the canvas reloads from the truncated YAML, the dropped steps are unrecoverable.",
+  "recommendation": "In ExportGraphToYaml, warn for EVERY excluded executable node, not just edge-less ones: compute the orphan set as all non-hidden, non-child, non-comment nodes absent from `visited` and emit one diagnostic each (or one grouped diagnostic listing them). Drop the `!incomingCount.ContainsKey(nid)` clause at FlowCanvasBridge.cs:1145. Consider escalating to Error severity (blocking apply) when the orphan set contains snippet-bearing top-level steps, or have Form1 require an explicit confirmation before overwriting txtCommand when any node was excluded.",
+  "user_benefit": "Prevents silent loss of script steps from a single accidental edge deletion — today most of a preset can vanish from the YAML with one easy-to-miss warning about a single node.",
+  "mockup_idea": "Before/after of the apply flow: 'before' shows the current single toast warning naming one node id while 9 blocks quietly disappear from the YAML preview; 'after' shows a blocking confirmation dialog listing all excluded blocks by label with Keep-in-YAML / Remove choices.",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "1126-1152", "note": "chain built from Start only; warning gated on having zero incoming edges, so downstream orphans are silently excluded"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "1696-1705", "note": "BuildChain DFS — defines `visited`"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "6932, 6966-6969", "note": "graphChanged=true (an edge delete is a change) overwrites txtCommand with the truncated YAML; warnings do not block"}
+  ]
+ },
+ {
+  "id": "BUG-035",
+  "title": "Disabled-block state is persisted and restored by unstable raw node id — the wrong block gets silently skipped after the preset's YAML changes",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "flowcanvas-state",
+  "lens": "correctness",
+  "existing_state": "Layout autosave persists node positions keyed by the stable `stepPath:blockType` tuple, but `disabledBlocks` and `expandedNodes` are flat arrays of raw live node ids (FlowCanvas/src/utils/layoutAutosave.ts:51-61). On the next open, the host re-applies them by raw id: `MergeAuxiliaryLayout` stamps `data.disabled = true` on whichever node currently has that id (Services/FlowCanvasBridge.cs:5444-5456), and React then rebuilds its disabled set from that stamp (stores/messageBridge.ts:169-177). Node ids are reassigned sequentially on every import (`node-{_idCounter++}`, FlowCanvasBridge.cs:331), so any change that shifts step order between the autosave and the next open — editing the preset in the text editor, deleting a step, inserting one above — moves the disabled flag onto a DIFFERENT block, which the executor then skips during runs. The codebase already knows ids are unstable: position merge was migrated to the tuple key for exactly this reason (`TryMergeLayoutByTuple`, FlowCanvasBridge.cs:5403-5441, with 'pre-migration entry: no stable key' comment at :5409), but disabled/expanded were left id-keyed. Compounding it, deleting a node never purges its id from `disabledBlocks`/`breakpoints`/`expandedNodes` (graphSlice.ts:447-456 filters only selectedNodeIds), so a deleted disabled block's stale id is persisted by every autosave (layoutAutosave.ts:60) and lands on whichever block inherits that id after the ids shift.",
+  "recommendation": "Key disabled (and expanded) persistence by the same `stepPath:blockType` tuple as positions: include the tuple in the autosave payload (layoutAutosave.ts) and match on it in MergeAuxiliaryLayout instead of raw id, with the same 'vanished tuple -> drop' safety rule TryMergeLayoutByTuple uses. Separately, purge removed node ids from `disabledBlocks`, `breakpoints`, and `expandedNodes` inside `removeNodes`/`onNodesChange` remove handling in graphSlice.ts.",
+  "user_benefit": "A block the user never disabled can currently be skipped in a multi-host run — silently producing an incomplete deployment/audit — just because they edited the script after disabling a different block.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\layoutAutosave.ts", "lines": "51-61", "note": "positions carry the stable tuple; disabledBlocks/expandedNodes are raw ids"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "5444-5463", "note": "MergeAuxiliaryLayout stamps disabled/expanded by raw id"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "331, 5403-5441", "note": "ids reassigned per import; position merge deliberately tuple-keyed because ids are unstable"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\graphSlice.ts", "lines": "447-456", "note": "removeNodes never purges the debug Sets — stale ids keep getting autosaved"}
+  ]
+ },
+ {
+  "id": "BUG-036",
+  "title": "Breakpoints leak across preset switches on both sides of the bridge — runs pause at invisible breakpoints and the first gutter click does nothing",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "S",
+  "area": "flowcanvas-state",
+  "lens": "reliability",
+  "existing_state": "When a new graph loads, `resetGraphSessionState` clears dirty/history/execution/timeline/exportStatus/iterations (FlowCanvas/src/stores/messageBridge.ts:74-81) and the load handler explicitly re-restores `disabledBlocks` and `expandedNodes` from node data — the comment at messageBridge.ts:164-168 documents that this exact leak was fixed for those two Sets because preset node ids collide. The `breakpoints` Set got no such treatment: debugSlice has no clear or restore action for it (stores/slices/debugSlice.ts:36, 41-56) and nothing in the load path touches it. The host mirrors the leak: Form1's `_pendingBreakpoints` accumulates via toggle messages (Form1.cs:182, 6756-6771) and is only cleared inside the run-start path, which immediately re-adds every stale id that exists in the new preset's node map (Form1.cs:12322, 12346-12349, 13811-13824) before feeding them into the executor's debug state (Form1.cs:12358-12361, 13878-13879). Since node ids are reassigned sequentially per import (`node-{_idCounter++}`, Services/FlowCanvasBridge.cs:331), a stale `node-5` from preset A almost always matches an unrelated block in preset B. Concrete failure: set a breakpoint in preset A, switch the open canvas to preset B, run — execution pauses at an arbitrary block with NO visible dot (BaseBlock renders the dot from data.breakpoint, nodes/BaseBlock.tsx:149, which the fresh load doesn't carry), looking like a hang against live SSH hosts. Toggling a breakpoint on a stale id also inverts: the first gutter click REMOVES the hidden entry, so the user must click twice to actually set a breakpoint.",
+  "recommendation": "Mirror the disabled/expanded fix: in the `load-graph` handler (or resetGraphSessionState) always reset the breakpoints Set — clear it, restoring from node data if the host ever stamps breakpoints — and notify the host to clear `_pendingBreakpoints` (a lightweight 'breakpoints-clear' message handled next to OnBreakpointToggle in Form1, or clear it directly when a new graph is loaded into the canvas). The run-start id-existence filter (Form1.cs:12346-12349) is not a sufficient guard because ids collide across presets by construction. Symmetry with the existing always-restore pattern makes this a small, well-precedented change.",
+  "user_benefit": "Debugging a preset no longer inherits ghost breakpoints from the previously opened preset — fleet runs against live SSH hosts won't mysteriously freeze at an unmarked block (currently the only recovery is guessing or restarting the canvas), and gutter clicks set breakpoints on the first try.",
+  "mockup_idea": "",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\messageBridge.ts", "lines": "74-81, 162-183", "note": "session reset + load-graph always-restore cover disabled/expanded only; breakpoints Set untouched"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\debugSlice.ts", "lines": "36, 41-56", "note": "breakpoints Set has toggle only — no clear/restore API; stale entry makes the first click a removal"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "182, 6756-6771, 12322-12361, 13811-13824", "note": "_pendingBreakpoints survives preset switches; run-start filter passes colliding ids into the executor debug state"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "331", "note": "NextId() => node-{_idCounter++} — ids guaranteed to collide across presets"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\nodes\\BaseBlock.tsx", "lines": "149", "note": "dot renders from data.breakpoint, so the stale Set entry is invisible on the new preset"}
+  ]
+ },
+ {
+  "id": "BUG-037",
+  "title": "No global exception handler: any unhandled error is a stock crash with no save, no log — and two startup paths throw unhandled",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "cross-startup",
+  "lens": "reliability",
+  "existing_state": "There are zero registrations of Application.ThreadException, AppDomain.CurrentDomain.UnhandledException, or Application.SetUnhandledExceptionMode anywhere in the codebase (grep across all .cs files returns no hits). Program.Main runs Application.Run(new Form1()) bare (Program.cs:59). Concrete unhandled startup throws exist today: (a) ScintillaNativeBootstrap.ExtractEmbeddedNativeLibraries throws InvalidOperationException when both extraction roots are unwritable (Utilities/ScintillaNativeBootstrap.cs:84-86, called from Program.cs:58) — hard crash before any window; (b) AppDataPaths.ValidateStartupStorageWritable returns true without probing in standard builds (Utilities/AppDataPaths.cs:99-100), so a locked-down or full %LocalAppData% surfaces as a raw exception inside the Form1 constructor (GetAppFolder/Directory.CreateDirectory via ConfigurationService at Form1.cs:344, or the first-run default-config Save at ConfigurationService.cs:48-53). At runtime, any stray exception on the UI thread kills a process that may hold an unsaved host grid, running SSH sessions, and the scheduler — with no log, no state flush, and (because LastAppShutdownUtc is only written in FormClosing, Form1.cs:3946) corrupted missed-run bookkeeping on the next start.",
+  "recommendation": "In Program.Main: wrap the bootstrap (ConfigureSatelliteDirectory onward) in try/catch that shows an actionable error dialog; register Application.ThreadException and AppDomain.CurrentDomain.UnhandledException handlers that write the exception to a crash log under AppDataPaths.GetAppFolder() and attempt a best-effort SaveConfiguration before exiting; extend ValidateStartupStorageWritable to probe %LocalAppData%\\SSH_Helper in standard builds too (TryEnsureFolderWritable already exists and is only wired for portable mode).",
+  "user_benefit": "Crashes stop silently destroying in-session work and become diagnosable; the two real startup-crash paths (unwritable AppData, failed native extraction) get a clear message instead of a stack-trace dialog or instant process death.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Program.cs", "lines": "13-60", "note": "Main has no try/catch and registers no global exception handlers"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\ScintillaNativeBootstrap.cs", "lines": "84-86", "note": "throws InvalidOperationException pre-UI when extraction roots are unwritable; unhandled in Main"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\AppDataPaths.cs", "lines": "95-108", "note": "ValidateStartupStorageWritable early-returns true for non-portable builds, never probing LocalAppData"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "344-349", "note": "ConfigurationService/Load in the constructor — storage failures here are unhandled"}
+  ]
+ },
+ {
+  "id": "BUG-038",
+  "title": "Release pipeline never runs the .NET test suite or FlowCanvas unit tests, and no CI runs on push/PR at all",
+  "category": "BUG",
+  "severity": "high",
+  "effort": "M",
+  "area": "models-samples-build",
+  "lens": "build-ci",
+  "existing_state": "The repo has exactly one workflow, .github/workflows/build-release.yml. Its triggers are tags 'v*' and manual dispatch only — the push-to-master and pull_request triggers are commented out (build-release.yml:3-10). The three jobs are: flowcanvas-browser-tests (Playwright e2e only, line 41-43), build (two dotnet publish calls, lines 83-87), and release (lines 95-138). `dotnet test` appears nowhere, so the entire SSH_Helper.Tests xUnit suite — including the suites that validate every ScriptSamples YAML (CanonicalCommandMapSyntaxTests) and the FlowCanvas bridge parity tests — never executes in CI. The FlowCanvas vitest unit suite (`npm test`) is likewise never run; only e2e is. Net effect: every commit lands on master unverified, and release binaries are published from code whose unit/integration tests may be red.",
+  "recommendation": "Add a test job to the workflow (or a separate ci.yml) that runs `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj` on windows-2022 (use `-p:SkipFlowCanvasBuild=true` to avoid the Node build, and apply the known UI-test parallel-hang mitigation: exclude the UI namespace or run with --blame-hang-timeout) plus `npm test` in FlowCanvas/, then make `build` depend on it. Re-enable the push/PR triggers for the test jobs (keep publish/release tag-gated as today).",
+  "user_benefit": "The project maintains a substantial test suite that currently protects nothing in CI; wiring it in means regressions are caught before they land on master or ship in a tagged release.",
+  "mockup_idea": "",
+  "merged_from": 1,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml", "lines": "3-10", "note": "push branches and pull_request triggers commented out; only v* tags + workflow_dispatch"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\.github\\workflows\\build-release.yml", "lines": "16-93", "note": "Jobs run Playwright e2e and dotnet publish only — no dotnet test, no vitest anywhere"}
+  ]
+ },
+ {
+  "id": "BUG-039",
+  "title": "Preset-to-canvas load failures are swallowed, leaving the previous preset's graph live — Apply then overwrites the new preset's YAML with the old script",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "flowcanvas-bridge",
+  "lens": "data-integrity",
+  "existing_state": "LoadCurrentScriptIntoCanvas wraps the whole bridge conversion in a bare `catch { /* Silently fail — canvas will show empty state */ }` (Form1.cs:6844-6889). The comment is wrong for the common case: on failure no LoadGraph message is sent at all, so an open canvas keeps rendering whatever was loaded before. TextToGraph calls ScriptParser.Parse directly (Services/FlowCanvasBridge.cs:381-391), which can throw on YAML that passes the lightweight IsYamlScript heuristic gate (Form1.cs:6838) — e.g. a hand-edited preset with a syntax error. Concrete hazard: switch from preset A to broken preset B with the canvas open (LoadPresetIntoEditor, Form1.cs:2148-2160) — `_activePresetName` is now B but the canvas still shows A's blocks; pressing Apply or Run from the canvas calls ApplyFlowCanvasGraph, which exports the stale graph and writes it into txtCommand when graphChanged is true (Form1.cs:6966-6969) — replacing the newly selected preset's content with the previous preset's script; saving the preset persists the cross-preset overwrite. Relatedly, BuildNodeIdToStepPathMap has a swallow-all catch returning an empty map (FlowCanvasBridge.cs:5224-5227), so a run on un-graphable YAML silently loses all canvas highlighting/output attribution. The same swallow also hides genuine bridge bugs as a mystery 'empty canvas'.",
+  "recommendation": "In the catch block, capture the exception and send the canvas an explicit failure state instead of nothing: at minimum `LoadGraph(new JArray(), new JArray())` plus an error banner naming the preset and parse error (or a dedicated load-failed message), so the stale graph is cleared and Apply cannot export stale content. Log the exception via SshDebugLog. Consider an `importFailed` flag in load-graph so React can disable Apply/Run until a valid graph loads.",
+  "user_benefit": "Eliminates a confusing and dangerous state where the canvas displays one preset while edits/runs target another — preventing a silent failure from escalating into real data loss when applying from a stale canvas replaces one preset's YAML with another preset's script.",
+  "mockup_idea": "Small before/after of the canvas: before — old graph silently shown for the wrong preset; after — empty canvas with a banner 'Could not load \"<preset>\" into the canvas: YAML parse error at line N' and a Retry link.",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "6831-6890", "note": "swallow-all catch; no LoadGraph sent on failure, comment claims empty state incorrectly"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "6966-6969", "note": "Apply writes exported (stale) graph YAML into txtCommand"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "381-391", "note": "TextToGraph strict-parses with ScriptParser; throws on YAML the IsYamlScript heuristic accepted"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs", "lines": "5224-5227", "note": "BuildNodeIdToStepPathMap swallow-all returns empty map — debug highlighting dies silently"}
+  ]
+ },
+ {
+  "id": "BUG-040",
+  "title": "History lies after a crash: the interrupted run vanishes, and the next startup logs false 'Skipped' entries for runs that actually executed",
+  "category": "BUG",
+  "severity": "medium",
+  "effort": "S",
+  "area": "jobs-scheduling",
+  "lens": "correctness",
+  "existing_state": "Two crash-path defects compound. (1) Crash recovery in Initialize() finds orphaned RunningState and raises only a transient JobStateChanged(Failed, 'Application crashed during execution') (Services/JobExecutionService.cs:153-168); it never raises JobCompleted, and JobHistoryService persists runs only from JobCompleted (Services/JobHistoryService.cs:36-47). The crashed run therefore leaves zero trace in run history — a cron job that dies mid-run every night shows a clean history, and the Job List 'Last Result' column (JobListDialog.cs:755-763 reads the newest history record) keeps showing the previous night's 'OK (n/n)'. (2) LastAppShutdownUtc is written only in the graceful FormClosing path (Form1.cs:3946). After a crash, the next launch anchors missed-run detection to the PREVIOUS graceful shutdown (Form1.cs:15265-15272), so the detection window swallows the entire crashed session — every recurring run that genuinely executed during that session is re-counted and written into history as 'Skipped (N runs)' (Form1.cs:15276-15282, rendered orange in JobListDialog). Together, after any crash the history both omits the run that died and fabricates misses for runs that succeeded.",
+  "recommendation": "(1) In Initialize(), synthesize a failed JobRunResult (Success=false, ErrorMessage='Application crashed during execution', StartedUtc from RunningState.StartedUtc, CompletedUtc now, empty HostOutputs — mirror the OnJobFailed shape at JobExecutionService.cs:909-927) and raise JobCompleted so the existing history pipeline records it. (2) Heartbeat the downtime anchor: update LastAppShutdownUtc (or a dedicated LastSchedulerEvaluationUtc) at the end of each 30-second evaluation pass — or at minimum exclude occurrences older than the orphaned RunningState timestamps — so post-crash missed-run detection only covers true downtime.",
+  "user_benefit": "After a crash or forced reboot during the nightly window, the morning review shows an honest 'FAIL — application crashed' row instead of yesterday's success, and the 'Skipped' rows stop lying about runs that actually executed — exactly the moments when accurate history matters most.",
+  "mockup_idea": "",
+  "merged_from": 2,
+  "evidence": [
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs", "lines": "153-168", "note": "Crash recovery raises JobStateChanged only; no JobCompleted, so nothing reaches history"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobHistoryService.cs", "lines": "36-47", "note": "History persists exclusively via the JobCompleted subscription"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs", "lines": "3946, 15265-15282", "note": "Shutdown timestamp written only on graceful close; missed-run window anchored to it at startup"},
+   {"file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs", "lines": "755-763", "note": "Last Result column reads the newest history record — crash leaves it stale"}
+  ]
+ }
+]

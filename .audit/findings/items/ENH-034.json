@@ -1,0 +1,31 @@
+{
+ "id": "ENH-034",
+ "title": "extract regex options are hardcoded (IgnoreCase|Multiline) with no way to opt out; named groups silently overwrite variables",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-commands-a",
+ "lens": "ux",
+ "existing_state": "ExtractCommand compiles every user pattern with hardcoded `RegexOptions.Multiline | RegexOptions.IgnoreCase` (Services/Scripting/Commands/ExtractCommand.cs:60). The parser's allowed-key table for extract is only `from, pattern, into, match, required` (Services/Scripting/ScriptParser.cs:114) — there is no flags/options key, so case-sensitive matching of device output (interface flags, base64 tokens, mixed-case hostnames) is impossible unless the user happens to know the undocumented .NET inline-modifier workaround `(?-i)`. There is also no singleline/dotall option for patterns spanning config blocks. Separately, every named capture group is auto-exported as a context variable of the same name (ExposeNamedGroups, ExtractCommand.cs:195-208), silently overwriting any existing script variable that shares the name, with no opt-out.",
+ "recommendation": "Add an optional `flags:` (or individual `case_sensitive: true`, `dotall: true`) key to ExtractOptions, thread it into the RegexOptions construction at ExtractCommand.cs:60, and register the key in the ScriptParser allowed-key table at line 114 plus the extract option parser so editor validation/autocomplete pick it up. While in there, add an optional `export_groups: false` to suppress ExposeNamedGroups for scripts that use named groups purely for pattern readability. Document the inline `(?-i)` escape hatch in the command reference either way.",
+ "user_benefit": "Precise parsing of case-significant device output without regex contortions, and no more mystery variable clobbering when a named group collides with an existing script variable.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExtractCommand.cs",
+   "lines": "60",
+   "note": "hardcoded Multiline | IgnoreCase"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExtractCommand.cs",
+   "lines": "195-208",
+   "note": "named groups unconditionally exported as variables, overwriting existing ones"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs",
+   "lines": "114",
+   "note": "allowed keys: from, pattern, into, match, required — no flags key exists"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

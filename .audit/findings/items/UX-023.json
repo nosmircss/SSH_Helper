@@ -1,0 +1,51 @@
+{
+ "id": "UX-023",
+ "title": "Cancel and on_error: continue mean different things in every interactive/file command — and confirm cannot be cancelled at all",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-b",
+ "lens": "ux",
+ "existing_state": "Pressing Cancel in a script prompt does a different thing depending on which command opened it: readfile's picker aborts the entire run via CommandResult.Exit(ScriptExitStatus.Cancelled) (Services/Scripting/Commands/ReadFileCommand.cs:360-370); input, choose, and multiselect return a plain step Fail bypassing ApplyOnError even though their other failures honor on_error: continue (InputCommand.cs:61-65/82, ChooseCommand.cs:58-62/78, MultiselectCommand.cs:56-60); writefile's save dialog returns Fail, or Suppressed under on_error: continue (WriteFileCommand.cs:42-51). Meanwhile `confirm` offers no cancel path at all: ESC and window-close map to the No button (ConfirmCommand.cs:114 CancelButton = btnNo), so the script always proceeds with the literal string 'false' stored (ConfirmCommand.cs:41-42) — an operator who wants to abort the run at a confirmation gate cannot express that from the dialog. on_error: continue is equally inconsistent: readfile and writefile path/extension validation errors return CommandResult.Ok(message) — plain success, not even flagged as suppressed (ReadFileCommand.cs:62-65, 84-87, 95-98; WriteFileCommand.cs:58-59) — while every other command goes through ApplyOnError → Suppressed; and playsound silently treats an omitted on_error as continue (PlaySoundCommand.cs:127-134), documented only in a code comment. Finally, the unattended-run dialog gate exists only in readfile (AllowFileSelectionDialogs check, ReadFileCommand.cs:237-238); writefile with a relative path pops its modal save dialog unconditionally (WriteFileCommand.cs:175-182), so a scheduled job stalls on an invisible dialog.",
+ "recommendation": "Define one contract and apply it across the commands: (1) Cancel produces one consistent result — e.g. Fail with a 'cancelled by user' message routed through ApplyOnError, plus an optional per-step on_cancel: fail|exit|continue for scripts that want the readfile abort-the-run behavior, and a <into>_cancelled marker variable so scripts can branch; (2) give confirm an optional allow_cancel: true that adds a Cancel button distinct from No, failing the step under the same contract (register the key in the parser tables, ScriptParser.cs:138); (3) every on_error: continue path returns CommandResult.Suppressed (route through ApplyOnError), never bare Ok, so _last_error and the canvas suppressed-error styling work; (4) gate writefile's save dialog on context.AllowFileSelectionDialogs like readfile; (5) make playsound's continue-by-default explicit in docs/validator.",
+ "user_benefit": "Script authors can predict what Cancel and on_error: continue actually do instead of learning per-command folklore, operators get a real 'abort here' affordance at confirmation gates, and scheduled jobs stop stalling on invisible save dialogs.",
+ "evidence": [
+  {
+   "file": "Services/Scripting/Commands/ReadFileCommand.cs",
+   "lines": "360-370, 62-65, 84-87, 95-98, 237-238",
+   "note": "cancel = Exit(Cancelled); continue = bare Ok; only command gated on AllowFileSelectionDialogs"
+  },
+  {
+   "file": "Services/Scripting/Commands/InputCommand.cs",
+   "lines": "61-65, 82",
+   "note": "cancel = plain Fail bypassing ApplyOnError; other errors honor on_error"
+  },
+  {
+   "file": "Services/Scripting/Commands/ChooseCommand.cs",
+   "lines": "58-62, 78",
+   "note": "same split in choose"
+  },
+  {
+   "file": "Services/Scripting/Commands/MultiselectCommand.cs",
+   "lines": "56-60",
+   "note": "cancel = plain Fail"
+  },
+  {
+   "file": "Services/Scripting/Commands/ConfirmCommand.cs",
+   "lines": "41-42, 113-114",
+   "note": "ESC/close maps to No; 'false' stored; no abort path"
+  },
+  {
+   "file": "Services/Scripting/Commands/WriteFileCommand.cs",
+   "lines": "42-51, 58-59, 175-182",
+   "note": "cancel = Fail/Suppressed; validation continue = bare Ok; relative-path dialog has no unattended gate"
+  },
+  {
+   "file": "Services/Scripting/Commands/PlaySoundCommand.cs",
+   "lines": "127-134",
+   "note": "omitted on_error silently defaults to continue — unique among all commands"
+  }
+ ],
+ "mockup_idea": "The Script Confirmation dialog with three buttons — Yes / No / Cancel run — where Cancel run is visually separated (left-aligned, subdued), illustrating the difference between answering the question and aborting the gate.",
+ "merged_from": 2
+}

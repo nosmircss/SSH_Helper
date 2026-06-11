@@ -1,0 +1,36 @@
+{
+ "id": "ENH-010",
+ "title": "Renaming an environment silently breaks YAML 'environment:' headers, and a missing declared environment only flashes the status bar before running against the wrong fleet",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "persistence-config",
+ "lens": "ux",
+ "existing_state": "Environment rename does cascade to folder base-environment overrides (EnvironmentDialog.cs:471-472 calls both EnvironmentService.RenameEnvironment and PresetManager.RenameFolderBaseEnvironment, Services/PresetManager.cs:880-904), but nothing rewrites the 'environment: <name>' headers embedded in YAML preset commands. After a rename, loading such a preset hits the missing-environment branch in ApplyPresetEnvironmentOnPresetLoad (Form1.cs:2189-2192), which only writes \"Preset 'X' requested environment 'old-name', but it was not found.\" to the status bar (Utilities/PresetEnvironmentStatusFormatter.cs:40) — a transient line that is easy to miss. The preset stays loaded against whatever environment (and host list) is currently active, and Run executes against those hosts with no further check.",
+ "recommendation": "Two parts: (1) in the rename flow (EnvironmentDialog.BtnRename), scan preset Commands for YAML scripts whose parsed script.Environment equals the old name (TryGetScriptDeclaredEnvironment already does the parse, Form1.cs:2201+) and offer \"3 presets declare environment 'prod' — update them to 'production'?\" with a one-click rewrite of the environment: line; (2) elevate the missing-environment case at preset load from a status-bar line to a persistent inline banner near the Run button (\"Declared environment 'prod' not found — running against 'staging' hosts\"), since the consequence is executing commands against the wrong device fleet.",
+ "user_benefit": "Environment auto-switch exists precisely so a prod preset cannot run against the wrong hosts; a routine rename quietly defeats it today. The cascade plus a visible warning closes the wrong-fleet footgun.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "2186-2199",
+   "note": "missing declared environment -> status bar only, load continues on current env"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\PresetEnvironmentStatusFormatter.cs",
+   "lines": "32-40",
+   "note": "the only feedback text"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\EnvironmentDialog.cs",
+   "lines": "471-472",
+   "note": "rename cascades folders but nothing rewrites YAML environment: headers"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\PresetManager.cs",
+   "lines": "880-904",
+   "note": "existing folder cascade to model the preset-header cascade on"
+  }
+ ],
+ "mockup_idea": "After-state sketch: preset header area showing an amber banner 'Environment \"prod\" declared by this preset was not found — currently targeting \"Default\" (212 hosts)' with a [Pick environment] link, replacing the transient status-bar text.",
+ "merged_from": 1
+}

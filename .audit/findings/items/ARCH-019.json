@@ -1,0 +1,26 @@
+{
+ "id": "ARCH-019",
+ "title": "Application version has no single source of truth: hardcoded const drives updates while the assembly says 1.0.0.0",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "cross-startup",
+ "lens": "perf",
+ "existing_state": "The real version exists only as private const ApplicationVersion = \"0.51.23\" in Form1.cs:115. SSH_Helper.csproj contains no <Version>/<AssemblyVersion>/<FileVersion> property at all (verified — the only Version strings are PackageReference attributes), so the compiled exe's assembly/file version is the default 1.0.0.0 and disagrees with the title bar (Form1.cs:329). Critically, UpdateService is constructed with this const (Form1.cs:374-377) and compares GitHub releases against it — so each release requires manually bumping the const, the git branch name (currently also '0.51.23'), and the GitHub tag in sync. A missed const bump means every user is re-offered the version they already run (update loop) or never offered the next one; meanwhile file-properties/installer tooling sees 1.0.0.0 forever.",
+ "recommendation": "Add <Version>0.51.23</Version> to SSH_Helper.csproj as the single source (CI can override via -p:Version=). Replace the const with a static property reading Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>() (trimming any +commit suffix) and use it for the title, AboutDialog, NoUpdateDialog, and the UpdateService comparison. Delete the Form1.cs:115 const.",
+ "user_benefit": "Releases can no longer ship with a stale in-app version that breaks the self-updater for every user, and the exe's file properties finally match the product version.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "115, 329, 374-377",
+   "note": "hand-maintained const is the title and the update-comparison baseline"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SSH_Helper.csproj",
+   "lines": "1-72",
+   "note": "no Version/AssemblyVersion property anywhere — assembly defaults to 1.0.0.0"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

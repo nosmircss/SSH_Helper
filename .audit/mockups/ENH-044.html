@@ -1,0 +1,76 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace}
+.cap{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 4px}
+.cap b{color:#ff5c5c;font-weight:600}.cap i{color:#2bd97c;font-style:normal;font-weight:600}
+.row{display:flex;gap:10px}
+.term{flex:1;border:1px solid #1c2330;border-radius:6px;overflow:hidden;background:#000}
+.tbar{background:#141a24;color:#8294a8;font-size:10px;padding:4px 8px;border-bottom:1px solid #1c2330;display:flex;justify-content:space-between}
+.tbar span{color:#46546a}.tbar .z{color:#4cc9f0}
+pre{margin:0;padding:7px 9px;color:#bbb;line-height:1.35;overflow:hidden}
+.b pre{font:13px "Courier New",monospace}
+.a pre{font:15px "Cascadia Code",Consolas,monospace}
+.lost{color:#ff5c5c;font-style:italic}
+.note{font-size:10px;color:#8294a8;margin:4px 1px 12px;line-height:1.45}
+.note c{color:#4cc9f0}
+.set{border:1px solid #1c2330;border-radius:6px;background:#11151d;padding:9px 12px}
+.set h4{margin:0 0 8px;font-size:10px;color:#4cc9f0;letter-spacing:.1em;text-transform:uppercase;font-weight:600}
+.fr{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:11px;flex-wrap:wrap}
+.fr label{color:#8294a8;width:118px}
+.in{background:#0b0e13;border:1px solid #2a3447;border-radius:3px;padding:3px 8px;color:#c9d4e3}
+.in u{text-decoration:none;color:#8294a8;margin-left:10px}
+.spin{padding-right:4px}
+.chk{display:inline-flex;align-items:center;gap:6px;color:#c9d4e3}
+.box{width:11px;height:11px;border:1px solid #2bd97c;border-radius:2px;background:#12241a;color:#2bd97c;font-size:9px;line-height:11px;text-align:center}
+.hint{color:#8294a8;font-size:10px}
+.new{color:#2bd97c;font-size:9px;border:1px solid #2bd97c55;border-radius:3px;padding:0 4px}
+</style></head><body>
+
+<div class="row">
+ <p class="cap" style="flex:1"><b>Before</b> — hardcoded Courier New 10pt</p>
+ <p class="cap" style="flex:1"><i>After</i> — Code font + zoom + scrollback</p>
+</div>
+<div class="row">
+ <div class="term b">
+  <div class="tbar">edge-fw-02 (10.0.40.11) — SSH<span>72×18</span></div>
+  <pre><span class="lost">── scrollback full (10,000 lines) — earlier output discarded ──</span>
+get system status
+Version: FortiGate-100F v7.4.5 build2702
+Serial-Number: FG100FTK22003917
+Hostname: edge-fw-02
+edge-fw-02 # diagnose sys top 5
+Run Time:  41 days, 6 hours
+0U, 0N, 2S, 97I; 7975T, 5310F
+   ipsengine   217   S   1.9   3.1
+edge-fw-02 # _</pre>
+ </div>
+ <div class="term a">
+  <div class="tbar">edge-fw-02 (10.0.40.11) — SSH<span class="z">⌕ 120% · Ctrl+Wheel</span><span>64×14</span></div>
+  <pre>get system status
+Version: FortiGate-100F v7.4.5 build2702
+Serial-Number: FG100FTK22003917
+Hostname: edge-fw-02
+edge-fw-02 # diagnose sys top 5
+Run Time:  41 days, 6 hours
+edge-fw-02 # _</pre>
+ </div>
+</div>
+<div class="row">
+ <p class="note" style="flex:1"><b style="color:#ff5c5c">BEFORE</b> — Courier New 10pt hardcoded (InteractiveTerminalForm.cs:117); ignores the app-wide Code font; <i>show tech-support</i> blows past the fixed 10k-line history.</p>
+ <p class="note" style="flex:1"><b style="color:#2bd97c">AFTER</b> — inherits <c>FontSettings.CodeFontFamily</c> (Cascadia Code 12pt), live Ctrl+Wheel zoom — FontChanged already renegotiates cols/rows for free.</p>
+</div>
+
+<p class="cap"><i>AFTER</i> — new Settings → Terminal section (today: zero terminal options)</p>
+<div class="set">
+ <h4>Terminal</h4>
+ <div class="fr"><label>Terminal font</label><span class="in">Cascadia Code ▾</span>
+  <span class="chk"><span class="box">✓</span>Inherit Code editor font</span></div>
+ <div class="fr"><label>Font size</label><span class="in spin">12 <u>▲▼</u></span>
+  <span class="hint">Ctrl + Mouse Wheel zooms live</span><span class="new">NEW</span></div>
+ <div class="fr"><label>Scrollback lines</label><span class="in">50,000</span>
+  <span class="hint">was fixed at 10,000 (SshTerminalOptionsFactory)</span><span class="new">NEW</span></div>
+ <div class="fr"><label>Window position</label>
+  <span class="chk"><span class="box">✓</span>Remember across restarts (WindowState)</span><span class="new">NEW</span></div>
+</div>
+
+</body></html>

@@ -1,0 +1,31 @@
+{
+ "id": "ENH-026",
+ "title": "Missed runs after sleep/reboot are recorded but dead-end — no startup prompt or catch-up option",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scheduler-e2e",
+ "lens": "cross",
+ "existing_state": "On startup, RecordMissedSchedulerRunsOnStartup (Form1.cs:15258-15283) detects recurring runs missed during downtime (via SchedulingService.DetectMissedRunSummaries, Services/SchedulingService.cs:148-181) and writes one aggregated skipped-summary record into each affected job's history — and that is the entire surfacing. There is no startup banner, no toast, no prompt, and no \"run missed jobs now\" affordance; the orange 'SKIPPED (n)' row is visible only if the user opens the Job List dialog AND selects that specific job's history. Missed runs are never auto-executed (by design), but the user is also never told they were missed. Note this covers shutdown-to-startup gaps only; the detection anchors on LastAppShutdownUtc, so laptop sleep without app restart is handled separately by the evaluation window and collapses multiple missed occurrences into one run (JobExecutionService.cs:1028).",
+ "recommendation": "Make the existing summaries actionable at startup: after RecordMissedSchedulerRunsOnStartup, if any summaries were written, show a dismissible non-modal notification (output-panel line + optional toast) like \"3 scheduled runs were missed while SSH Helper was closed\" with a click-through to the Job List, and add a 'Run missed jobs now' action that fan-outs RunNowAsync for the affected job ids (reusing RunTrackedJobNowAsync, Form1.cs:15311-15326). Optionally a per-job 'catch up on missed runs at startup' checkbox for jobs where one late run is acceptable (the standard cron 'catch-up' / anacron semantic for nightly backups).",
+ "user_benefit": "A machine that was off overnight currently produces silently-missing backups; the operator must know to go digging in per-job history. A one-line prompt with a catch-up action turns downtime into at most one click of recovery.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "15258-15283",
+   "note": "Missed-run detection writes history summaries only; no UI surfacing or action"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SchedulingService.cs",
+   "lines": "148-181",
+   "note": "DetectMissedRunSummaries — enabled recurring jobs only"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "15311-15326",
+   "note": "RunTrackedJobNowAsync already exists as the run-now primitive a catch-up action would reuse"
+  }
+ ],
+ "mockup_idea": "Startup state of the main window with a slim dismissible banner under the menu bar: \"3 scheduled runs were missed while SSH Helper was closed (Nightly FortiGate Backup ×2, Switch Config Audit ×1) — [Run missed jobs now] [Review] [Dismiss]\".",
+ "merged_from": 1
+}

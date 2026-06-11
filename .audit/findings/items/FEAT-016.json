@@ -1,0 +1,36 @@
+{
+ "id": "FEAT-016",
+ "title": "parse command supports only FortiGate — no Cisco IOS or generic parser despite advertising multi-format",
+ "category": "FEAT",
+ "severity": "medium",
+ "effort": "L",
+ "area": "scripting-commands-b",
+ "lens": "ux",
+ "existing_state": "ParserFactory registers exactly two format names, 'fortigate' and 'fortios', both mapping to the same FortiGateParser (Services/Scripting/Parsers/ParserFactory.cs:11-16). Any other format throws 'Unsupported configuration format' (:32-35). Yet ParseCommand's own doc comment claims it 'Supports FortiGate and other network device configuration formats' (Services/Scripting/Commands/ParseCommand.cs:10-11), and IConfigParser's doc even names 'cisco-ios' as an example format (Services/Scripting/Parsers/IConfigParser.cs:11) — the abstraction was built for multi-vendor but never filled in. A related authoring trap: parse's 'from' takes a bare variable name via GetVariableString (ParseCommand.cs:33; ScriptContext.cs:559-565 does a raw lookup), unlike nearly every other command which substitutes ${var}; a user who writes from: ${cfg} silently hits the empty-source path — warning, empty dictionary, and Ok success (ParseCommand.cs:34-40).",
+ "recommendation": "Add at least a CiscoIosParser (indentation-scoped blocks: 'interface X' / nested ' description ...' lines — structurally simpler than FortiGate's config/edit/next/end) and a generic template parser (per-line regex with named capture groups, textfsm-style, where the script supplies the patterns) and register them in ParserFactory. In the same pass, make ParseCommand accept ${var} in 'from' by stripping the wrapper before lookup, and fix the doc comment to list the actual formats. The IConfigParser seam already exists, so each new parser is a self-contained class plus one factory line.",
+ "user_benefit": "A multi-vendor network operator (the explicit audience of this tool) can turn 'show run' output from Cisco/Arista/Juniper into structured variables for foreach/if logic instead of hand-rolling extract regexes per device family. Today parse is useless on anything that isn't FortiOS.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Parsers\\ParserFactory.cs",
+   "lines": "11-16, 32-35",
+   "note": "only fortigate/fortios registered; anything else throws"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ParseCommand.cs",
+   "lines": "10-11, 33-40",
+   "note": "doc claims 'and other formats'; bare-name 'from' lookup with silent-Ok empty-source path"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Parsers\\IConfigParser.cs",
+   "lines": "11",
+   "note": "interface doc names 'cisco-ios' as intended format"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+   "lines": "559-565",
+   "note": "GetVariableString is a raw variable lookup — '${cfg}' is looked up literally"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

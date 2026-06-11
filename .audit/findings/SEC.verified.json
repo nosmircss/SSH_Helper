@@ -1,0 +1,618 @@
+[
+ {
+  "id": "SEC-001",
+  "title": "Job export (.sshjobs files and clipboard shares) leaks per-host plaintext SSH passwords despite documenting 'Credentials are stripped'",
+  "category": "SEC",
+  "severity": "critical",
+  "effort": "S",
+  "area": "jobs-scheduling",
+  "lens": "bugs",
+  "existing_state": "JobExportService.ExportToFile and ExportToString both document 'Credentials are stripped and running state cleared' (Services/JobExportService.cs:32-34, 50-52), but CloneForExport (JobExportService.cs:141-148) only resets CredentialMode to InheritFromApp, RunningState to null, and HasDriftWarning to false. The job's embedded host-grid snapshot (Hosts, List<Dictionary<string,string>>, Models/JobDefinition.cs:159) is serialized verbatim — including 'password' and 'username' columns, which are live credentials: PerHostColumn mode requires a filled password cell on every host row (Utilities/JobEditorValidator.cs:147-169; the editor instructs users to put credentials there, JobEditorDialog.cs:1144), and JobExecutionService.BuildHostConnections reads row['password'] as the SSH password at run time (Services/JobExecutionService.cs:527-534). Exposure is wider than PerHostColumn jobs: 'Copy from main grid' snapshots ALL named grid columns with no filtering (Utilities/HostGridUtilities.cs:325-340, wired via Form1.cs:15183), so any job whose hosts were copied from a grid containing a password column carries those secrets regardless of credential mode. ExportToFile writes indented plaintext JSON (JobExportService.cs:35-47); ExportToString is GZip+Base64 — encoding, not encryption — placed on the shared Windows clipboard (JobExportService.cs:53-65; entry points JobListDialog.cs:1140-1197). The same rows also sit unencrypted at rest in jobs.json and its .bak (Services/JobStorageService.cs:227-244), and in config.json's ApplicationState whenever Credential Manager is disabled — the default (CredentialSettings.UseCredentialManager defaults false, Models/AppConfiguration.cs:564-576; Form1.cs:14731-14751 blanks the main-grid password column only when it is enabled). Side effect of the same code: because CloneForExport blanks CredentialMode for ALL modes, a Vault or PerHostColumn job round-trips an import as InheritFromApp and silently runs with the app's default credentials.",
+  "recommendation": "In CloneForExport, blank the values of the 'password' (and arguably 'username') column case-insensitively in every Hosts row before serialization (matching the lookup convention in JobExecutionService.TryGetRowValue; the column itself can stay so the schema survives), and stop downgrading CredentialMode for Vault/PerHostColumn jobs — Vault paths and the now-blanked per-host schema are portable; only Stored mode needs the reset. On import, flag jobs whose password cells are empty under PerHostColumn so ImportPreviewDialog shows 'passwords must be re-entered' (same pattern as the existing MissingTarget status). As a follow-up, extend the Credential Manager redirection Form1 already does for the main grid to JobEditorDialog's host snapshot so jobs.json stops storing per-host passwords at rest, and consider excluding the password column from 'Copy from main grid' when the job is not in PerHostColumn mode.",
+  "user_benefit": "Sharing a .sshjobs file or pasting a clipboard export into chat no longer hands out every fleet host's SSH password in cleartext/trivially-decodable form — making the export feature's stated security contract actually true.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExportService.cs",
+    "lines": "32-65, 141-148",
+    "note": "Docs claim credentials stripped; CloneForExport only resets CredentialMode/RunningState/HasDriftWarning; Hosts exported verbatim to plaintext file and GZip+Base64 clipboard"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\JobEditorValidator.cs",
+    "lines": "147-169",
+    "note": "PerHostColumn mode requires a filled password cell on every host row, so exported cells always contain real secrets"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+    "lines": "524-534",
+    "note": "Runtime consumes the plaintext 'password' row value as the live SSH credential"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\HostGridUtilities.cs",
+    "lines": "325-340",
+    "note": "Copy-from-main-grid snapshot includes every named column, password included — exposure not limited to PerHostColumn jobs"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs",
+    "lines": "1140-1197",
+    "note": "Export File / Export Clipboard entry points"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+    "lines": "13126-13136, 1501-1523, 14731-14751",
+    "note": "Contrast: history capture strips the password column and main-grid passwords are migrated to Credential Manager (when enabled) — exports break that intent"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 3,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced end-to-end and the claim holds exactly as written. CloneForExport (JobExportService.cs:141-148) resets only CredentialMode/RunningState/HasDriftWarning; job.Hosts rows — including username/password cells — serialize verbatim into the plaintext .sshjobs file and the GZip+Base64 (encoding-only, GZipBase64Utility) clipboard string, directly contradicting the \"Credentials are stripped\" doc on both export methods. No guard exists anywhere on the path: JobListDialog passes selected jobs straight to the service, there is no JsonIgnore/contract-resolver redaction on JobDefinition, BuildSchedulerCopySnapshot copies every named grid column (password included), and JobExecutionService.BuildHostConnections (lines 525-532) consumes those cells as live SSH credentials regardless of CredentialMode. One scoping note in the finding's favor: Stored-mode passwords are NOT leaked (they live in Windows Credential Manager via JobPasswordTarget), so the exposure is precisely the per-host rows as described; the Vault/PerHostColumn-downgrades-to-InheritFromApp side effect also verifies (ResolveCredentials switch, JobExecutionService.cs:596-626). Critical severity is justified: plaintext secret exposure on an explicit sharing feature whose documentation promises the opposite. | impact check: Traced end-to-end: CloneForExport (JobExportService.cs:141-148) resets only CredentialMode/RunningState/HasDriftWarning while serializing the Hosts rows verbatim, despite both export docstrings promising credentials are stripped — and no caller or layer sanitizes (JobListDialog passes raw jobs; Credential Manager redirection covers only the main grid, default-off, never job snapshots). PerHostColumn validation mandates real passwords in those rows and copy-from-main-grid includes every column, so the trigger is normal usage, the artifact is purpose-built for sharing, and clipboard GZip+Base64 is trivially decoded. One nuance: the round-trip side effect (\"runs with app default credentials\") is exactly true for Vault jobs, but a PerHostColumn job today still uses its (leaked) row credentials after import since BuildHostConnections reads them regardless of mode — the recommendation's import-time flag correctly handles this once blanking lands. Critical is justified: secret exposure on a common path with a false documented safety contract."
+  }
+ },
+ {
+  "id": "SEC-002",
+  "title": "Resolved secrets (host/Vault passwords, inline vault values) flow unredacted into the live output pane and plaintext on-disk run history",
+  "category": "SEC",
+  "severity": "critical",
+  "effort": "M",
+  "area": "scripting-core",
+  "lens": "bugs",
+  "existing_state": "The output/history pipeline has no value-based secret redaction, and secrets enter it from several directions. (1) The fully resolved connection password — typed in the grid, recalled from Windows Credential Manager, or fetched from HashiCorp Vault via vault_path (Form1.cs:13332-13343) — is seeded as an ordinary readable script variable: host.Variables[\"password\"] = host.Password (Form1.cs:13368-13371) and SeedConnectionVariables' context.SetVariable(\"password\", password) (Services/SshExecutionService.cs:2027-2028); that dictionary seeds every ScriptContext (SshExecutionService.cs:1542/1676/1736/1880). Any print/log/send/set_column referencing {{password}} emits the cleartext secret (set_column also writes it into the CSV grid), and when a remote device echoes an interpolated command (typical for network gear and enable/login flows) the secret enters the output buffer that way too. (2) Inline vault refs resolve during ordinary substitution and are echoed verbatim: SendCommand substitutes then emits the full command line unless suppress: is set (Services/Scripting/Commands/SendCommand.cs:57-65), PrintCommand likewise (PrintCommand.cs:18-20); ResolveVaultExpression returns the raw secret untagged (Services/Scripting/ScriptContext.cs:748-749) and EmitOutput/RecordCommandOutput append everything to the shared FullOutput with zero masking (ScriptContext.cs:855-893). (3) The only redaction that exists is name-anchored: SensitiveSetOutputRegex rewrites literal 'Set _ssh_password = ...' / '_ssh_identity_passphrase' lines only (SshExecutionService.cs:87-89, RedactSensitiveScriptOutput :2731-2737) — echoed secret VALUES pass through untouched. StoreExecutionHistory then persists the raw buffer to disk (Form1.cs:14217-14248) as unencrypted JSON under %LocalAppData%\\SSH_Helper\\history (Services/HistoryStorageService.cs:468/569). The codebase clearly intends to keep secrets out of persisted artifacts — BuildHostExecutionContexts skips the password variable (Form1.cs:13126-13130) and the canvas Variable Inspector masks it (FlowCanvas/src/panels/VariableInspector.tsx:165-168) — but the output stream defeats both protections. Vault-sourced credentials are the worst case: centrally managed, rotated secrets end up cached in local plaintext history files that survive indefinitely.",
+  "recommendation": "Add a per-run secret registry and a value-based masking pass: register the resolved connection password, identity passphrase, and every value returned by ResolveVaultExpression/vault() in a per-context redaction set, and have EmitOutput/RecordCommandOutput plus RedactSensitiveScriptOutput replace registered substrings with **** before output reaches _sharedState.Output, OutputReceived subscribers, the live pane, and the persisted history payload. Additionally, stop seeding the raw password as an ordinary readable variable — keep it only in the redaction-aware _ssh_password channel (or make {{password}} an explicit per-preset opt-in) — and exclude registered secret values from set_column grid write-back.",
+  "user_benefit": "Prevents SSH, Vault, and other credentials from accumulating in plaintext on disk in history payloads and .txt exports, and from appearing in the visible run log during screen shares — which currently undermines the entire Credential Manager / Vault integration story.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+    "lines": "13332-13371",
+    "note": "Vault/CredMan/grid password resolved then injected into host.Variables[\"password\"] as a readable script variable"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+    "lines": "87-89, 2027-2028, 2731-2737",
+    "note": "SeedConnectionVariables sets a readable 'password' var; the only redaction is the name-anchored 'Set _ssh_password=' regex — no value scrubbing"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SendCommand.cs",
+    "lines": "57-65",
+    "note": "Vault-resolved command line echoed via EmitOutput unless suppress: is set"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+    "lines": "748-749, 855-893",
+    "note": "ResolveVaultExpression returns the raw secret untagged; EmitOutput/RecordCommandOutput append to FullOutput with no redaction"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+    "lines": "14217-14248",
+    "note": "Raw output buffer persisted to the history payload"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\HistoryStorageService.cs",
+    "lines": "468, 569",
+    "note": "Payload written as plain JSON under %LocalAppData%\\SSH_Helper\\history"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 4,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced end-to-end and the claim holds: the resolved password (grid/CredMan/Vault) is seeded as an ordinary readable {{password}} variable into every ScriptContext, variable resolution has no sensitive-value handling, and a repo-wide search confirms the only redaction anywhere is the name-anchored 'Set _ssh_password=' regex — secret values echoed by print/send or device echo flow unmasked into the live pane and are persisted as plain JSON under the history dir. The deliberate password-skip in BuildHostExecutionContexts and the canvas Variable Inspector name-masking confirm intent to protect secrets, which the output stream defeats; critical severity is justified under the secret-exposure rubric. Only nit: the grid write-back command is named update_column, not set_column (mechanism as described). | impact check: Traced every citation; all hold exactly. The resolved password (grid/CredMan/Vault) is seeded as a plain {{password}} variable, send/print echo substituted secrets by default, the only redaction is the name-anchored 'Set _ssh_password=' regex (and even that is bypassed for RawChunk output, SshExecutionService.cs:2723-2726), and the raw buffer lands unencrypted in %LocalAppData% history. Two aggravators found beyond the finding: RawChunk bypass, and SetCommand echoing 'Set {var} = {value}' for ANY variable in debug mode (SetCommand.cs:39/93). The suppress: flag is a manual opt-in that doesn't cover print/device-echo/set_column; no value-based masking exists anywhere. Critical is justified per rubric (secret exposure on a supported mainline path). [updated refs: SshExecutionService.cs: SeedConnectionVariables is invoked at line 1777 (inside ConfigureScriptExecutionContext); the 1542/1676/1736/1880 refs are the `new ScriptContext(host.Variables)` ctor sites and are accurate. The grid write-back command is `update_column` (UpdateColumnCommand.cs:26-29), not `set_column`.]"
+  }
+ },
+ {
+  "id": "SEC-003",
+  "title": "No SSH host-key verification on any connection path (execution, pool, interactive terminal, sftp) — connections are MITM-trivial",
+  "category": "SEC",
+  "severity": "critical",
+  "effort": "L",
+  "area": "ssh-execution",
+  "lens": "cross",
+  "existing_state": "There is no fingerprint check, no known_hosts store, and no trust-on-first-use prompt anywhere in the SSH layer — every connection accepts whatever host key the server presents, then sends the user's password (or Vault-resolved credential) to it. Rebex paths: CreateConfiguredClient builds the Ssh client applying only timeout and cipher/host-key-algorithm settings, never a Fingerprint/key-acceptance handler (Services/SshExecutionService.cs:2372-2378); bare client.Connect calls at SshExecutionService.cs:2393/2412/2444/2485 with Login immediately after (:2211, :1612); the pool mirrors this at Services/SshConnectionPool.cs:389/411/433/452 (Login :472). The interactive terminal is a separate dial-out with the same gap: ConnectAndLogin (Services/Terminal/InteractiveTerminalService.cs:3728-3740) connects and logs in with no verification, while ApplyAlgorithmSettings (:3742-3753) only sets algorithms — and here a human is typing live credentials and privileged commands into the session. The sftp script command bypasses the Rebex stack entirely via SSH.NET's new SftpClient(host, port, username, password) with no HostKeyReceived subscription (Services/Scripting/Commands/SftpCommand.cs:66-72) — SSH.NET's default when the event is unhandled is to trust any key. A repo-wide grep for Fingerprint/HostKeyReceived/known_hosts/VerifyHostKey returns only CSV change-detection hits. Secondary issues in the same sftp code: auth is password-only (no key-file or Vault option despite the app having both, :130-136), and ParseHostWithOptionalPort splits on LastIndexOf(':') so a bare IPv6 literal is mangled into a bogus host+port (:139-156). For a multi-host admin tool that sprays credentials at fleets, an on-path attacker (rogue switch, ARP/DNS spoofing, compromised jump host) can impersonate any host, harvest every password, capture live terminal sessions, and inject forged command output.",
+  "recommendation": "Implement a single shared host-key trust store: persist accepted SHA-256 fingerprints keyed by host:port in a known_hosts-style file under AppDataPaths (via JsonFileWriter.WriteJsonAtomic). Wire verification into all four paths — Rebex's fingerprint/key-validation callback in CreateConfiguredClient and the pool's client factory, the same check between Connect and Login in InteractiveTerminalService.ConnectAndLogin, and an SSH.NET HostKeyReceived handler in SftpCommand. On first contact show a TOFU accept/reject dialog (themed via DialogTheme) displaying the fingerprint; on mismatch hard-fail with a prominent warning. Offer a strict / TOFU / explicitly-opt-in insecure policy in SettingsDialog, defaulting to TOFU so existing users aren't hard-broken. While in SftpCommand, add key-file and Vault credential options and fix IPv6 host:port parsing (skip splitting on multiple ':' unless bracketed).",
+  "user_benefit": "Without host-key checking, anyone able to intercept the network path can impersonate a target device and silently harvest the SSH passwords this tool types into every host in the fleet. Host-key verification is the baseline expectation for a professional multi-host SSH tool, and one shared store fixes all four connection paths consistently.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshExecutionService.cs",
+    "lines": "2372-2378, 2393, 2412, 2444, 2485, 2211",
+    "note": "CreateConfiguredClient attaches no key-acceptance handler; all Connect tiers accept any key; password sent immediately after unverified connect"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConnectionPool.cs",
+    "lines": "389-452, 472",
+    "note": "Pool connect+login path likewise accepts any key"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Terminal\\InteractiveTerminalService.cs",
+    "lines": "3728-3753",
+    "note": "Interactive terminal ConnectAndLogin: Connect + Login with no fingerprint verification; ApplyAlgorithmSettings sets algorithms/ciphers only"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\SftpCommand.cs",
+    "lines": "66-72, 130-156",
+    "note": "SSH.NET SftpClient with no HostKeyReceived handler (default: trust any key); password-only auth; IPv6 host:port mangling"
+   }
+  ],
+  "mockup_idea": "One-time TOFU dialog: 'First connection to 10.0.0.5:22 — ED25519 SHA256:abc... Accept / Reject', plus a red key-mismatch warning variant that blocks the connection.",
+  "merged_from": 4,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced all four connection paths and the claim holds exactly as written: Rebex execution clients (SshExecutionService 2372-2379, Connect at 2393/2412/2444/2485, Login at 2211/1612), the pool (SshConnectionPool 389-452, Login 472), and the interactive terminal (InteractiveTerminalService 3728-3753) all connect and send credentials with zero host-key verification — the only \"host key\" code anywhere is SetHostKeyAlgorithms (algorithm preference, not trust). SftpCommand uses SSH.NET's SftpClient with no HostKeyReceived handler (default = trust any key), is password-only (it hard-fails without a password), and its LastIndexOf(':') parsing does mangle bare IPv6 literals. Repo-wide greps for Fingerprint/HostKeyReceived/known_hosts/VerifyHostKey confirm only CSV-fingerprint hits. Critical is justified: fleet-wide password exposure to any on-path impersonator. Minor nuance only: agent/key-file auth paths wouldn't leak a password to a MITM, but password auth is the tool's primary mode and session capture/output injection applies regardless. | impact check: Traced all four paths; every cited line is accurate and a repo-wide grep confirms no fingerprint check, trust store, or even key-change warning exists anywhere (only CSV-fingerprint false hits). Rebex paths never inspect the server key between Connect and Login, and the sftp command relies on SSH.NET's trust-everything default; the password-only sftp auth and bare-IPv6 host:port mangling are also real. Exploitation does require an active on-path attacker, and Rebex paths can use agent/key-file auth which limits password harvest — but password/Vault is the primary mode, the terminal exposes live typed credentials, and one run sprays the whole fleet, so critical is justified and the TOFU recommendation is sound and not implemented anywhere."
+  }
+ },
+ {
+  "id": "SEC-004",
+  "title": "http command leaks Authorization headers (Basic creds / bearer tokens) into script output and on-disk run history when debug is on",
+  "category": "SEC",
+  "severity": "critical",
+  "effort": "S",
+  "area": "scripting-commands-a",
+  "lens": "bugs",
+  "existing_state": "HttpCommand sets the Authorization header for basic/bearer auth (Services/Scripting/Commands/HttpCommand.cs:107-118), then emits the FULL serialized request headers to script output at HttpCommand.cs:145 via SerializeHeaders (HttpCommand.cs:298-315), which iterates request.Headers with no redaction — so 'Authorization: Basic <base64(user:pass)>' (trivially reversible to the plaintext password) or 'Bearer <token>' lands in the output stream. It also echoes the basic-auth username (line 109 authSummary, emitted at 143), the full request body (146-149), and the full response headers — including Set-Cookie / session tokens — and body (175-176). These are ScriptOutputType.Debug lines gated only on DebugMode (ScriptContext.cs:872-876), which is enabled by a plain `debug: true` directive in the YAML script (ScriptExecutor.cs:201-204) or the app's Debug Mode menu (Form1.cs:6460 -> SshExecutionService.cs:1301). Run output is persisted in plain text to disk in history payloads (Models/HistoryRunPayload.cs:9) under %LocalAppData%\\SSH_Helper\\history — so a one-time debug troubleshooting session durably writes API credentials to disk and into anything the user copies/shares from the output pane.",
+  "recommendation": "Redact sensitive headers in both SerializeHeaders overloads (HttpCommand.cs:282-315): mask Authorization, Proxy-Authorization, Cookie, Set-Cookie, and X-Api-Key values (e.g. emit 'Authorization: Basic ***' or value length only, mirroring the existing password_length pattern at line 109). Consider also masking the request body when auth mode is basic/bearer, or at minimum document that debug mode dumps bodies. This keeps debug mode useful (method, URL, non-sensitive headers, timing) without persisting secrets.",
+  "user_benefit": "Prevents API passwords and bearer tokens from being silently written to the output pane and plaintext history files every time someone turns on debug mode to troubleshoot a script — exactly the moment output tends to get copied into tickets and chat.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\HttpCommand.cs",
+    "lines": "107-118, 141-149, 171-176, 298-315",
+    "note": "Authorization header set, then emitted unredacted via SerializeHeaders(request); response headers/body also dumped"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+    "lines": "872-876",
+    "note": "Debug output suppressed only when DebugMode is false"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs",
+    "lines": "201-204",
+    "note": "Script-level `debug: true` flips context.DebugMode for the whole run"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\HistoryRunPayload.cs",
+    "lines": "9",
+    "note": "Run Output persisted to disk in history payloads"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 1,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced end-to-end and the claim holds exactly as written: HttpCommand sets Authorization (basic at line 108, bearer at 117) and dumps it unredacted via SerializeHeaders at line 145 (overload 298-315 iterates request.Headers with no masking), plus request body, response headers (incl. Set-Cookie) and body; the only redaction layer in the relay (SshExecutionService.RedactSensitiveScriptOutput, line 2731) masks only \"Set _ssh_password/_ssh_identity_passphrase = ...\" lines and never Authorization. Debug gating (ScriptContext.cs:875, ScriptExecutor.cs:201-204, Form1.cs:6460 -> SshExecutionService.cs:1301/1770) and plaintext persistence are both real — Form1.cs:14219 even says \"includes all debug output\" while building HistoryRunPayload.Output, saved as plain JSON on disk. Critical is justified per rubric (secret exposure: Basic auth is trivially reversible to the plaintext password). | impact check: Traced end-to-end and the claim holds exactly as written: HttpCommand sets Authorization (Basic/Bearer) then dumps the full request headers via SerializeHeaders with no redaction (HttpCommand.cs:145, 298-315), plus request body and response headers/body; ScriptContext.EmitOutput gates only on DebugMode; and the output pane snapshot persists in plaintext to disk via HistoryRunPayload.Output (Form1.cs:12996-13009 -> HistoryStorageService.SaveRun:439-468). I specifically hunted for a mitigating layer and found the app DOES have a script-output redactor (SshExecutionService.RedactSensitiveScriptOutput, applied to all script output at line 1792) — but its regex covers only \"Set _ssh_password/_ssh_identity_passphrase = ...\" lines, so it does nothing here; the recommendation is not already implemented and is cheap (extend the existing pattern). Telling detail: line 109 already emits only password_length, showing the author intended NOT to leak the password — line 145 defeats that. Exposure is debug-gated and local-profile-only, but debug mode is the normal troubleshooting path and the disk write is silent and durable, so critical is justified under the secret-exposure rubric. [updated refs: All cited refs verified current; minor precision only: the authSummary emit spans HttpCommand.cs:142-144 (finding said 143), and context.DebugMode assignment from effectiveDebugMode is SshExecutionService.cs:1770.]"
+  }
+ },
+ {
+  "id": "SEC-005",
+  "title": "Vault failures are silently swallowed — runs proceed against the fleet with the wrong or empty credentials",
+  "category": "SEC",
+  "severity": "high",
+  "effort": "M",
+  "area": "integrations",
+  "lens": "bugs",
+  "existing_state": "Two independent layers turn any Vault failure into silent mis-execution. (1) Connection credentials: VaultCredentialProvider.TryGetPassword wraps the entire resolution in a try/catch that swallows EVERY exception to Debug.WriteLine and returns false, and also returns false when the resolved password is empty (Services/Vault/VaultCredentialProvider.cs:57-63). Form1.GetHostConnections treats false as 'vault not used' and falls through to the credential-manager branch, substituting the per-host stored password or the toolbar/global default (Form1.cs:13345-13359). So a mistyped path/profile, expired/revoked token, sealed Vault, outage, or missing key surfaces no error — SSH silently proceeds under a DIFFERENT identity, spraying the wrong/default password across a multi-host run (lockout risk, mis-targeted privileged commands, zero signal). The scheduled-job path mirrors this: ResolveCredentials returns (\"\",\"\") on failure with only a Debug.WriteLine (Services/JobExecutionService.cs). (2) Scripting: VaultGet and VaultList catch VaultException and return null with no logging and no _last_error (Services/Scripting/Functions/VaultFunctions.cs:34-41, 61-68); VaultService wraps ALL failure modes — connection refused, auth failure, missing key/permission — into VaultException (Services/Vault/VaultService.cs:848-859), so an outage is indistinguishable from a missing key. A typical `- set: pwd = vault(\"secret/prod\", \"password\")` stores null, and substitution converts null to empty string (Services/Scripting/ScriptContext.cs:559-565) — commands then run fleet-wide with a blank credential (e.g. `echo {{pwd}} | sudo -S ...`). The inline `vault:profile@path#key` path at least sets _last_error before returning empty (ScriptContext.cs:746-755); the function path doesn't, so `if: _last_error` guards that work inline silently don't work for vault().",
+  "recommendation": "Distinguish 'vault not configured for this row' from 'vault was configured but failed'. When a non-empty vault_path is present and resolution throws or returns empty, do NOT fall back to grid/stored/default credentials — fail that host with a surfaced error (red cell + output line), and plumb the VaultException message up instead of swallowing it; same for Vault-mode jobs (a credential failure should fail the job/host, not return empty strings). In VaultGet/VaultList, at minimum set context._last_error for parity with ResolveVaultExpression, and preferably fail the step loudly (the executor already has fail/Try semantics); distinguish 'key not found' from connectivity/auth errors if null-on-missing-key is desired. Consider failing fast when a vault()-sourced value resolves to null/empty before substitution into a send.",
+  "user_benefit": "Today a Vault hiccup mid-run means logging into production hosts as the wrong account or executing commands with blank passwords — burning auth-lockout counters and half-configuring devices with no trace of why. This makes Vault failures loud and diagnosable instead of silent and destructive.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultCredentialProvider.cs",
+    "lines": "57-63",
+    "note": "All exceptions swallowed to Debug.WriteLine; empty password also returns false"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+    "lines": "13345-13359",
+    "note": "On vaultResolved==false, falls through to stored/toolbar password — silent identity swap"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\VaultFunctions.cs",
+    "lines": "34-41, 61-68",
+    "note": "catch (VaultException) { return null; } — no _last_error, no log"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+    "lines": "848-859",
+    "note": "Connection refused and other transport errors wrapped into VaultException — outages swallowed by the same catch"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+    "lines": "559-565, 746-755",
+    "note": "null substitutes as empty string into {{pwd}}; inline vault: path sets _last_error — function path inconsistent with it"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 2,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced end-to-end and every layer behaves as described. TryGetPassword swallows all exceptions and returns false (also on empty password), Form1 treats false as \"no vault\" and falls back to grid/stored credentials, and SshExecutionService.cs:1198/1300 then substitutes the toolbar/global default password when the host password is empty — so a vault outage really does send a different identity fleet-wide with only a Debug.WriteLine trace. The job path (ResolveCredentials → (\"\",\"\")) and the scripting path (vault()/vault_list() catch VaultException → null → {{var}} substitutes as empty, while inline vault: sets _last_error) are all exactly as claimed; I found no guard, validation, or error surfacing anywhere that mitigates this. [updated refs: Form1.cs:13330-13359 (full vault block; cited 13345-13359 is the fall-through tail); Services/JobExecutionService.cs:628-640 (Vault job mode) and 508-518 (per-host vault rows, same pattern); supporting: Services/SshExecutionService.cs:1198,1300 (empty host password falls back to toolbar/global defaultPassword); Services/Vault/VaultService.cs:97-102,134-139 (missing key also throws VaultException)]"
+  }
+ },
+ {
+  "id": "SEC-006",
+  "title": "localcmd confirm: never runs arbitrary local processes with no prompt and no global override",
+  "category": "SEC",
+  "severity": "high",
+  "effort": "S",
+  "area": "security-posture",
+  "lens": "cross",
+  "existing_state": "LocalCmdCommand.HandleConfirmation (Services/Scripting/Commands/LocalCmdCommand.cs:104-110) reads the per-step confirm policy and, when it equals 'never', returns LocalCmdConfirmResult.Run immediately — no dialog, no logging, no gate. The decision is entirely controlled by the YAML/preset author; there is no app-level setting that forces confirmation regardless of the per-step value. Because presets and YAML scripts are shareable artifacts in this app (the Flow Canvas is a preset-builder and presets are imported/exported), an operator who runs a colleague's or downloaded preset containing `localcmd: { confirm: never, command: ... }` executes arbitrary commands on their own workstation (powershell/cmd/custom shell, foreground or background) silently. The command string is also variable-substituted, so untrusted CSV/host values interpolated into it become a local injection vector.",
+  "recommendation": "Add a Settings (Credentials/Security) option such as 'Always require confirmation for localcmd' that, when enabled, forces the confirmation dialog even when a step specifies confirm: never (HandleConfirmation should consult this flag before honoring 'never'). Default it on. Optionally surface a one-time warning the first time a preset containing confirm:never is loaded.",
+  "user_benefit": "Protects operators from silently running attacker-authored local commands embedded in a shared/imported preset — turning 'I ran a teammate's preset' into a code-execution event. A global override gives security-conscious shops a hard guarantee that nothing runs locally without a human seeing it.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\LocalCmdCommand.cs",
+    "lines": "104-110",
+    "note": "Confirm policy 'never' returns Run with no dialog and no global override; no config knob exists to force confirmation"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 1,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced and confirmed: HandleConfirmation (LocalCmdCommand.cs:104-110) returns Run immediately for confirm:never with no dialog or gate; no global force-confirm setting exists anywhere (AppConfiguration only mentions confirm for font sizes), and the command is variable-substituted (line 50), so imported presets + untrusted CSV values can execute arbitrary local commands without operator approval. One caveat for the recommendation: confirm:never is the documented escape hatch for unattended runs — SshExecutionService.TryBuildUnattendedLocalCmdPreflightMessage (SshExecutionService.cs:937-955) blocks scheduler runs that require confirmation and explicitly tells users to set confirm:never — so a default-on global \"always confirm\" would break scheduled localcmd jobs; the override should be scoped to interactive runs or paired with a per-job trust acknowledgment. Minor: execution isn't fully silent by default (a [localcmd] banner is echoed to run output), but the same preset author can suppress it via quiet/suppress, so the adversarial claim stands."
+  }
+ },
+ {
+  "id": "SEC-007",
+  "title": "browser_callback_capture loopback listener accepts forged captures — no nonce/state binding on the fixed local port",
+  "category": "SEC",
+  "severity": "high",
+  "effort": "M",
+  "area": "scripting-commands-a",
+  "lens": "bugs",
+  "existing_state": "The command binds an HttpListener to http://127.0.0.1:{port}/ on a fixed default port 8086 (CreateListener, Services/Scripting/Commands/BrowserCallbackCaptureCommand.cs:219-224) and completes the step from ANY local request: a GET to the callback path with query params short-circuits capture when capture_mode=query (:249-260); a POST to the callback path or to <path>/capture followed by <path>/complete finalizes the first non-empty payload (:272-305). There is no nonce, state token, or Origin/Referer validation — no binding between the browser session the command launched and the request that completes the capture; the served capture page (BuildCaptureHtml) posts to well-known paths with no secret. Any local process, or a malicious web page already open in the user's browser (a form-encoded POST to 127.0.0.1 is a CORS 'simple request' that fires without preflight; no-cors blocks reading the response but the injection lands), can race or replace the legitimate payload with attacker-chosen values during the step's window (timeout default 300s). Those values are persisted into script variables (into / into_<key>, PersistCapture :436-451) that scripts typically use as OAuth tokens/credentials for subsequent http/ssh steps against the fleet. Contrast: the app's own Vault OIDC flow DOES validate state (Services/Vault/VaultService.cs:522-523) — the capture flow skipped the same protection.",
+  "recommendation": "Generate a cryptographically random per-step nonce when the listener starts; embed it in the served capture page as a hidden field/query param on the /capture and /complete POSTs, and reject any request in CaptureAsync whose nonce doesn't match (respond 403, keep waiting) — accept the first VALID payload, not the first non-empty one. For query-mode short-circuit captures, support standard OAuth `state` validation when the user supplies one in start_url. Additionally validate that Origin/Referer is absent or loopback, and support local_port: 0 (bind an ephemeral port and substitute it into start_url) so two app instances can't collide on 8086.",
+  "user_benefit": "Stops local malware or a hostile background browser tab from silently injecting forged OAuth codes/tokens into a running script, which would otherwise flow straight into SSH/HTTP operations against the whole host fleet.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\BrowserCallbackCaptureCommand.cs",
+    "lines": "219-224",
+    "note": "Fixed loopback prefix, default port 8086"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\BrowserCallbackCaptureCommand.cs",
+    "lines": "239-308, 436-451",
+    "note": "Any local GET/POST finalizes the step (first non-empty payload wins); captured values persisted into script variables consumed downstream"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+    "lines": "522-523",
+    "note": "The Vault OIDC flow validates state — the capture flow does not"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 3,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced the full path and the claim holds. The HttpListener binds http://127.0.0.1:{LocalPort}/ with LocalPort defaulting to 8086 (ScriptStep.cs:1085; CreateListener 219-224). CaptureAsync (239-308) finalizes from any unauthenticated local request: a POST to the callback path with a non-empty form body returns the payload immediately (272-280); a /capture POST then /complete POST also finalizes (282-305); query-mode GET stages the payload then auto-completes via the served page (249-260). There is no nonce, state, Origin or Referer check anywhere, and BuildCaptureHtml posts to well-known unsecured paths. Captured values land in script variables via PersistCapture (436-451) and feed downstream http/ssh steps. The contrast is accurate: VaultService.cs:522-523 does validate OIDC state, so the same protection was simply skipped here. The browser-tab CORS reasoning is correct (a url-encoded POST is a simple request, no preflight; CORS only blocks reading the response). High severity is justified as a credential-injection security weakness. Two minor caveats for the owner: (1) the attacker must be mid-OAuth-flow and know the user-chosen callback_path (port 8086 is the documented default and the path is in the redirect_uri, so weak barriers); (2) the description's \"GET short-circuits capture in query mode\" is slightly loose — a raw attacker GET only stages pendingPayload and still needs the /complete POST, but the POST-to-callback-path avenue is a true single-request injection, so the finding stands. Cited line numbers are all accurate."
+  }
+ },
+ {
+  "id": "SEC-008",
+  "title": "SshConfigParser ignores OpenSSH negated host patterns — settings the user excluded from specific hosts get applied to them anyway",
+  "category": "SEC",
+  "severity": "high",
+  "effort": "S",
+  "area": "ui-utilities",
+  "lens": "bugs",
+  "existing_state": "MatchesHost returns true if ANY pattern matches (Utilities/SshConfigParser.cs:177-185), and MatchesPattern regex-escapes the pattern verbatim (:190-212), so an OpenSSH negation like 'Host * !prod.example.com' is treated as two literals: '*' matches everything (including prod) and '!prod.example.com' simply never matches. OpenSSH semantics are the opposite — a matching negated pattern excludes the host from the entire block. The result: User, Port, IdentityFile, HostKeyAlgorithms, and Ciphers from a block the user deliberately scoped away from a host are silently applied to that host via SshConfigService.GetConfigForHost (Services/SshConfigService.cs:82), which feeds connection settings. Concrete hazard: a common pattern like 'Host * !bastion' with weakened Ciphers/HostKeyAlgorithms for legacy gear gets those weak algorithms applied to the bastion too. Compounding it, Parse swallows every I/O and parse exception and returns an empty config (SshConfigParser.cs:32-41), so a locked or malformed ~/.ssh/config is silently ignored rather than reported.",
+  "recommendation": "In GetConfigForHost/MatchesHost, implement OpenSSH negation: for each Host block, first check negated patterns (leading '!', stripped before wildcard matching) — if any negated pattern matches the hostname, the block does not apply at all; otherwise require at least one positive pattern match. Add a unit test mirroring 'Host * !x' from ssh_config(5). For the silent catch in Parse(string), surface the failure (e.g., a ParseError property on SshConfigFile that the settings UI can show) instead of returning an indistinguishable empty config.",
+  "user_benefit": "Honors the user's explicit security exclusions in ~/.ssh/config — no more weak ciphers, wrong identities, or wrong usernames silently applied to hosts the user carved out of a wildcard block.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\SshConfigParser.cs",
+    "lines": "177-212",
+    "note": "Any-pattern-matches semantics; '!' patterns regex-escaped as literals, never excluding anything"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Utilities\\SshConfigParser.cs",
+    "lines": "32-41",
+    "note": "Bare catch returns empty config — user's ssh config silently ignored on any read/parse error"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\SshConfigService.cs",
+    "lines": "82",
+    "note": "GetConfigForHost feeds per-host connection settings (User/Port/IdentityFile/Ciphers/HostKeyAlgorithms)"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 1,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced end-to-end and the claim holds exactly: MatchesHost is any-pattern-wins and MatchesPattern regex-escapes '!' as a literal, so 'Host * !x' applies the block to x (inverted OpenSSH semantics); the resolved User/Port/IdentityFile/HostKeyAlgorithms/Ciphers flow via Form1.cs:13386 → HostConnection.ApplySshConfig into Rebex SshParameters in all three connection paths (pool, execution, interactive terminal) — and Ciphers/HostKeyAlgorithms have no grid override, so excluded-block weak algorithms always win. The bare catch in Parse(string) returning an empty config is also as described, with no error surface on SshConfigFile. Only mitigation: the feature is opt-in (EnableSshConfig defaults false, gated at Form1.cs:13384), but enablers are exactly the ~/.ssh/config users who use negation, so high severity stands; no negation handling or parser tests exist anywhere, so the recommendation is not already implemented."
+  }
+ },
+ {
+  "id": "SEC-009",
+  "title": "Editor hover tooltip echoes plaintext passwords and environment secrets on screen",
+  "category": "SEC",
+  "severity": "medium",
+  "effort": "S",
+  "area": "editor",
+  "lens": "bugs",
+  "existing_state": "Dwelling 250ms over any ${var} or {{column}} token shows its live value in a tooltip for 3 seconds (UI/ScintillaScriptEditorControl.cs:810-844, 2307-2350, 2366). The resolver chain in Form1 maps ${_password} directly to the host grid's password cell (Form1.cs:740), {{password}} (or any custom secret column) to the raw cell value (Form1.cs:747-757), and any ${name} matching an active environment variable to its raw value (Form1.cs:709-713) — environments are a common place to stash API tokens. JobEditorDialog wires the same column resolver for job host grids (JobEditorDialog.cs:588-612). The feature is on by default (EnableVariableInspectorTooltips = true, Models/AppConfiguration.cs:181) with no masking anywhere, so the secret pops up wherever the token appears in a script — including during screen shares and demos.",
+  "recommendation": "Mask sensitive values before display in the tooltip resolvers: always return a fixed mask (e.g. '[set — hidden]') for _password, the password column, and any variable/column whose name matches a sensitive-name heuristic (password|passwd|secret|token|key|vault). Apply in Form1.ResolveEditorVariableValue/TryGetBuiltInEditorVariable/ResolveEditorColumnValue, the environment-variable branch at Form1.cs:709-713, and JobEditorDialog.ResolveCustomPresetColumnValue. Optionally show value length or '[empty]' so the tooltip stays useful for debugging.",
+  "user_benefit": "Hovering a script during a screen share or with someone looking over your shoulder no longer prints fleet SSH passwords and environment tokens on screen.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+    "lines": "709-713, 727-757",
+    "note": "_password -> raw grid cell; environment variable values returned raw to the tooltip"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\ScintillaScriptEditorControl.cs",
+    "lines": "2330-2346, 2366",
+    "note": "Tooltip renders '${name} = <value>' with no masking; shown 3000ms"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobEditorDialog.cs",
+    "lines": "588-612",
+    "note": "Job editor wires the same unmasked cell echo for {{password}}"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs",
+    "lines": "181",
+    "note": "EnableVariableInspectorTooltips defaults to true"
+   }
+  ],
+  "mockup_idea": "Before/after tooltip pair: hovering ${_password} showing \"${_password} = Sup3rS3cret!\" vs \"${_password} = [set — hidden]\".",
+  "merged_from": 1,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced fully: dwell 250ms (MouseDwellTime, ScintillaScriptEditorControl.cs:135) triggers Editor_DwellStart (810-844), which with EnableVariableInspectorTooltips=true (default, AppConfiguration.cs:181) shows \"${name} = <raw value>\" for 3000ms (2330-2346, 2366) with no masking anywhere in the chain — Form1's resolvers return env vars raw (709-713), _password and {{password}} as the raw grid cell (740, 747-756), and JobEditorDialog wires the same raw cell echo (588-612). Two softeners worth knowing: the host grid already shows the password column unmasked on the same form (so the password tooltip is incremental exposure), and with Credential Manager active the password cell is emptied on state save/restore, so that leg mainly fires for in-session typed/CSV-loaded passwords or Cred-Manager-off setups; the environment-variable leak is the cleanest new exposure. Medium severity is right."
+  }
+ },
+ {
+  "id": "SEC-010",
+  "title": "TLS can be silently disabled and SMTP credentials sent in cleartext, with no runtime warning",
+  "category": "SEC",
+  "severity": "medium",
+  "effort": "M",
+  "area": "security-posture",
+  "lens": "cross",
+  "existing_state": "Three transport paths can drop or skip TLS protection with no visible warning. (1) Vault: SkipTlsVerification installs DangerousAcceptAnyServerCertificateValidator, accepting any certificate (Services/Vault/VaultService.cs:1094-1098) — and Vault tokens travel over that connection. (2) The http script command: verify_tls: false installs the same any-cert validator (Services/Scripting/Commands/HttpCommand.cs:327-330); the only signal is a Debug-level line. (3) SMTP notifications: SmtpClient is created with EnableSsl = profile.UseStartTls (Services/Notifications/SmtpDispatcher.cs:86-90), so if UseStartTls is unset the SMTP username/password (pulled from Credential Manager) and the message body are sent over an unencrypted connection; there is no implicit-TLS (port 465) support and System.Net.Mail offers no STARTTLS-required/downgrade protection. None of these states raise a persistent warning badge in the UI.",
+  "recommendation": "Surface a clear, persistent warning whenever TLS verification is disabled (a red badge on the Vault profile / Settings, and a runtime Warning-level output line — not Debug — for verify_tls:false). For SMTP, default UseStartTls on, warn when a username/password is configured but transport encryption is off, and add implicit-TLS (465) support. Where feasible, prefer fixing certificate trust (custom CA) over blanket skip.",
+  "user_benefit": "Operators can unknowingly ship Vault tokens, API bearer tokens, or SMTP credentials across the network in the clear; making the insecure state loud (or secure-by-default) prevents accidental credential exposure during routine automation.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+    "lines": "1094-1098",
+    "note": "SkipTlsVerification accepts any server certificate"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Notifications\\SmtpDispatcher.cs",
+    "lines": "86-95",
+    "note": "EnableSsl=UseStartTls only; creds sent cleartext if disabled, no 465 implicit-TLS"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\HttpCommand.cs",
+    "lines": "327-330",
+    "note": "verify_tls:false installs DangerousAcceptAnyServerCertificateValidator"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 1,
+  "verification": {
+   "verdict": "partial",
+   "confidence": "high",
+   "notes": "All three cited code sites are accurate (Vault any-cert validator at VaultService.cs:1094-1098 with vault tokens on that client; http verify_tls Debug-only signal at HttpCommand.cs:141-144 and 327-330; SmtpClient EnableSsl=UseStartTls with no 465 support at SmtpDispatcher.cs:86-95), and none of the three states raises a runtime or persistent UI warning. But the SMTP claim is overstated: UseStartTls defaults to TRUE (Models/NotificationSettings.cs:77) and the Settings checkbox defaults to checked, so cleartext credentials require an explicit opt-out — and the recommendation's \"default UseStartTls on\" is already implemented. Also, with EnableSsl=true SmtpClient fails closed when the server lacks STARTTLS, so the \"no STARTTLS-required/downgrade protection\" claim only applies after the user unchecks the box; and the Vault checkbox does carry a \"(development only)\" caption at config time. [updated refs: Cited lines are current; supporting refs: Models/NotificationSettings.cs:77 (UseStartTls default true), SettingsDialog.cs:708 (Vault skip-TLS checkbox label), SettingsDialog.cs:1326/1527 (STARTTLS checkbox defaults checked), HttpCommand.cs:141-144 (Debug-level signal)]"
+  }
+ },
+ {
+  "id": "SEC-011",
+  "title": "Self-update verifies integrity but not authenticity — no code-signature check, and the update source repo is config-controlled",
+  "category": "SEC",
+  "severity": "medium",
+  "effort": "M",
+  "area": "persistence-config",
+  "lens": "bugs",
+  "existing_state": "The update pipeline mandates SHA256 verification (UpdateDialog.cs:542-558 aborts without a checksum; VerifyUpdatePackageAsync at Services/UpdateService.cs:366-379), but the checksum file is just a sibling asset in the same GitHub release (FindChecksumAsset, UpdateService.cs:627-647) — anyone who can modify the release (compromised maintainer token, supply-chain, or a malicious repo) regenerates both, so the check proves only download integrity, not publisher authenticity. The downloaded exe/zip is then installed by a hidden PowerShell run with -ExecutionPolicy Bypass that copies over the running binary and relaunches it (UpdateService.cs:404-424, embedded script :470-624) with no Authenticode/signature check. Compounding this, GitHubOwner/GitHubRepo are plain config values (Models/AppConfiguration.cs:447-452) fed straight into the API URL (Form1.cs:374-376, UpdateService.cs:128), and config.json is an unsigned user-writable file — any process or person able to edit it can silently point the updater (which checks on every startup, AppConfiguration.cs:457) at an attacker-controlled repo whose release passes all current checks.",
+  "recommendation": "Add an authenticity gate before LaunchUpdaterAndExit: verify the downloaded executable's Authenticode signature (X509Certificate.CreateFromSignedFile / WinVerifyTrust) and pin the expected publisher thumbprint, refusing unsigned or differently-signed packages; for zips, verify the contained exe post-extraction in the script or pre-extraction in C#. Treat the SHA256 check as a corruption guard, not an authenticity guarantee. Independently, stop sourcing GitHubOwner/GitHubRepo from config (hardcode, or at minimum show a prominent warning in the update dialog when the configured repo differs from the compiled-in default).",
+  "user_benefit": "A compromised GitHub release or a one-line edit to a plaintext config file can currently become arbitrary code execution delivered through the app's own trusted update prompt; signature pinning closes that path for every machine that auto-updates.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\UpdateService.cs",
+    "lines": "366-379, 627-647",
+    "note": "SHA256 checksum sourced from the same release as the binary — integrity only"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\UpdateService.cs",
+    "lines": "404-424",
+    "note": "Hidden powershell -ExecutionPolicy Bypass installs over the app; no signature check"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Models\\AppConfiguration.cs",
+    "lines": "447-457",
+    "note": "GitHubOwner/GitHubRepo config-editable; CheckOnStartup default true"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+    "lines": "374-376",
+    "note": "UpdateService constructed from config values"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 2,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced all four cited locations; the claim holds exactly as written. UpdateDialog.cs:542-558 mandates a SHA256 check, but the checksum is just a sibling .sha256 asset in the SAME GitHub release (FindChecksumAsset, UpdateService.cs:627-647; wired at :163-167), so VerifyUpdatePackageAsync (UpdateService.cs:366-379) proves download integrity only, not publisher authenticity. A repo-wide grep for Authenticode/WinVerifyTrust/CreateFromSignedFile/X509/GetAuthenticodeSignature finds zero hits in the update path (only Vault TLS code), and the .github workflows contain no code-signing step — so LaunchUpdaterAndExit (UpdateService.cs:388-424) runs powershell -ExecutionPolicy Bypass and the embedded script (:558-609) copies the package over the running exe and relaunches it with no signature validation. GitHubOwner/GitHubRepo are plain config values (AppConfiguration.cs:447-452) flowed verbatim into the API URL (Form1.cs:374-377, UpdateService.cs:128), CheckOnStartup defaults true (:457) and triggers a silent check at launch (Form1.cs:439-441), and config.json is the unsigned user-writable file. Medium is appropriate: it is a genuine missing authenticity control that can escalate to RCE through the trusted update prompt, but it requires a precondition (a compromised release/maintainer token, supply-chain compromise, or local write access to config.json — a local attacker with that access already has a foothold). The SHA256 gate does block naive in-transit tampering, so this is not a zero-interaction remote-on-default-repo critical."
+  }
+ },
+ {
+  "id": "SEC-012",
+  "title": "readfile path guard only blocks a tiny C: denylist; other drives, UNC shares, and prefix tricks pass",
+  "category": "SEC",
+  "severity": "medium",
+  "effort": "M",
+  "area": "scripting-core",
+  "lens": "bugs",
+  "existing_state": "ValidateReadPath only rejects six hardcoded C: directories plus other users' profile folders (Services/Scripting/ScriptFileAccessValidator.cs:12-20, 35-63); every other location is readable. A script `readfile:` can therefore read D:\\, E:\\, the root of C:\\, and arbitrary UNC paths like \\\\attacker-host\\share\\x — none of which match any blocked prefix. The matching is plain fullPath.StartsWith(blocked, OrdinalIgnoreCase) with no trailing-separator check (line 46), so 'C:\\Windows' also falsely blocks a legitimate 'C:\\WindowsCustom\\...' (over-broad) while extended-length syntax \\\\?\\C:\\Windows\\... bypasses the blocklist entirely (under-broad). The write allowlist has the analogous bug: it checks fullPath.StartsWith(UserProfile) (line 113), so a sibling directory whose name extends the username (e.g. C:\\Users\\nos_evil) satisfies both the 'other users' read check and the write allowlist.",
+  "recommendation": "Replace prefix-string matching with canonicalized, separator-aware containment checks: normalize with Path.GetFullPath, append a trailing separator before comparing, resolve/deny reparse points (symlinks/junctions), and reject UNC and extended-length (\\\\?\\) prefixes for both read and write unless explicitly allowed. Treat the read guard as a real boundary (deny-by-default to a configured root list) rather than a six-entry denylist.",
+  "user_benefit": "Shared/imported presets can no longer read arbitrary local drives or pull files off network shares through the scripting engine, and legitimately-named directories stop being falsely blocked.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptFileAccessValidator.cs",
+    "lines": "35-72",
+    "note": "Read guard: 6-entry denylist, prefix StartsWith without separator, no UNC/extended-path handling"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptFileAccessValidator.cs",
+    "lines": "100-118",
+    "note": "Write allowlist uses bare StartsWith(UserProfile), matches sibling dirs"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 1,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced ScriptFileAccessValidator.cs and its only callers (ReadFileCommand.cs:91, WriteFileCommand.cs:54). Every claim holds. ValidateReadPath blocks only 6 hardcoded C: system dirs (lines 12-20) plus other users' profiles (53-63), then returns true for everything else — so D:\\, E:\\, the root of C:\\, and UNC \\\\host\\share paths are all readable. The StartsWith at line 46 has no trailing-separator check, so 'C:\\Windows' falsely blocks legitimate 'C:\\WindowsCustom\\...' (over-broad), while Path.GetFullPath preserves the \\\\?\\ device prefix so '\\\\?\\C:\\Windows\\...' never matches the denylist and .NET file APIs still open it (under-broad bypass). The write allowlist's bare StartsWith(UserProfile) at line 113 plus the read other-users check both treat 'C:\\Users\\nos_evil' as belonging to user 'nos'. For non-interactive runs the validator is the only path gate (ReadFileCommand.cs:229-234 goes Path.GetFullPath -> ValidateReadPath with no other guard). Medium is fair: the guard is a real but porous boundary and the practical attack (malicious imported preset reading then exfiltrating a file) is indirect; the over-broad false-block is a concrete correctness bug regardless of threat model. [updated refs: Read guard: Services/Scripting/ScriptFileAccessValidator.cs:35-72 (denylist 12-20, StartsWith no-separator at 46, other-users 53-63). Write allowlist: 100-124 (bare StartsWith at 113). Sole callers: ReadFileCommand.cs:91, WriteFileCommand.cs:54.]"
+  }
+ },
+ {
+  "id": "SEC-013",
+  "title": "Webhook URLs (with query-string secrets) and Vault key listings are echoed into the run output stream",
+  "category": "SEC",
+  "severity": "medium",
+  "effort": "S",
+  "area": "integrations",
+  "lens": "bugs",
+  "existing_state": "WebhookCommand emits the full request line including the substituted URL to the output stream: context.EmitOutput($\"Webhook: {method} {url}\", ScriptOutputType.Debug) (Services/Scripting/Commands/WebhookCommand.cs:100). Webhook URLs routinely carry secrets in the query string or path (Slack/Teams/PagerDuty tokens, signed URLs), so the secret is written verbatim into the same output channel the UI/history can display. Header values built from variables (e.g. Authorization) are substituted with no redaction (:72-73). Separately, Vault missing-key errors enumerate every field name in the secret into the exception message ('available keys: ...', Services/Vault/VaultService.cs:99-101, 136-139), which can flow into script output/history.",
+  "recommendation": "Redact credentials from webhook debug output: log only scheme+host+path (strip query string and userinfo), or gate the full-URL log behind an explicit verbose/diagnostic flag. Do not include header values in any emitted output. For the Vault missing-key message, omit the enumerated key list (or gate it behind debug mode) so secret structure isn't leaked into history. Route both through the shared redaction helper proposed in SEC-002.",
+  "user_benefit": "Prevents bearer tokens and signed webhook URLs from being persisted into run history and shown in debug panels where they can be exported or shoulder-surfed.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WebhookCommand.cs",
+    "lines": "72-73, 100",
+    "note": "Full substituted URL emitted to output; header values substituted with no redaction"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+    "lines": "99-101, 136-139",
+    "note": "Missing-key error enumerates all secret field names"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 1,
+  "verification": {
+   "verdict": "partial",
+   "confidence": "high",
+   "notes": "Core issue is real but narrower than described. The Vault half is fully confirmed: the \"available keys: ...\" enumeration (VaultService.cs:99-101, 136-139) flows unconditionally into _last_error, the script failure message, and per-host ErrorMessage shown in the UI and persisted to history. The webhook half has two material errors: (1) the full-URL emit at WebhookCommand.cs:100 uses ScriptOutputType.Debug, which ScriptContext.EmitOutput (ScriptContext.cs:872-876) suppresses unless debug mode is on (Debug Mode menu toggle or script debug: true) — so the URL only reaches output/history during debug sessions, partially matching the recommendation's own \"gate behind a diagnostic flag\" option (though no query-string redaction exists, and debug output IS persisted to history, so a single debug run still lands webhook tokens at rest); (2) header values (lines 72-73) are only added to the outbound HTTP request and are never emitted to any output — that exposure sub-claim does not exist in today's code. Medium severity remains fair for the combination of conditional secret persistence plus unconditional secret-structure leakage."
+  }
+ },
+ {
+  "id": "SEC-014",
+  "title": "WebView2 hosts accept commands (run SSH, rewrite scripts, open dialogs) from any page — no origin validation or navigation restrictions",
+  "category": "SEC",
+  "severity": "medium",
+  "effort": "S",
+  "area": "flowcanvas-bridge",
+  "lens": "bugs",
+  "existing_state": "Both WebView2 hosts dispatch inbound web messages without checking the sender's origin: FlowCanvasForm.OnWebMessageReceived parses and routes directly (UI/FlowCanvasForm.cs:200-212), and the routed messages include run/run-request (executes the preset over SSH via Form1 wiring), apply-yaml/execute-canvas (rewrites the script editor), and browse-path (opens native file pickers) — FlowCanvasForm.cs:229-294. Neither form validates CoreWebView2WebMessageReceivedEventArgs.Source against the expected https://flowcanvas.local origin, and neither subscribes to NavigationStarting or NewWindowRequested (no handlers anywhere in UI/), so any navigation away from the bundled app — a link/window.open introduced in the React bundle, or future linkified run output — leaves an arbitrary page able to PostWebMessage and drive SSH execution against the loaded host fleet. The dist folder is also mapped with CoreWebView2HostResourceAccessKind.Allow (FlowCanvasForm.cs:173-176; UI/RunOutputWindowForm.cs:120), broader than the DenyCors default Microsoft recommends for local app assets.",
+  "recommendation": "Standard WebView2 hardening, ~20 lines: (1) in both OnWebMessageReceived handlers, return unless e.Source starts with 'https://flowcanvas.local/'; (2) subscribe NavigationStarting and cancel any URI outside that origin; (3) subscribe NewWindowRequested and set Handled=true (open external links via Process.Start if ever needed); (4) downgrade the host mapping to DenyCors unless cross-origin fetches are actually used. Apply identically to FlowCanvasForm and RunOutputWindowForm.",
+  "user_benefit": "This app holds SSH credentials for entire fleets; the message channel is effectively remote-execution. Pinning it to the bundled origin closes the gap permanently instead of relying on the React bundle never containing an external navigation path.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\FlowCanvasForm.cs",
+    "lines": "200-212, 229-294",
+    "note": "No e.Source validation; routed messages include run/apply-yaml/browse-path"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\FlowCanvasForm.cs",
+    "lines": "135-179",
+    "note": "Allow virtual-host mapping; no NavigationStarting/NewWindowRequested handlers anywhere in the file"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\UI\\RunOutputWindowForm.cs",
+    "lines": "104-134",
+    "note": "Same pattern in the detached run-output window"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 1,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced fully: neither WebView2 host checks e.Source before routing messages (FlowCanvasForm routes run/apply-yaml/execute-canvas/browse-path to Form1 events), no NavigationStarting/NewWindowRequested handlers exist anywhere in the codebase, and both virtual-host mappings use Allow. Mitigating context the finding already concedes: the current React bundle contains zero navigation escape paths (no anchors, window.open, or dangerouslySetInnerHTML), so exploitation requires a future bundle change — medium as defense-in-depth hardening is the right calibration. RunOutputWindowForm shares the unvalidated pattern but only routes ready/layout-save, so the dangerous surface is FlowCanvasForm alone."
+  }
+ },
+ {
+  "id": "SEC-015",
+  "title": "Vault profile rename orphans live secrets in Windows Credential Manager forever",
+  "category": "SEC",
+  "severity": "medium",
+  "effort": "S",
+  "area": "dialogs-general",
+  "lens": "bugs",
+  "existing_state": "When a vault profile is renamed, PersistVaultProfileByIndex updates the list display and default-profile tracking (SettingsDialog.cs:997-1005) and then re-saves the four secrets under the NEW name (1011-1017) — but never deletes the old ssh_helper:vault:<oldname>:* targets. The notifications tab does this correctly via MigrateNotificationCredential, which copies then deletes the old target (1584-1593); the vault tab has no equivalent. Every rename therefore leaves a complete, working copy of the vault token / AppRole secret-id / LDAP password / userpass password under the stale name in Windows Credential Manager, readable by any process running as the user, with no UI that will ever list or clean it up (BtnVaultRemove_Click at 851-858 only deletes targets for names currently in the profile list).",
+  "recommendation": "In PersistVaultProfileByIndex's rename branch (after line 997's name-change check), migrate the four credentials the same way notifications do: read old target, save under new target, DeletePassword the old one. Extract MigrateNotificationCredential into a shared helper taking the target-builder Func and reuse it for the four VaultAuthTarget types.",
+  "user_benefit": "Stops live vault tokens and directory passwords from silently accumulating under dead names in the OS credential store every time a profile is renamed.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+    "lines": "996-1017",
+    "note": "Rename branch updates display only; secrets re-saved under new name, old targets untouched"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\SettingsDialog.cs",
+    "lines": "1584-1593",
+    "note": "Notifications already implement the correct migrate+delete pattern — vault drifted from it"
+   }
+  ],
+  "mockup_idea": "",
+  "merged_from": 1,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Traced fully and accurate. PersistVaultProfileByIndex (SettingsDialog.cs:976-1017) captures oldName, rewrites profile.Name, and re-saves all four secrets under the new name only — oldName is never deleted; a repo-wide grep confirms the only VaultAuthTarget deletions are BtnVaultRemove_Click (854-857, selected-profile names only) and SaveVaultCredential's empty-value delete under the current name, so renamed profiles' tokens/secret-ids/passwords persist forever under the stale target. The notifications tab's MigrateNotificationCredential (1584-1593) does the correct copy+delete on rename, confirming the vault tab drifted from the established pattern; the recommended fix is not implemented anywhere."
+  }
+ },
+ {
+  "id": "SEC-016",
+  "title": "Password and token block properties render in cleartext in the Flow Canvas Properties panel and are matchable via canvas search",
+  "category": "SEC",
+  "severity": "low",
+  "effort": "S",
+  "area": "flowcanvas-ui",
+  "lens": "bugs",
+  "existing_state": "Block schemas define secret-bearing props as plain text: sftp 'password' Override (FlowCanvas/src/blockDefs/registry.ts:119) and http 'password'/'token' (registry.ts:368-369). PropertyField renders all text-type props as <input type=\"text\"> (FlowCanvas/src/panels/Properties.tsx:782-798), so selecting one of these blocks shows the credential in cleartext in the right rail. The app already treats these keys as secrets elsewhere — the on-canvas block summary masks exactly 'password' and 'token' with bullets (FlowCanvas/src/utils/blockSummary.ts:10, 64-70) — creating a false sense that secrets are hidden. Additionally, Ctrl+F search matches against JSON.stringify(props) (FlowCanvas/src/stores/slices/uiSlice.ts:226-243), so secret VALUES are part of the search haystack (a query matching part of a password highlights the block).",
+  "recommendation": "In PropertyField, render props whose key is in the shared SECRET_KEYS set (import it from blockSummary.ts so the two stay aligned) as type=\"password\" with a small eye/reveal toggle; in uiSlice.setSearchQuery, build the props haystack from non-secret keys only (or keys-plus-non-secret-values).",
+  "user_benefit": "Credentials stop being displayed on screen during screen shares or over-the-shoulder viewing whenever a block is selected, matching the masking the canvas card already promises.",
+  "evidence": [
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\blockDefs\\registry.ts",
+    "lines": "119, 368-369",
+    "note": "password/token props declared type 'text'"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\panels\\Properties.tsx",
+    "lines": "782-798",
+    "note": "Text case renders a plain type=\"text\" input — no password masking"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\utils\\blockSummary.ts",
+    "lines": "10, 64-70",
+    "note": "Same keys are bullet-masked on the canvas card — masking intent already established"
+   },
+   {
+    "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\FlowCanvas\\src\\stores\\slices\\uiSlice.ts",
+    "lines": "226-243",
+    "note": "Search haystack includes JSON.stringify(props) — secret values are searchable"
+   }
+  ],
+  "mockup_idea": "Side-by-side of the http block's Properties panel: before — Password field showing 'hunter2' in a plain input; after — bullets with an eye-icon reveal toggle, matching the bullet masking already shown on the collapsed block card next to it.",
+  "merged_from": 1,
+  "verification": {
+   "verdict": "confirmed",
+   "confidence": "high",
+   "notes": "Verified all four citations at the exact lines. sftp 'password' (registry.ts:119) and http 'password'/'token' (registry.ts:368-369) are plain 'text' props; PropertyField's text case (Properties.tsx:782-798) renders them as type=\"text\" with no masking anywhere in the panel (the Advanced section they live in is always expanded), while blockSummary.ts:10,64-70 bullet-masks the same keys on the canvas card; uiSlice.setSearchQuery (226-243) includes JSON.stringify(props) in the search haystack so secret values are matchable. Low severity is fair since the same values are plaintext in the YAML source regardless."
+  }
+ }
+]

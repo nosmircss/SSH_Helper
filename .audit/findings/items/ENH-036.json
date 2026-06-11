@@ -1,0 +1,26 @@
+{
+ "id": "ENH-036",
+ "title": "foreach flattens every item to a string — iterating structured JSON requires re-parsing inside the loop",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-commands-a",
+ "lens": "ux",
+ "existing_state": "Foreach resolves its collection via `ValueResolver.ResolveCollectionExpression` into a `List<string>` (Services/Scripting/Commands/ForeachCommand.cs:89, 193-196), and the loop variable is set to that string each iteration (ForeachCommand.cs:95). The map form likewise stringifies every value through `JsonUtilities.JsonNodeToStringValue` (ForeachCommand.cs:198-205). So iterating a JSON array of objects — the natural shape of an http/vault/parse result — hands the body a serialized object string, and every field access inside the loop must round-trip through json_get(item, 'field') re-parsing the same string. There is no way to write `{{device.name}}` against the loop variable.",
+ "recommendation": "Preserve structure through the loop: have ResolveCollection return `List<object?>` keeping JsonNode/dictionary elements intact when the source is a JSON array (strings stay strings, so existing scripts are unaffected), store the element object via context.SetVariable, and make sure the variable-substitution/expression layer supports property access (`item.field` / `{{item.field}}`) on stored object values — json_get can short-circuit on an already-structured value instead of re-parsing. The labelFor truncation (ForeachCommand.cs:96, 48-51) should stringify per-item for iteration-stepper labels as today.",
+ "user_benefit": "Scripts that iterate API results (interface tables, inventory exports, Vault secret lists) lose a layer of json_get boilerplate per field and a per-access re-parse, making the most common structured-data loop read like every other automation tool (Ansible loop items, PowerShell objects).",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ForeachCommand.cs",
+   "lines": "89-96",
+   "note": "items resolved as List<string>; loop var set to items[i] string"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ForeachCommand.cs",
+   "lines": "193-205",
+   "note": "ResolveCollection -> ResolveCollectionExpression (strings); map values stringified via JsonNodeToStringValue"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

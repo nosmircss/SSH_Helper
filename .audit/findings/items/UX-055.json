@@ -1,0 +1,26 @@
+{
+ "id": "UX-055",
+ "title": "Autocomplete popup is caged inside the editor control and collapses in short panes",
+ "category": "UX",
+ "severity": "low",
+ "effort": "M",
+ "area": "editor",
+ "lens": "ux",
+ "existing_state": "The completion popup is a Panel child of the UserControl, not a top-level window, so it can never extend past the editor's bounds: UpdateCompletionPopupSize clamps height to ClientSize.Height - 4 and width to ClientSize.Width - 4 (UI/ScintillaScriptEditorControl.cs:1242-1244), and CalculateCompletionPopupLocation clamps position into the client area (lines 1271-1273). With the splitter dragged down (or in JobEditorDialog where the custom-preset box shares a tab with the hosts grid), the 8-row list shrinks toward a single cramped row and long items lose their detail text, making completion near-useless exactly when screen space is scarce. Professional editors float the list over neighboring UI.",
+ "recommendation": "Host the popup in a borderless ToolStripDropDown or a non-activating top-level Form (WS_EX_NOACTIVATE) positioned in screen coordinates from PointXFromPosition/PointYFromPosition, so it overlays the output pane/grid below the editor. The existing CompletionDismissMessageFilter and GetFocus-based dismissal logic (UI/ScintillaScriptEditorControl.cs:760-788) already handle out-of-hierarchy clicks, so most of the hard focus work is done.",
+ "user_benefit": "Autocomplete stays fully usable regardless of how small the user has sized the script pane — no more one-row completion lists when the output pane is maximized during a debugging session.",
+ "evidence": [
+  {
+   "file": "UI/ScintillaScriptEditorControl.cs",
+   "lines": "1234-1247",
+   "note": "Popup size clamped to the control's ClientSize"
+  },
+  {
+   "file": "UI/ScintillaScriptEditorControl.cs",
+   "lines": "1268-1274",
+   "note": "Popup location clamped inside the client area — cannot overlay neighbors"
+  }
+ ],
+ "mockup_idea": "Two panels: left, today — editor pane shrunk to ~5 visible lines, completion list squashed to one row clipped at the pane edge; right — same layout but the 8-row list floats over the output pane below the editor boundary.",
+ "merged_from": 1
+}

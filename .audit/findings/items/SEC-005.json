@@ -1,0 +1,41 @@
+{
+ "id": "SEC-005",
+ "title": "Vault failures are silently swallowed — runs proceed against the fleet with the wrong or empty credentials",
+ "category": "SEC",
+ "severity": "high",
+ "effort": "M",
+ "area": "integrations",
+ "lens": "bugs",
+ "existing_state": "Two independent layers turn any Vault failure into silent mis-execution. (1) Connection credentials: VaultCredentialProvider.TryGetPassword wraps the entire resolution in a try/catch that swallows EVERY exception to Debug.WriteLine and returns false, and also returns false when the resolved password is empty (Services/Vault/VaultCredentialProvider.cs:57-63). Form1.GetHostConnections treats false as 'vault not used' and falls through to the credential-manager branch, substituting the per-host stored password or the toolbar/global default (Form1.cs:13345-13359). So a mistyped path/profile, expired/revoked token, sealed Vault, outage, or missing key surfaces no error — SSH silently proceeds under a DIFFERENT identity, spraying the wrong/default password across a multi-host run (lockout risk, mis-targeted privileged commands, zero signal). The scheduled-job path mirrors this: ResolveCredentials returns (\"\",\"\") on failure with only a Debug.WriteLine (Services/JobExecutionService.cs). (2) Scripting: VaultGet and VaultList catch VaultException and return null with no logging and no _last_error (Services/Scripting/Functions/VaultFunctions.cs:34-41, 61-68); VaultService wraps ALL failure modes — connection refused, auth failure, missing key/permission — into VaultException (Services/Vault/VaultService.cs:848-859), so an outage is indistinguishable from a missing key. A typical `- set: pwd = vault(\"secret/prod\", \"password\")` stores null, and substitution converts null to empty string (Services/Scripting/ScriptContext.cs:559-565) — commands then run fleet-wide with a blank credential (e.g. `echo {{pwd}} | sudo -S ...`). The inline `vault:profile@path#key` path at least sets _last_error before returning empty (ScriptContext.cs:746-755); the function path doesn't, so `if: _last_error` guards that work inline silently don't work for vault().",
+ "recommendation": "Distinguish 'vault not configured for this row' from 'vault was configured but failed'. When a non-empty vault_path is present and resolution throws or returns empty, do NOT fall back to grid/stored/default credentials — fail that host with a surfaced error (red cell + output line), and plumb the VaultException message up instead of swallowing it; same for Vault-mode jobs (a credential failure should fail the job/host, not return empty strings). In VaultGet/VaultList, at minimum set context._last_error for parity with ResolveVaultExpression, and preferably fail the step loudly (the executor already has fail/Try semantics); distinguish 'key not found' from connectivity/auth errors if null-on-missing-key is desired. Consider failing fast when a vault()-sourced value resolves to null/empty before substitution into a send.",
+ "user_benefit": "Today a Vault hiccup mid-run means logging into production hosts as the wrong account or executing commands with blank passwords — burning auth-lockout counters and half-configuring devices with no trace of why. This makes Vault failures loud and diagnosable instead of silent and destructive.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultCredentialProvider.cs",
+   "lines": "57-63",
+   "note": "All exceptions swallowed to Debug.WriteLine; empty password also returns false"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13345-13359",
+   "note": "On vaultResolved==false, falls through to stored/toolbar password — silent identity swap"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\VaultFunctions.cs",
+   "lines": "34-41, 61-68",
+   "note": "catch (VaultException) { return null; } — no _last_error, no log"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+   "lines": "848-859",
+   "note": "Connection refused and other transport errors wrapped into VaultException — outages swallowed by the same catch"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+   "lines": "559-565, 746-755",
+   "note": "null substitutes as empty string into {{pwd}}; inline vault: path sets _last_error — function path inconsistent with it"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

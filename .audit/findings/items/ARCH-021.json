@@ -1,0 +1,26 @@
+{
+ "id": "ARCH-021",
+ "title": "Connect/login/algorithm-fallback ladder is fully duplicated between SshExecutionService and SshConnectionPool — and has already drifted",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "M",
+ "area": "ssh-execution",
+ "lens": "perf",
+ "existing_state": "The entire connection pipeline exists twice. Service side: CreateConnectedClientWithFallback (Services/SshExecutionService.cs:2372-2493), ApplyAlgorithmTier (:2499-2514), ShouldRetryWithAlgorithmFallback/HasUnsupportedKeyAlgorithmError/TrySetSshParameterAlgorithms (:2516-2555), plus the agent→identity-file→password login order written out twice more (:1602-1614, :2199-2213). Pool side: CreateConnectionAsync (Services/SshConnectionPool.cs:365-459), LoginClient (:461-475), ApplyAlgorithmTier (:477-490), HasUnsupportedKeyAlgorithmError (:492-500), TrySetMacAlgorithms (:502-506), ApplyAlgorithmSettings (:512+). Verified drift between the copies today: (1) the service's HasUnsupportedKeyAlgorithmError has a CryptographicException-typed branch (:2542-2546) the pool's lacks (:492-500); (2) the service ladder is instrumented with SshDebugLog at every step (:2381-2487) while pool CreateConnectionAsync has zero debug logging — the same connect failure is diagnosable on the direct path and opaque on the pooled path; (3) retry scope differs — the service's fallback try wraps Connect only (:2410-2419) while the pool wraps Connect+Login together (:408-418), so the two paths classify failures differently. Every cross-cutting change (e.g. adding host-key verification, which is currently absent) must be applied at 8 separate Connect() sites across the two files (service :2393, :2412, :2444, :2485; pool :389, :411, :433, :452).",
+ "recommendation": "Extract a single SshClientFactory (or static SshClientConnector) owning: tier cache lookup, the three-tier connect ladder, ApplyAlgorithmSettings, the agent/key/password login order, and an optional debug-log callback. Both CreateConnectedClientWithFallback and SshConnectionPool.CreateConnectionAsync become thin wrappers over it; delete the pool's private copies of ApplyAlgorithmTier/HasUnsupportedKeyAlgorithmError/TrySetMacAlgorithms/ApplyAlgorithmSettings and the two extra in-service login blocks. This also creates the single choke point you'll need when host-key verification is added.",
+ "user_benefit": "Connect behavior, fallback decisions, and diagnostics become identical whether pooling is on or off, and future SSH-layer fixes (host-key verification above all) only need to be made once instead of at 8 call sites in 2 files.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "2372-2555, 1602-1614, 2199-2213",
+   "note": "Service copy of ladder + tier replay + error matching + two in-line login-order copies"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshConnectionPool.cs",
+   "lines": "365-530",
+   "note": "Pool replica of the same ladder, login order, tier application, and error matcher with verified drift (no CryptographicException branch, no debug logging, Login inside retry scope)"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

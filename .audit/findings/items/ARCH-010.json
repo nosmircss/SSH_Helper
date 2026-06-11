@@ -1,0 +1,31 @@
+{
+ "id": "ARCH-010",
+ "title": "No global exception handling: any unhandled error kills the app with no log and no state flush",
+ "category": "ARCH",
+ "severity": "high",
+ "effort": "S",
+ "area": "cross-startup",
+ "lens": "perf",
+ "existing_state": "Program.Main (Program.cs:13-60) calls Application.Run(new Form1()) at Program.cs:59 with no try/catch, and a repo-wide search for Application.ThreadException, AppDomain.CurrentDomain.UnhandledException, TaskScheduler.UnobservedTaskException, and SetUnhandledExceptionMode returns zero hits in any .cs file. The shell is a 15,360-line Form1.cs plus async void handlers (e.g. Form1_Shown at Form1.cs:414) wired to an SSH engine, a cron scheduler, and WebView2 bridges. Today any stray exception on the UI thread shows the stock .NET crash dialog, and one on a worker/Task thread silently terminates the process — unsaved host-grid edits (_csvDirty state), running executions, and the active scheduler all die with zero diagnostics written anywhere. ScintillaNativeBootstrap.ConfigureSatelliteDirectory (Program.cs:58) can itself throw InvalidOperationException pre-UI (ScintillaNativeBootstrap.cs:84-86) and is equally unhandled.",
+ "recommendation": "In Program.Main, before Application.Run: call Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException), subscribe Application.ThreadException, AppDomain.CurrentDomain.UnhandledException, and TaskScheduler.UnobservedTaskException. The shared handler should append exception + stack to a crash log under AppDataPaths.GetAppFolder() (e.g. crash.log), show a themed 'unexpected error' dialog with the log path, and on fatal paths attempt a best-effort SaveApplicationState/config flush before exit. Also wrap the ConfigureSatelliteDirectory call so a Scintilla extraction failure produces a message instead of a pre-UI hard crash.",
+ "user_benefit": "Bugs stop costing users their unsaved fleet edits and their scheduler session, and every crash leaves a log you can actually debug from instead of a one-off 'it just closed' report.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Program.cs",
+   "lines": "13-60",
+   "note": "Main has no exception handling; Application.Run(new Form1()) bare at :59"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/ScintillaNativeBootstrap.cs",
+   "lines": "84-86",
+   "note": "throws InvalidOperationException when both extraction roots are unwritable — unhandled pre-UI"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "414-443",
+   "note": "async void Form1_Shown — exceptions escaping it crash the process"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

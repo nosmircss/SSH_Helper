@@ -1,0 +1,41 @@
+{
+ "id": "PERF-009",
+ "title": "Scheduled Jobs dialog refresh storm: full grid rebuild plus one index.json disk read per job, on every scheduler event AND every 5 seconds, forever",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "M",
+ "area": "jobs-scheduling",
+ "lens": "perf",
+ "existing_state": "JobListDialog is modeless and single-instance (Form1.cs:166, 15171 via ModelessDialogManager.ShowOrActivate) so it commonly stays open all session. RefreshJobList runs from four triggers: a 5-second WinForms Timer (JobListDialog.cs:179-180) and full-refresh handlers for JobsChanged, JobStateChanged, and JobCompleted (433-435, 457-485). Each refresh clears and rebuilds the entire jobs grid (Rows.Clear at 502; the selection-preservation machinery at 566-606 exists only because of the rebuild) and, per job, calls GetLastResultText (755-763) -> JobHistoryService.GetRunsForJob(jobId, MaxResults=1) -> LoadJobIndex, an uncached File.ReadAllText + full JSON deserialize of that job's entire history index (up to 1000 entries with the editor's retention override) just to Take(1) (Services/JobHistoryService.cs:402-420, 499-518). It also re-parses every cron expression twice per job per refresh (CronExpressionDescriptor at JobListDialog.cs:724-732, Cronos at 734-753), and RefreshJobList then calls RefreshHistory (562, 642-718), which loads the selected job's same index file AGAIN and rebuilds the history grid — all synchronously on the UI thread. Because RunningState writes route through JobStorageService.Save, which fires JobsChanged (Services/JobStorageService.cs:138), and JobExecutionService fires JobStateChanged on every transition (Services/JobExecutionService.cs:904-906), a single run triggers at least five full refreshes. With a few dozen jobs and a busy scheduler that is hundreds of synchronous file reads, JSON parses, and cron parses per minute, plus 5-second grid rebuilds that wipe any column sort and cause visible repaint churn — and the 5-second poll is almost entirely redundant with the events.",
+ "recommendation": "Make the event-driven path the only full refresh and demote the timer: (1) cache the last-run record per job in the dialog (Dictionary<jobId, JobRunRecord>), seeded once on open and updated from the JobCompleted event payload (JobRunResult already contains everything GetRunResultText needs), so GetLastResultText stops hitting disk; (2) coalesce the four triggers through a ~250ms one-shot debounce so event bursts produce one refresh; (3) have the 5-second tick only rewrite the Next Run cell values in existing rows instead of Rows.Clear + rebuild (or delete it). Optionally add a cheap JobHistoryService.GetLastRun(jobId) backed by an index cache invalidated on write — Form1's mirrored 5s scheduler status-bar timer benefits too.",
+ "user_benefit": "Eliminates constant background disk I/O, JSON churn, and UI-thread work while the scheduler window sits open (it is modeless and often left open all day), keeps the window smooth during active runs, and stops the 5-second rebuild from wiping column sort.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobListDialog.cs",
+   "lines": "179-180, 433-435, 457-485",
+   "note": "5s poll timer plus three event handlers all invoke full RefreshJobList"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobListDialog.cs",
+   "lines": "491-564, 642-718, 724-763",
+   "note": "per refresh: both grids rebuilt, per-job GetLastResultText disk read, double cron re-parse, selected job's index loaded a second time"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobHistoryService.cs",
+   "lines": "402-420, 499-518",
+   "note": "GetRunsForJob always reads and deserializes the whole index.json from disk, no caching"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobStorageService.cs",
+   "lines": "138",
+   "note": "JobsChanged fires on every RunningState write, multiplying refreshes per run"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "166, 15171",
+   "note": "dialog is modeless single-instance, so the poll runs for the life of the session"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 2
+}

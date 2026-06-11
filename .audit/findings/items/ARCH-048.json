@@ -1,0 +1,26 @@
+{
+ "id": "ARCH-048",
+ "title": "HistoryResultStore is dead production code",
+ "category": "ARCH",
+ "severity": "low",
+ "effort": "S",
+ "area": "persistence-config",
+ "lens": "perf",
+ "existing_state": "Services/HistoryResultStore.cs (89 lines, in-memory id→host-results/details maps) has zero production references — a repo-wide grep finds it used only by its own test file SSH_Helper.Tests/Services/HistoryResultStoreTests.cs. The per-run-file design in HistoryStorageService (payload files + index) replaced it entirely; Form1's history path goes through _historyStorage exclusively (Form1.cs:13009, 14240).",
+ "recommendation": "Delete Services/HistoryResultStore.cs and SSH_Helper.Tests/Services/HistoryResultStoreTests.cs. Per the project's own 'no ghosts' rule, this is a leftover that misleads anyone exploring the history subsystem into thinking there is a second results cache.",
+ "user_benefit": "No behavior change — removes 89 lines plus its test file that misdirect future history work and dilute the test suite's signal.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/HistoryResultStore.cs",
+   "lines": "8",
+   "note": "Class definition; repo-wide grep shows the only other references are in its test file"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SSH_Helper.Tests/Services/HistoryResultStoreTests.cs",
+   "lines": "13-70",
+   "note": "Sole consumer"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,36 @@
+{
+ "id": "BUG-033",
+ "title": "Flow Canvas \"Test this step\" on a nested block executes ALL later blocks inside its container — the scope-disable logic is vacuous (and once fixed, the disables would leak into later full runs)",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "flowcanvas-bridge",
+ "lens": "correctness",
+ "existing_state": "ExecuteCanvasTestStep truncates the script only at TOP-LEVEL granularity (Form1.cs:7072, 7084; TryBuildYamlThroughTopLevelStep at 7356-7394 keeps the entire top-level step containing the target). Out-of-scope nested blocks are supposed to be disabled via BuildTestStepAllowedRoots + IsStepPathAllowed (Form1.cs:7131-7142). But BuildTestStepAllowedRoots adds the target's whole top-level step path as a root (`roots.Add(currentStepPath)` with currentStepPath = \"steps/{topLevelStepIndex}\", Form1.cs:7409-7410), and IsStepPathAllowed treats every root as a PREFIX (`stepPath.StartsWith(root + \"/\")`, Form1.cs:7451). Therefore every descendant of that step — sibling branches AND all siblings AFTER the selected block — is 'allowed', `testScopeDisabledNodes` is always empty, and the careful per-branch root computation at 7415-7438 is dead code (verified by tracing the code: for target steps/2/then/1 the roots set contains steps/2, which prefix-matches everything beneath it). Net effect: testing a block nested in a foreach/do or if/then runs the entire container against the live SSH host, including destructive steps placed after the one being tested. A second latent defect sits in the same method: the test-scope disables are merged into the persistent `_pendingDisabledBlocks` staging set (Form1.cs:7133-7142) and the `existingDisabledNodes` snapshot taken at 7137 is never used to restore it — the finally only resets the prompt anchor (7156-7159), and post-run cleanup deliberately leaves `_pendingDisabledBlocks` alone (Form1.cs:13826-13837) while the next full run re-applies every staged id (Form1.cs:12322-12361). Today this leak is masked only because the disable set is always empty; the moment the scoping bug is fixed, sibling branches disabled for a test would stay silently disabled for subsequent full runs.",
+ "recommendation": "Make intermediate container paths exact-match-only: in IsStepPathAllowed, only the FINAL target path (and fully-allowed prerequisite top-level steps steps/0..N-1) should be prefix roots; the chain of enclosing containers (steps/N, steps/N/do/2, ...) must match exactly so untargeted descendants stay disallowed. Keep the existing `{listScope}/0..targetIndexInScope` roots for earlier siblings. In the same change, restore `_pendingDisabledBlocks` to the pre-merge snapshot in the finally block (the snapshot already exists at Form1.cs:7137) — or pass the test-scope disables to ExecutePresetOnRowsAsync as an explicit parameter unioned only for that one run — so the now-real disables cannot leak into later full runs. Add a unit test asserting testScopeDisabledNodes is non-empty for a nested target with a later sibling, and that _pendingDisabledBlocks is unchanged after the test completes.",
+ "user_benefit": "\"Test this step\" is the safety feature users rely on to poke one command at a real device; today it can fire every subsequent command in the loop/branch (e.g. a config-write right after the show command you wanted to test). Fixing it without the restore would instead silently skip sibling branches in later full runs — this closes both holes together.",
+ "mockup_idea": "",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "7396-7442",
+   "note": "BuildTestStepAllowedRoots adds steps/{topLevelStepIndex} as a root at 7409-7410, defeating the nested scoping below it"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "7444-7456",
+   "note": "IsStepPathAllowed prefix-matches every root, so all descendants of the target's top-level step pass"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "7131-7159",
+   "note": "testScopeDisabledNodes merged into _pendingDisabledBlocks; snapshot at 7137 never restored; finally resets only the prompt anchor"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "13826-13837, 12322-12361",
+   "note": "post-run cleanup leaves _pendingDisabledBlocks; next run re-applies staged ids via ConfigureFlowCanvasDebugStateForRun"
+  }
+ ]
+}

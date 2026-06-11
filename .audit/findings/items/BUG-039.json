@@ -1,0 +1,36 @@
+{
+ "id": "BUG-039",
+ "title": "Preset-to-canvas load failures are swallowed, leaving the previous preset's graph live — Apply then overwrites the new preset's YAML with the old script",
+ "category": "BUG",
+ "severity": "medium",
+ "effort": "S",
+ "area": "flowcanvas-bridge",
+ "lens": "data-integrity",
+ "existing_state": "LoadCurrentScriptIntoCanvas wraps the whole bridge conversion in a bare `catch { /* Silently fail — canvas will show empty state */ }` (Form1.cs:6844-6889). The comment is wrong for the common case: on failure no LoadGraph message is sent at all, so an open canvas keeps rendering whatever was loaded before. TextToGraph calls ScriptParser.Parse directly (Services/FlowCanvasBridge.cs:381-391), which can throw on YAML that passes the lightweight IsYamlScript heuristic gate (Form1.cs:6838) — e.g. a hand-edited preset with a syntax error. Concrete hazard: switch from preset A to broken preset B with the canvas open (LoadPresetIntoEditor, Form1.cs:2148-2160) — `_activePresetName` is now B but the canvas still shows A's blocks; pressing Apply or Run from the canvas calls ApplyFlowCanvasGraph, which exports the stale graph and writes it into txtCommand when graphChanged is true (Form1.cs:6966-6969) — replacing the newly selected preset's content with the previous preset's script; saving the preset persists the cross-preset overwrite. Relatedly, BuildNodeIdToStepPathMap has a swallow-all catch returning an empty map (FlowCanvasBridge.cs:5224-5227), so a run on un-graphable YAML silently loses all canvas highlighting/output attribution. The same swallow also hides genuine bridge bugs as a mystery 'empty canvas'.",
+ "recommendation": "In the catch block, capture the exception and send the canvas an explicit failure state instead of nothing: at minimum `LoadGraph(new JArray(), new JArray())` plus an error banner naming the preset and parse error (or a dedicated load-failed message), so the stale graph is cleared and Apply cannot export stale content. Log the exception via SshDebugLog. Consider an `importFailed` flag in load-graph so React can disable Apply/Run until a valid graph loads.",
+ "user_benefit": "Eliminates a confusing and dangerous state where the canvas displays one preset while edits/runs target another — preventing a silent failure from escalating into real data loss when applying from a stale canvas replaces one preset's YAML with another preset's script.",
+ "mockup_idea": "Small before/after of the canvas: before — old graph silently shown for the wrong preset; after — empty canvas with a banner 'Could not load \"<preset>\" into the canvas: YAML parse error at line N' and a Retry link.",
+ "merged_from": 2,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "6831-6890",
+   "note": "swallow-all catch; no LoadGraph sent on failure, comment claims empty state incorrectly"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Form1.cs",
+   "lines": "6966-6969",
+   "note": "Apply writes exported (stale) graph YAML into txtCommand"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "381-391",
+   "note": "TextToGraph strict-parses with ScriptParser; throws on YAML the IsYamlScript heuristic accepted"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\FlowCanvasBridge.cs",
+   "lines": "5224-5227",
+   "note": "BuildNodeIdToStepPathMap swallow-all returns empty map — debug highlighting dies silently"
+  }
+ ]
+}

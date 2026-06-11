@@ -1,0 +1,46 @@
+{
+ "id": "UX-004",
+ "title": "Enter key confirms the destructive action in some delete prompts but cancels in others",
+ "category": "UX",
+ "severity": "high",
+ "effort": "S",
+ "area": "consistency",
+ "lens": "cross",
+ "existing_state": "The app has two themed confirmation primitives with inverted Enter semantics. DialogTheme.Confirm sets AcceptButton = btnNo and styles No as primary (UI/DialogTheme.cs:577-582), so Enter safely declines — used by Clear Grid (Form1.cs:5603) and JobListDialog's delete-job / clear-job-history (JobListDialog.cs:1377, 1261). DialogTheme.Show → ShowCore sets AcceptButton to the FIRST button (Yes) and styles it primary (UI/DialogTheme.cs:724, 729) — used by Delete Folder (Form1.cs:8178, 8224, plus the YesNoCancel variant at 8148), Delete History Entry (Form1.cs:14352), Delete ALL History (Form1.cs:14378), and Delete Environment (EnvironmentDialog.cs:486-494, which also persists to disk immediately). So 'Clear all history for this job?' defaults Enter to No while the visually identical 'Delete all history?' defaults Enter to Yes — a reflexive Enter irreversibly wipes all execution history, a preset folder, or an environment. Additionally, Confirm's message label is fixed at Size(310, 56) with AutoSize=false (UI/DialogTheme.cs:546-556), silently clipping messages longer than ~3 lines, while ShowCore auto-sizes up to 560px (UI/DialogTheme.cs:681-707).",
+ "recommendation": "Pick one policy — destructive prompts default to the safe answer — and enforce it in one place: extend ShowCore with a defaultButton/dangerous parameter (mapping to AcceptButton + primary styling), set it to No/Cancel at the destructive call sites, and reimplement Confirm as a thin wrapper over ShowCore so there is a single Yes/No code path (which also fixes the message clipping for free). Keep Enter=Yes only for non-destructive questions (e.g., 'Reload file from disk?'). Audit the ~15 destructive Show(YesNo) call sites.",
+ "user_benefit": "A user who reflexively hits Enter never wipes all history, a folder of presets, or an environment by accident — and the same action always behaves the same way in every window.",
+ "evidence": [
+  {
+   "file": "UI/DialogTheme.cs",
+   "lines": "577-582",
+   "note": "Confirm: AcceptButton=No, No styled primary (Enter=No)"
+  },
+  {
+   "file": "UI/DialogTheme.cs",
+   "lines": "711-730",
+   "note": "ShowCore: AcceptButton=first button=Yes, Yes styled primary (Enter=Yes)"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "8148-8224, 14352, 14378",
+   "note": "Delete folder / delete entry / delete ALL history confirms ride the Enter=Yes path"
+  },
+  {
+   "file": "EnvironmentDialog.cs",
+   "lines": "486-494",
+   "note": "Delete environment via Show(YesNo) — Enter deletes, and the delete persists immediately"
+  },
+  {
+   "file": "JobListDialog.cs",
+   "lines": "1261-1264, 1377-1380",
+   "note": "Same-concept deletions via Confirm — Enter = No"
+  },
+  {
+   "file": "UI/DialogTheme.cs",
+   "lines": "546-556",
+   "note": "Confirm fixed Size(360,160), label AutoSize=false Size(310,56) — long messages clip"
+  }
+ ],
+ "mockup_idea": "Side-by-side screenshots of the two Yes/No dialogs ('Clear all history for job X?' vs 'Delete all history?') with the focused/primary button highlighted and an 'Enter presses this' arrow, showing the polarity flip; an 'after' frame showing both defaulting to the safe button with the destructive button secondary.",
+ "merged_from": 3
+}

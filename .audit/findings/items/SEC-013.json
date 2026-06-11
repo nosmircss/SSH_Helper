@@ -1,0 +1,26 @@
+{
+ "id": "SEC-013",
+ "title": "Webhook URLs (with query-string secrets) and Vault key listings are echoed into the run output stream",
+ "category": "SEC",
+ "severity": "medium",
+ "effort": "S",
+ "area": "integrations",
+ "lens": "bugs",
+ "existing_state": "WebhookCommand emits the full request line including the substituted URL to the output stream: context.EmitOutput($\"Webhook: {method} {url}\", ScriptOutputType.Debug) (Services/Scripting/Commands/WebhookCommand.cs:100). Webhook URLs routinely carry secrets in the query string or path (Slack/Teams/PagerDuty tokens, signed URLs), so the secret is written verbatim into the same output channel the UI/history can display. Header values built from variables (e.g. Authorization) are substituted with no redaction (:72-73). Separately, Vault missing-key errors enumerate every field name in the secret into the exception message ('available keys: ...', Services/Vault/VaultService.cs:99-101, 136-139), which can flow into script output/history.",
+ "recommendation": "Redact credentials from webhook debug output: log only scheme+host+path (strip query string and userinfo), or gate the full-URL log behind an explicit verbose/diagnostic flag. Do not include header values in any emitted output. For the Vault missing-key message, omit the enumerated key list (or gate it behind debug mode) so secret structure isn't leaked into history. Route both through the shared redaction helper proposed in SEC-002.",
+ "user_benefit": "Prevents bearer tokens and signed webhook URLs from being persisted into run history and shown in debug panels where they can be exported or shoulder-surfed.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\WebhookCommand.cs",
+   "lines": "72-73, 100",
+   "note": "Full substituted URL emitted to output; header values substituted with no redaction"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Vault\\VaultService.cs",
+   "lines": "99-101, 136-139",
+   "note": "Missing-key error enumerates all secret field names"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

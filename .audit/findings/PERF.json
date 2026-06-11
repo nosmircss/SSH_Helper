@@ -1,0 +1,1379 @@
+[
+  {
+    "id": "PERF-001",
+    "title": "Run start blocks the UI thread on per-host Vault and credential resolution — and deadlocks permanently on a cold Vault cache",
+    "category": "PERF",
+    "severity": "critical",
+    "effort": "M",
+    "area": "integrations",
+    "lens": "perf",
+    "existing_state": "All run entry points materialize host connections synchronously on the UI thread before any await: ExecutePresetOnRowsAsync calls GetHostConnections(hostRows).ToList() at Form1.cs:12277, the folder path at Form1.cs:12900, and the parallel connection test reaches it too at Form1.cs:8916 (the SemaphoreSlim(5).WaitAsync at 8910-8913 completes synchronously for the first 5 rows, so the lambda keeps running on the UI thread). Inside the per-row iterator (Form1.cs:13309-13391), every row with a vault_path calls VaultCredentialProvider.TryGetPassword, which blocks via .GetAwaiter().GetResult() on VaultService.ReadSecretKeysAsync (Services/Vault/VaultCredentialProvider.cs:48-49). VaultService.cs contains zero ConfigureAwait(false) (verified by grep — only VaultOidcLoginFlow has them), so on any cache miss the first real await (e.g. HttpClient.SendAsync during auth at VaultService.cs:323) posts its continuation back to the blocked WindowsFormsSynchronizationContext — a permanent sync-over-async deadlock, not just a slow call. The 300s instance cache (VaultService.cs:1065) is shared with background script/job runs (which execute under Task.Run, SshExecutionService.cs:446), masking the bug: a UI run works right after a background run warmed the cache and hangs otherwise. Even with the deadlock fixed, resolution is one sequential HTTPS round-trip per row (a cold 200-host fleet = 200 round-trips with the form frozen and no progress or cancel), an expired OIDC token launches the full browser login flow (VaultService.cs:448-573, up to 180s) inside the blocking call, and there is no single-flight gate around authentication (GetAuthenticatedProfileAsync, VaultService.cs:282-313 has no lock), so parallel callers with an expired token each perform a full login. The same enumeration also performs a Credential Manager CredWrite syscall per row with a grid password as a side effect (StoreHostPassword, Form1.cs:13349-13352) or a CredRead fallback (13353-13356).",
+    "recommendation": "Make host-credential resolution genuinely async: snapshot the grid cell values on the UI thread (cheap), then resolve credentials in an awaited background task before SetExecutionMode(true) — extract an async ResolveHostConnectionsAsync and await it in ExecutePresetOnRowsAsync / ExecuteFolderWithOptionsAsync / the connection-test path (the callers are already async Task; Task.Run around the vault batch is an acceptable first step). Dedupe distinct vault_path values and resolve them concurrently with a small cap (e.g. SemaphoreSlim(4)) behind a cancellable progress UI. Add an async TryGetPasswordAsync to VaultCredentialProvider so the sync-over-async bridge disappears from this path; add ConfigureAwait(false) throughout VaultService as defense-in-depth; add a per-profile single-flight SemaphoreSlim around GetAuthenticatedProfileAsync so concurrent resolution cannot trigger N simultaneous logins or N OIDC browser windows fighting over the callback port. Move the StoreHostPassword CredWrite side effect out of enumeration to the explicit save path, keeping only TryResolveHostPassword reads here.",
+    "user_benefit": "The app stops hard-freezing — and in the cold-cache case permanently hanging — the moment Run is pressed on a grid using the vault_path column; the feature becomes usable from the UI at all, and large fleets resolve credentials in parallel with visible, cancellable progress instead of one blocking HTTPS call per host.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Vault/VaultCredentialProvider.cs",
+        "lines": "48-49",
+        "note": ".GetAwaiter().GetResult() on ReadSecretKeysAsync — sync-over-async HTTP per host row"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "12277, 12900, 8910-8916",
+        "note": "GetHostConnections(...).ToList() executed on the UI thread in all three entry points"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "13332-13357",
+        "note": "per-row vault_path resolution plus CredWrite/CredRead side effects inside the row loop"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Vault/VaultService.cs",
+        "lines": "282-313, 323, 448-573, 1065",
+        "note": "no ConfigureAwait(false) anywhere in the file; no auth single-flight; OIDC browser login up to 180s inside the blocking call; 300s cache TTL masks the deadlock"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+        "lines": "446",
+        "note": "script/job execution runs under Task.Run — background paths merely block, masking the UI deadlock"
+      }
+    ],
+    "mockup_idea": "Small modal/inline progress strip shown after pressing Run: 'Resolving credentials 37/200 (vault: 12 pending)' with a Cancel button, replacing today's frozen window.",
+    "merged_from": 3
+  },
+  {
+    "id": "PERF-002",
+    "title": "Multi-host runs are effectively sequential: plain Execute has no parallelism, the folder dialog resets Parallel hosts to 1 every run, and batch barriers stall on slow hosts",
+    "category": "PERF",
+    "severity": "high",
+    "effort": "M",
+    "area": "ssh-execution",
+    "lens": "perf",
+    "existing_state": "Three compounding gaps. (1) The plain Execute path iterates hosts strictly one at a time: both ExecuteAsync overloads do a foreach over hosts with a single awaited Task.Run(() => ExecuteSingleHost(...)) per host (Services/SshExecutionService.cs:389-401 and 434-451), and ExecuteScriptAsync does the same per-host await at 584-597; ExecutePresetAsync (466-486) routes everything to these loops, so a normal toolbar Execute against a 100-row grid pays connect + auth + prompt-detect + command time serially — roughly 100 x 8s, about 13 minutes for something parallelism 10 would finish in ~1.5 minutes. (2) The only parallel path, folder runs, never remembers its setting: FolderExecutionDialog's Parallel hosts textbox is hard-initialized to 1 (FolderExecutionDialog.cs:180-186), the dialog is constructed fresh each run (Form1.cs:12286, shown at 12283-12301), and FolderExecutionOptions is built only from the dialog controls with default ParallelHostCount=1 (FolderExecutionDialog.cs:337-348, Models/FolderExecutionOptions.cs:27) — users must re-type the parallel count every single run. (3) Even when set, ExecuteFolderAsync groups hosts into fixed batches via index GroupBy (SshExecutionService.cs:684-689) and awaits Task.WhenAll per batch (888-890): the next batch cannot start until every host in the current one finishes, so one unreachable host costs the full 30s connection timeout (Services/SshTimeoutOptions.cs defaults; hung commands cost the 60s command timeout) while the other N-1 slots idle — scattered dead hosts add one full timeout per affected batch. Per-host output isolation already works (ExecuteSingleHost builds its own StringBuilder at 1196) and the folder path proves live OutputReceived interleaving plus per-host aggregation, so the serialization protects nothing.",
+    "recommendation": "Extract a shared sliding-window scheduler (SemaphoreSlim(parallelHostCount) plus one task per host, or Parallel.ForEachAsync with MaxDegreeOfParallelism, results ordered by original grid index for history aggregation) and use it both in ExecuteAsync/ExecuteScriptAsync and in place of ExecuteFolderAsync's batch + WhenAll barrier; move the completedHosts counter to Interlocked per-task completion (the per-operation progress reporting at 859-870 already works that way, and stop-on-first-error plus cancellation checks already live inside the per-host lambda). Persist the last-used FolderExecutionOptions (ParallelHostCount, StopOnFirstError, SuppressPresetNames) in AppConfiguration and prime the dialog from it; surface a parallel-hosts option on the plain Execute path via the existing >1-host execution options dialog (Utilities/ExecutionDialogPolicy.cs already gates it on multi-host), defaulting to 1 to preserve current behavior.",
+    "user_benefit": "Fleet sweeps — the app's core use case — finish in minutes instead of hours, the parallelism setting sticks between runs instead of silently resetting to sequential, and slow or dead hosts no longer stall healthy ones in the same batch.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+        "lines": "389-401, 434-451, 584-597",
+        "note": "per-host foreach with one awaited Task.Run at a time in all three non-folder entry points"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+        "lines": "684-691, 888-890",
+        "note": "folder run is the only parallel path, and it uses fixed batches + Task.WhenAll barriers"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FolderExecutionDialog.cs",
+        "lines": "180-186, 337-348",
+        "note": "Parallel hosts textbox hardcoded to 1; options built only from controls, never primed from config or the previous run"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "12283-12301",
+        "note": "dialog constructed fresh per run, no option persistence"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshTimeoutOptions.cs",
+        "lines": "1-73",
+        "note": "default 30s connection / 60s command timeouts that a single bad host imposes on its whole batch"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ExecutionCoordinator.cs",
+        "lines": "38-46",
+        "note": "Form1's Execute button funnels into ExecutePresetAsync, i.e. the sequential loops"
+      }
+    ],
+    "mockup_idea": "Execution-options dialog with a persisted 'Parallel hosts' numeric slider on plain Execute, plus a timeline bar comparing '100 hosts sequential ~13 min' vs 'parallel x10 ~1.5 min'.",
+    "merged_from": 3
+  },
+  {
+    "id": "PERF-003",
+    "title": "Select All / checkbox toggles on the host grid are O(N²) with per-row disk stats, layout reflows, and WebView2 messages — multi-second freeze on large fleets",
+    "category": "PERF",
+    "severity": "high",
+    "effort": "S",
+    "area": "form1-a",
+    "lens": "perf",
+    "existing_state": "SetAllCheckboxes (Form1.cs:2560-2575) loops every row setting the checkbox cell Value. Each programmatic set fires Dgv_Variables_CellValueChanged, whose checkbox branch (Form1.cs:4315-4322) calls UpdateSelectionCount for EVERY row — not once at the end. UpdateSelectionCount (Form1.cs:2536-2558) then does: a full-row scan in GetCheckedHostCount (2525-2534), a second full-row scan for totalCount (2539-2540), UpdateHostsFileIndicator, UpdateRunButtonText, and SendTargetHostToCanvas. UpdateRunButtonText (Form1.cs:11272-11296) performs a THIRD GetCheckedHostCount scan plus a Graphics allocation to measure text and button-reposition layout. SendTargetHostToCanvas -> ResolveTargetHostRow (Form1.cs:13430-13450) is a FOURTH full scan, plus a WebView2 IPC message with a full host payload built from every column when the Flow Canvas is open (13456-13496). UpdateHostsFileIndicator (Form1.cs:2370-2373) additionally calls ResolveLoadedFileSyncStatus (2343-2368) -> CsvFileSyncEvaluator.Evaluate (Utilities/CsvFileSyncEvaluator.cs:36-60), which hits the disk (File.Exists + new FileInfo) — 2 disk metadata reads per row toggle while a CSV is loaded. And when the grid is dirty, IsHostsGridUnsaved (Form1.cs:2375-2393) builds a full O(rows x cols) snapshot of the grid and deep-compares it — per row toggle. Net cost of one header select-all click on N hosts: ~4N² cell accesses + 2N disk stats + N layout reflows (+N IPC messages with canvas open). The same cascade applies to the context-menu Select All/Deselect All (Form1.cs:6523-6531), Invert Selection's loop (6533-6546), and every single checkbox click (4274-4283). The HostGridRestoreBatcher (UI/HostGridRestoreBatcher.cs:47-56) only defers these during restore/mutation scopes — SetAllCheckboxes opens no scope, and Form1.PasteFromClipboard (9604-9786) already demonstrates the handler-detachment fix.",
+    "recommendation": "Wrap the SetAllCheckboxes and invert-selection loops in _hostGridRestoreBatcher.BeginMutationScope() (or a _suppressSelectionCountUpdate flag checked in Dgv_Variables_CellValueChanged, mirroring how PasteFromClipboard detaches CellValueChanged) so UpdateSelectionCount runs exactly once after the loop. Inside UpdateSelectionCount, compute checked/total in a single pass and pass the checked count into UpdateRunButtonText instead of re-scanning. Cache the CsvFileSyncEvaluator result (re-evaluate at most every 1-2s or on FileSystemWatcher events) so per-click UI updates stop doing synchronous disk IO, and skip the BuildSnapshot deep-compare on checkbox-only changes (they never affect CSV dirty state, per the comment at 4317).",
+    "user_benefit": "Selecting all hosts in a 1,000+ row fleet currently locks the UI thread for seconds (and floods the canvas with hundreds of redundant IPC messages); this makes the core 'check everything and run' workflow instant.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "2560-2575",
+        "note": "SetAllCheckboxes per-row Value set, no event suppression"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "4315-4322",
+        "note": "CellValueChanged -> UpdateSelectionCount fires once per row during the loop"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "2536-2558",
+        "note": "UpdateSelectionCount: two full-row scans + indicator + run-button + canvas IPC"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "11272-11296",
+        "note": "UpdateRunButtonText re-runs GetCheckedHostCount (third scan) + Graphics text measure + layout"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "2343-2393",
+        "note": "ResolveLoadedFileSyncStatus disk stat + IsHostsGridUnsaved full snapshot deep-compare when dirty"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/CsvFileSyncEvaluator.cs",
+        "lines": "23-60",
+        "note": "Evaluate -> File.Exists + new FileInfo on every call"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "13430-13496",
+        "note": "ResolveTargetHostRow fourth full scan; SetTargetHost WebView2 message per row when canvas open"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 2
+  },
+  {
+    "id": "PERF-004",
+    "title": "Every step completion ships the entire accumulated host transcript to the Flow Canvas (quadratic IPC churn on long runs)",
+    "category": "PERF",
+    "severity": "high",
+    "effort": "S",
+    "area": "flowcanvas-bridge",
+    "lens": "perf",
+    "existing_state": "When the Flow Canvas window is open, Form1.SshService_StepCompleted (Form1.cs:13620-13650) attaches variables = activeContext?.GetAllVariables() (Form1.cs:13636) to the execution-update message sent for every completed step. ScriptContext.GetAllVariables (Services/Scripting/ScriptContext.cs:606-618) injects _output = LastCommandOutput and _outputwindow = OutputWindowText (lines 615-616), where OutputWindowText (lines 488-496) returns the FULL pane-formatted transcript accumulated for the host so far. FlowCanvasForm.SendMessage (UI/FlowCanvasForm.cs:337-362) runs JsonConvert.SerializeObject on the whole payload per call and posts it cross-process via PostWebMessageAsJson, where React must JSON.parse it again. There is no truncation or size guard anywhere on this path. Net effect: total bytes shipped grow as O(steps x transcript size) — quadratic in run length. A loop issuing 500 sends with ~2KB output each means the final execution-update messages each carry 1MB+, and a single host's run pushes hundreds of MB of serialize/IPC/parse churn; multiply by per-host execution and per-iteration step events. Users see the canvas (and the app, since posting marshals to the shared UI thread) get progressively more sluggish during exactly the runs this preset-builder is for.",
+    "recommendation": "Strip _outputwindow (and consider capping _output and any individual value to a few KB with a truncation marker) from the variables payload built for execution-update — either filter in SshService_StepCompleted before sending, or add a ScriptContext.GetCanvasVariablesSnapshot() that excludes transcript pseudo-variables. Keep the full snapshot only for debug-paused (Form1.cs:13683), which is rare and genuinely needs inspection data. Optionally stop sending variables on every step entirely and only send when the variables panel is visible or on pause/branch events.",
+    "user_benefit": "Long multi-host script runs and big loops stop degrading the canvas and UI thread; memory/GC churn during runs drops by orders of magnitude on output-heavy scripts.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "13620-13650",
+        "note": "execution-update built per StepCompleted with variables = GetAllVariables(), no size guard"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptContext.cs",
+        "lines": "606-618, 488-496",
+        "note": "GetAllVariables injects _outputwindow = full accumulated host transcript (StringBuilder.ToString of the whole run so far)"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/FlowCanvasForm.cs",
+        "lines": "337-362",
+        "note": "SendMessage serializes the full payload per call and posts via PostWebMessageAsJson (cross-process string copy)"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-005",
+    "title": "Every run completion rewrites the entire config twice on the UI thread: grid state serialized twice, Credential Manager written three times per password row, double GZip+JSON to disk",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "form1-b",
+    "lens": "perf",
+    "existing_state": "Both execution-history writers marshal to the UI thread and run the entire persistence pipeline inside Invoke() at every run completion: Form1.cs:13005-13017 (folder runs) and 14236-14248 (single runs) call _historyStorage.SaveRun — which serializes the full run payload (all host outputs + ExecutionDetails transcripts) to a string and writes it (HistoryStorageService.cs:459-475) — then call SaveConfiguration(). SaveConfiguration (Form1.cs:14625-14702) performs TWO complete config saves back-to-back: (1) SaveCurrentGridToEnvironment (14632), which itself calls BuildApplicationState() (Form1.cs:2232) and flows through EnvironmentService.SaveCurrentGridToEnvironment (EnvironmentService.cs:114-149), deep-cloning every environment twice before ConfigurationService.Save; then (2) the _configService.Update block at 14635-14688 rebuilds the full ApplicationState a second time (14681) and saves again — so the full host grid is walked and serialized twice per save. Each BuildApplicationState pass performs a Credential Manager CredWrite for every row with a password (Form1.cs:14731-14734), and MigratePasswordsToCredentialManager (14692) walks the grid a third time repeating the CredWrites (1501-1523). Each ConfigurationService.Save (108-151) copies a .bak, GZip-compresses the entire ApplicationState, serializes the whole config — including every environment's full host table — as indented JSON, and writes it synchronously. The same double-write also fires per update_environment script command, marshalled to the UI thread mid-run (Form1.cs:14166-14188 -> EnvironmentService.UpdateActiveEnvironmentVariable:272-299 -> full Save). Net per run ending: 1 payload write + 2 .bak copies + 2 GZip passes + 2 full-config serializations + 2 file writes + ~3 CredWrites per password row, all blocking the UI — a visible multi-second stall on large fleets.",
+    "recommendation": "Make SaveConfiguration produce exactly one Save: build the ApplicationState once and fold the grid-to-environment snapshot into the same Update(...) callback (change SaveCurrentGridToEnvironment to accept a prebuilt state) instead of letting it save independently first. At run completion persist only what changed — the history index is already persisted by _historyStorage.SaveRun on the line above, so most of SaveConfiguration is redundant there; keep the full save for exit, settings changes, and explicit saves. Make credential persistence a single explicit pass instead of a side effect of BuildApplicationState plus a separate migration sweep. Move the serialize+GZip+write of both ConfigurationService.Save and HistoryStorageService.SaveRun off the UI thread (snapshot on the UI thread, write on a single-writer background queue). For update_environment, batch/debounce variable writes during script execution and flush once at run end.",
+    "user_benefit": "Removes the end-of-run UI stall that grows with grid size, environment count, and output volume, halves the disk IO spent per run, and stops hammering the Windows Credential Manager with hundreds of duplicate writes per run.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "13005-13017, 14236-14248",
+        "note": "SaveRun + SaveConfiguration invoked inside Invoke() at every run completion (both history-store paths)"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "14625-14702",
+        "note": "SaveConfiguration: SaveCurrentGridToEnvironment (full save #1) + second BuildApplicationState at 14681 inside Update (full save #2) + MigratePasswordsToCredentialManager (14692)"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "2230-2240, 14718-14754, 1501-1523",
+        "note": "SaveCurrentGridToEnvironment calls BuildApplicationState; CredWrite per password row inside BuildApplicationState, repeated by the migration pass"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+        "lines": "108-151",
+        "note": "Save(): .bak copy + GZip of full ApplicationState + indented full-config serialize + synchronous File.WriteAllText, per save"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/EnvironmentService.cs",
+        "lines": "114-149, 272-299",
+        "note": "SaveCurrentGridToEnvironment and UpdateActiveEnvironmentVariable each end in SaveEnvironmentState -> full Save; the latter fires per update_environment command mid-run"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 2
+  },
+  {
+    "id": "PERF-006",
+    "title": "Every canvas drag, settings toggle, and one-field config change rewrites the entire config.json (gzip of the host fleet + full indented serialize + .bak copy) synchronously on the UI thread",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "persistence-config",
+    "lens": "perf",
+    "existing_state": "ConfigurationService.Update (Services/ConfigurationService.cs:156-161) funnels every tiny write into Save() (108-151), which on each call re-normalizes every environment's host rows (NormalizeEnvironmentData, 360-389), copies the existing file to .bak (116-120), re-serializes and GZip+base64-encodes the entire ApplicationState host-grid blob even when it did not change (CompressSavedState, 345-355), serializes the whole config with Formatting.Indented (135), and writes it with raw File.WriteAllText (144) — not the project's JsonFileWriter.WriteJsonAtomic convention. The hottest caller is Flow Canvas layout autosave: React debounces only 300ms (FlowCanvas/src/utils/layoutAutosave.ts:14-17) and fires on every node drag stop (App.tsx:176-178), branch-band drag (nodes/BranchBandsLayer.tsx:49), breakpoint/disable toggle (stores/slices/debugSlice.ts:75,90,104), comment add/edit/delete (commentSlice.ts:42,70,83), and display-setting change (settingsSlice.ts:58-61); each lands in Form1.ApplyLayoutAutosave (Form1.cs:2419-2501) -> PresetManager.UpdateCanvasLayout -> PersistToConfig (Services/PresetManager.cs:223-243, 1022-1042) -> full Save, dispatched on the UI thread (WebMessageReceived / BeginInvoke at Form1.cs:6792-6795). Canvas display prefs and panel resizes do the same via FlowCanvasForm.SavePanelSizes (UI/FlowCanvasForm.cs:474-527, RightPanel persists on mouseup), and the silent startup update check rewrites the whole config seconds after every launch just to record LastCheckTime (Form1.cs:14983, invoked from Form1_Shown:441 with the continuation on the UI thread), plus ~12 more Update sites across Form1/SettingsDialog/EnvironmentDialog. The live config.json is already 274KB and scales with fleet, environments, and presets: an arranging session of ~50 drags means 50+ full compress+serialize+double-write cycles (~27MB of file IO) on the UI thread, each one also a non-atomic crash window on the single file holding all presets, environments, and app state.",
+    "recommendation": "Two tiers. Cheap: cache the compressed SavedState blob and only re-run CompressSavedState when the application state actually changed (dirty flag/version counter set by the state-save path), and coalesce Save calls with a short trailing debounce (500ms-1s) flushed on FormClosing so a burst of autosaves produces one disk write; route the write through JsonFileWriter.WriteJsonAtomic and move it off the UI thread, keeping a synchronous Save only for the explicit close-path. Structural: stop persisting high-frequency canvas data through the config monolith — move per-preset CanvasLayoutData and Flow Canvas display prefs/WindowState to a small sidecar file under AppDataPaths (e.g. canvas-layouts.json or per-preset files) written atomically, leaving config.json for genuinely low-frequency settings.",
+    "user_benefit": "Eliminates repeated whole-config gzip/serialize/write stalls felt as micro-hitches while arranging blocks on the canvas or toggling settings (growing linearly with fleet size), cuts pointless .bak churn from writes that changed one timestamp, and shrinks the window where a crash mid-write corrupts the one file holding everything.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+        "lines": "108-161, 345-389",
+        "note": "Update always calls Save; Save = normalize all environments + .bak copy + unconditional CompressSavedState + full indented serialize + raw File.WriteAllText"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "2419-2501, 6792-6795",
+        "note": "ApplyLayoutAutosave -> PresetManager.UpdateCanvasLayout, invoked on the UI thread per autosave message"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/PresetManager.cs",
+        "lines": "223-243, 1022-1042",
+        "note": "UpdateCanvasLayout/UpdateLayoutMode -> PersistToConfig -> full config save per call"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/utils/layoutAutosave.ts",
+        "lines": "8-17",
+        "note": "only a 300ms debounce; callers include drag stop, band drag, comment ops, breakpoint/disable toggles, settings changes"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/FlowCanvasForm.cs",
+        "lines": "474-527",
+        "note": "three Update() sites — every canvas toggle/slider/panel-resize commit = full config rewrite"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "14983",
+        "note": "silent startup update check triggers a full config rewrite on every launch just for LastCheckTime"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/AppConfiguration.cs",
+        "lines": "18, 59-65",
+        "note": "one root object holds presets+layouts, the compressed state blob, and all environments' host grids"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 3
+  },
+  {
+    "id": "PERF-007",
+    "title": "Building the run's host list deep-clones every environment's entire host table once per selected host",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "persistence-config",
+    "lens": "perf",
+    "existing_state": "GetHostConnections (Form1.cs:13301-13392) calls _environmentService.GetActiveEnvironmentVariables() at Form1.cs:13373 INSIDE the per-row loop — once for every selected host. Each call runs ConfigurationService.LoadEnvironmentState (Services/ConfigurationService.cs:174-179), which (a) runs NormalizeEnvironmentData on the cached config (360-403), where EnvironmentConfig.Normalize re-allocates a new Dictionary for every host row of every environment (Models/EnvironmentConfig.cs:83-88); then (b) CloneEnvironmentMap (411-425) deep-clones every environment — every host-row dictionary again (EnvironmentConfig.Clone, 48-69) plus another Normalize pass. Net: ~3 full copies of every host row in every environment, per selected host, just to read the active environment's variables (which cannot change mid-loop). The iterator is materialized with .ToList() on the UI thread at run start (Form1.cs:12277 and 12900) — the SshDebugLog timing instrumentation around it (12276-12278, 'Building host connections') shows this stage was already a latency suspect. For a 500-host run with 3 environments of 500 rows each that is ~1.5 million dictionary copies before the first connection opens. The same clone-everything call also runs on every editor tooltip hover (Form1.cs:709).",
+    "recommendation": "Hoist the GetActiveEnvironmentVariables() call out of the loop in GetHostConnections — fetch once before the foreach and reuse the dictionary (a one-line move that eliminates the O(selected hosts x environments x env rows) clone storm). Additionally give ConfigurationService a read-only environment accessor that does not clone (or caches the last clone until the next Save invalidates it) so dialog/tooltip read paths stop paying O(all environments x all hosts) allocations per query; LoadEnvironmentState's normalize-on-read mutation of the cached config can move to load/save time where it belongs.",
+    "user_benefit": "Eliminates a hidden allocation storm at the start of every run — on a 1000-host fleet with a few environments this is millions of dictionary allocations and a multi-second UI freeze before the first connection even opens.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "13301-13392",
+        "note": "GetHostConnections loop; line 13373 fetches env variables per row"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+        "lines": "174-179, 360-403, 411-425",
+        "note": "LoadEnvironmentState = normalize-mutate cached config + full deep clone of all environments, on every read"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/EnvironmentConfig.cs",
+        "lines": "48-89",
+        "note": "Clone() and Normalize() each re-allocate a dictionary per host row"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "709, 12276-12278, 12900",
+        "note": "tooltip-hover call site; UI-thread .ToList() materialization with existing latency instrumentation"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-008",
+    "title": "Host grid populated row-by-row, cell-by-cell — startup and every environment switch stall on large fleets",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "cross-startup",
+    "lens": "perf",
+    "existing_state": "Both grid loaders insert hosts one at a time: RestoreApplicationState does dgv_variables.Rows.Add() per row, then sets Rows[rowIndex].Height = 28 per row (redundant — RowTemplate.Height is already 28 at Form1.cs:14817), then assigns each cell via name indexer guarded by dgv_variables.Columns.Contains(kvp.Key) per cell (Form1.cs:14836-14844). LoadEnvironmentIntoGrid repeats the identical pattern and additionally allocates a full Dictionary copy per row (Form1.cs:2286-2316). Columns.Contains + Cells[name] are linear name lookups, so populating is O(rows x cols x cols). BeginHostGridRestoreScope only defers the scrollbar/host-count/dirty callbacks (UI/HostGridRestoreBatcher.cs:36-67); nothing suspends grid layout or batches row insertion, so each Rows.Add triggers DataGridView bookkeeping individually. This runs in the startup Load handler (RestoreWindowState -> RestoreInitialEnvironmentState, Form1.cs:1678-1702) and again on every environment switch — for the multi-thousand-host fleets this app targets, that is the classic multi-second DataGridView freeze.",
+    "recommendation": "In both loaders: precompute a Dictionary<string,int> of column name -> index once; build DataGridViewRow instances offline (row.CreateCells(dgv) + SetValues) and insert with a single dgv_variables.Rows.AddRange(rowArray); drop the per-row Height assignment (RowTemplate covers it); wrap population in SuspendLayout/ResumeLayout. This naturally falls out of extracting a shared PopulateHostGrid helper for the two duplicate loaders.",
+    "user_benefit": "Startup restore and environment switching go from a visible multi-second freeze to near-instant on large fleets — the core workflow of a multi-host tool.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "14801-14858",
+        "note": "RestoreApplicationState: per-row Rows.Add + per-row Height + per-cell Columns.Contains/name-indexed assignment"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "2269-2331",
+        "note": "LoadEnvironmentIntoGrid: identical per-row/per-cell pattern plus a dictionary copy per row; runs on every environment switch"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/HostGridRestoreBatcher.cs",
+        "lines": "24-67",
+        "note": "restore scope only batches refresh callbacks — no layout suspension, no row batching"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-009",
+    "title": "Scheduled Jobs dialog refresh storm: full grid rebuild plus one index.json disk read per job, on every scheduler event AND every 5 seconds, forever",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "jobs-scheduling",
+    "lens": "perf",
+    "existing_state": "JobListDialog is modeless and single-instance (Form1.cs:166, 15171 via ModelessDialogManager.ShowOrActivate) so it commonly stays open all session. RefreshJobList runs from four triggers: a 5-second WinForms Timer (JobListDialog.cs:179-180) and full-refresh handlers for JobsChanged, JobStateChanged, and JobCompleted (433-435, 457-485). Each refresh clears and rebuilds the entire jobs grid (Rows.Clear at 502; the selection-preservation machinery at 566-606 exists only because of the rebuild) and, per job, calls GetLastResultText (755-763) -> JobHistoryService.GetRunsForJob(jobId, MaxResults=1) -> LoadJobIndex, an uncached File.ReadAllText + full JSON deserialize of that job's entire history index (up to 1000 entries with the editor's retention override) just to Take(1) (Services/JobHistoryService.cs:402-420, 499-518). It also re-parses every cron expression twice per job per refresh (CronExpressionDescriptor at JobListDialog.cs:724-732, Cronos at 734-753), and RefreshJobList then calls RefreshHistory (562, 642-718), which loads the selected job's same index file AGAIN and rebuilds the history grid — all synchronously on the UI thread. Because RunningState writes route through JobStorageService.Save, which fires JobsChanged (Services/JobStorageService.cs:138), and JobExecutionService fires JobStateChanged on every transition (Services/JobExecutionService.cs:904-906), a single run triggers at least five full refreshes. With a few dozen jobs and a busy scheduler that is hundreds of synchronous file reads, JSON parses, and cron parses per minute, plus 5-second grid rebuilds that wipe any column sort and cause visible repaint churn — and the 5-second poll is almost entirely redundant with the events.",
+    "recommendation": "Make the event-driven path the only full refresh and demote the timer: (1) cache the last-run record per job in the dialog (Dictionary<jobId, JobRunRecord>), seeded once on open and updated from the JobCompleted event payload (JobRunResult already contains everything GetRunResultText needs), so GetLastResultText stops hitting disk; (2) coalesce the four triggers through a ~250ms one-shot debounce so event bursts produce one refresh; (3) have the 5-second tick only rewrite the Next Run cell values in existing rows instead of Rows.Clear + rebuild (or delete it). Optionally add a cheap JobHistoryService.GetLastRun(jobId) backed by an index cache invalidated on write — Form1's mirrored 5s scheduler status-bar timer benefits too.",
+    "user_benefit": "Eliminates constant background disk I/O, JSON churn, and UI-thread work while the scheduler window sits open (it is modeless and often left open all day), keeps the window smooth during active runs, and stops the 5-second rebuild from wiping column sort.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobListDialog.cs",
+        "lines": "179-180, 433-435, 457-485",
+        "note": "5s poll timer plus three event handlers all invoke full RefreshJobList"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobListDialog.cs",
+        "lines": "491-564, 642-718, 724-763",
+        "note": "per refresh: both grids rebuilt, per-job GetLastResultText disk read, double cron re-parse, selected job's index loaded a second time"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobHistoryService.cs",
+        "lines": "402-420, 499-518",
+        "note": "GetRunsForJob always reads and deserializes the whole index.json from disk, no caching"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobStorageService.cs",
+        "lines": "138",
+        "note": "JobsChanged fires on every RunningState write, multiplying refreshes per run"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "166, 15171",
+        "note": "dialog is modeless single-instance, so the poll runs for the life of the session"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 2
+  },
+  {
+    "id": "PERF-010",
+    "title": "Run Now performs jobs.json writes and per-host Vault credential resolution synchronously on the UI thread",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "jobs-scheduling",
+    "lens": "perf",
+    "existing_state": "The Run Now click path never leaves the UI thread until deep inside execution. JobListDialog.OnRunNowClick (async void, JobListDialog.cs:1061-1069) awaits the invoker, Form1.RunJobNowAsync awaits _jobExecutionService.RunNowAsync directly (Form1.cs:15319) — no Task.Run anywhere. RunNowAsync therefore runs synchronously on the UI thread through TryStartJob (a jobs.json + .bak disk write, Services/JobExecutionService.cs:768-774) and the whole prefix of ExecuteJobCoreAsync up to the first real await at sshService.ExecutePresetAsync (687): ResolveCredentials (592-645 — a Vault HTTP call for Vault-mode jobs) and BuildHostConnections (487-544), which for every host row carrying a vault_path calls VaultCredentialProvider.TryGetPassword — a sync-over-async network call (Services/Vault/VaultCredentialProvider.cs:48-49) — sequentially, one row at a time. VaultService has a 300s TTL cache (Services/Vault/VaultService.cs:109-143, 1065), so repeated identical paths are cheap once warm, but a fleet with distinct per-host vault paths pays N cold sequential round-trips on the UI thread: 100 hosts at 100ms RTT freezes the window for ~10 seconds with no feedback. The same sequential resolution also delays scheduled runs (off the UI thread) while holding a concurrency slot.",
+    "recommendation": "Cheapest fix: in RunNowAsync (or Form1.RunJobNowAsync), move the execution onto the thread pool — e.g. await Task.Run(() => ExecuteTrackedJobAsync(job, isRunNow: true)) — so the UI thread returns immediately after the already-running check. Follow-up: make BuildHostConnections resolve distinct vault paths concurrently with a small parallelism cap (the VaultService cache already deduplicates identical paths), which also shortens scheduled-run startup for large fleets.",
+    "user_benefit": "Clicking Run Now on a Vault-backed fleet no longer freezes the app for the duration of N sequential network calls; the job appears as Running instantly and the window stays responsive.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobListDialog.cs",
+        "lines": "1061-1069, 1515-1523",
+        "note": "async void click handler awaits straight into the service on the UI thread"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "15313-15325",
+        "note": "Form1 invoker awaits RunNowAsync directly, no Task.Run"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobExecutionService.cs",
+        "lines": "222-247, 382-414, 487-544",
+        "note": "synchronous prefix: TryStartJob disk write, ResolveCredentials, per-row sequential Vault lookups before first await"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Vault/VaultCredentialProvider.cs",
+        "lines": "48-49",
+        "note": "sync-over-async: ReadSecretKeysAsync(...).GetAwaiter().GetResult() per host row"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-011",
+    "title": "jobs.json (all jobs + their full embedded host grids) is rewritten twice per job execution just to flip the RunningState marker",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "models-samples-build",
+    "lens": "perf",
+    "existing_state": "Each JobDefinition embeds a complete snapshot of its host grid (Hosts + HostColumns, Models/JobDefinition.cs:159-164) — deliberate, so jobs are immune to grid edits. But the crash-recovery marker RunningState also lives on JobDefinition (219-223, doc: persisted to jobs.json while executing), and JobStorageService has only whole-file persistence: PersistToDisk serializes every job and does a full .bak copy first (Services/JobStorageService.cs:227-244). JobExecutionService sets job.RunningState and calls _jobStorage.Save(job) at every run start (Services/JobExecutionService.cs:768-774) and clears it at every completion (827-832) — so one scheduled run = two full rewrites + two full .bak copies of a file whose size is dominated by every job's host snapshot. With several fleet-sized jobs on minute-level cron schedules, that is continuous multi-MB write amplification for a one-field change, all to a single contended file (and each Save also fires JobsChanged, amplifying the Job List dialog refresh storm).",
+    "recommendation": "Move the in-flight marker out of the monolith: persist running-state to a tiny sidecar (e.g. running-jobs.json mapping jobId -> StartedUtc) written atomically via JsonFileWriter.WriteJsonAtomic, and have the startup crash-recovery scan read that sidecar instead of JobDefinition.RunningState (keep deserializing the old field for one release to migrate). jobs.json then only changes when a job definition actually changes. Alternatively (bigger): per-job definition files under a jobs/ directory so any save touches only the affected job.",
+    "user_benefit": "Stops the scheduler from hammering the disk proportionally to fleet size on every single run, and removes the risk window where a crash mid-rewrite of the whole jobs file is in play twice per execution.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/JobDefinition.cs",
+        "lines": "159-164, 219-223",
+        "note": "embedded host snapshot per job; RunningState persisted to jobs.json while executing"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobExecutionService.cs",
+        "lines": "768-774, 827-832",
+        "note": "_jobStorage.Save(job) on every run start and completion"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/JobStorageService.cs",
+        "lines": "227-244",
+        "note": "PersistToDisk: .bak File.Copy + serialize ALL jobs + File.WriteAllText on every Save"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-012",
+    "title": "Job editor Hosts tab freezes on large host imports — it uses the naive grid-fill paths the main grid was already optimized away from",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "dialogs-jobs-history",
+    "lens": "perf",
+    "existing_state": "The job editor's per-job host grid fills row-by-row, cell-by-cell on the live grid. ApplyHostGridSnapshot (JobEditorDialog.cs:898-939) does Rows.Add() per row plus a string-keyed gridRow.Cells[columnName].Value assignment per cell, with no redraw suppression or bulk AddRange; it is the path behind Copy from Main Grid (JobEditorDialog.cs:1890-1908), Import CSV (1861-1888), and the initial PopulateHostGrid (794-801, called at 1611). Ctrl+V routes to HostGridUtilities.PasteClipboardText (JobEditorDialog.cs:1829-1836 -> Utilities/HostGridUtilities.cs:224-273), which grows the grid one Rows.Add(new DataGridViewRow()) at a time INSIDE the per-cell inner loop. The grid has RowPostPaint and CellPainting handlers wired (JobEditorDialog.cs:1394-1395), so every add invalidates and repaints. Form1's main grid had exactly this problem and was fixed: Form1.PasteFromClipboard (Form1.cs:9604-9693) documents the pathology in comments ('the grid services thousands of paint messages', 'O(rows^2) work') and implements WM_SETREDRAW suppression, handler detachment, and off-grid bulk row building — but that fix never reached the job editor's paths. Since Copy from Main Grid copies the entire main grid, a job targeting a few thousand hosts hits a multi-second UI freeze every time the Hosts tab is populated.",
+    "recommendation": "Port Form1's optimized bulk-fill technique into HostGridUtilities as a single shared ApplyRowsBulk(grid, columns, rows) helper (WM_SETREDRAW off, build DataGridViewRow objects off-grid with values pre-set, one Rows.AddRange, restore redraw) and call it from JobEditorDialog.ApplyHostGridSnapshot and HostGridUtilities.PasteClipboardText. This is a contained change: both call sites already funnel through these two methods.",
+    "user_benefit": "Copy-from-main-grid, CSV import, paste, and opening the editor for a large-fleet job become instant instead of freezing the dialog for seconds — the exact scenario this app is built for.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobEditorDialog.cs",
+        "lines": "898-939, 1861-1908, 1394-1395",
+        "note": "per-row/per-cell snapshot apply used by CSV import, Copy from Main Grid and initial load; paint handlers attached to the grid"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/HostGridUtilities.cs",
+        "lines": "224-273",
+        "note": "PasteClipboardText adds rows one at a time inside the per-cell loop, no redraw suppression"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "9604-9693",
+        "note": "main-grid paste already implements the fix (WM_SETREDRAW, off-grid bulk rows) with comments describing the exact pathology"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-013",
+    "title": "EnvironmentDialog writes the full config (with GZip of the app-state blob) to disk on every list click",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "dialogs-general",
+    "lens": "perf",
+    "existing_state": "Every selection change in the environments list calls PersistCurrentEnvironmentDetails unconditionally — no dirty check (EnvironmentDialog.cs:403-414, persist at 408; also before New at 418, Duplicate at 441, and on Save at 641). That flows through EnvironmentService.UpdateEnvironmentDetails (Services/EnvironmentService.cs:301-327), which first deep-clones the entire environment map via LoadEnvironmentState (Services/ConfigurationService.cs:174-179), then ConfigurationService.Save (108-151) copies config.json to .bak, GZip-compresses the entire SavedState blob, re-serializes the whole AppConfiguration with Formatting.Indented, and File.WriteAllText's it — all synchronously on the UI thread inside the SelectedIndexChanged handler. Arrow-keying through N environments performs N complete save cycles even when nothing was edited. Any failure is silently swallowed (EnvironmentDialog.cs:819-822). For a user with many presets and a large remembered host/app state, each list click costs gzip CPU plus rewriting a multi-hundred-KB-to-MB config file, felt as list-navigation lag, and each rewrite widens the exposure of the non-atomic WriteAllText.",
+    "recommendation": "Add a dirty check in PersistCurrentEnvironmentDetails: snapshot the loaded description/color/variables/vault-profile in LoadEnvironmentDetails and skip the service call when nothing changed (S). Better: stage edits in an in-memory environment map inside the dialog and commit once in BtnSave_Click — which also gives Cancel real semantics for free.",
+    "user_benefit": "Browsing environments stops costing a full config save per click — no UI hitches with big configs, far less disk churn, and fewer windows for a half-written config.json.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/EnvironmentDialog.cs",
+        "lines": "403-414, 802-823",
+        "note": "unconditional persist on every selection change; exceptions swallowed at 819-822"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/EnvironmentService.cs",
+        "lines": "301-327",
+        "note": "UpdateEnvironmentDetails -> full SaveEnvironmentState each call"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+        "lines": "108-151, 174-197",
+        "note": "each save: .bak copy + GZip of SavedState + full indented JSON serialize + WriteAllText; LoadEnvironmentState deep-clones the map"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-014",
+    "title": "Preset/favorite drag-and-drop and Favorites filtering do full config.json disk round-trips (including GZip of the entire host fleet) on the UI thread",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "form1-a",
+    "lens": "perf",
+    "existing_state": "Seven hot handlers call _configService.Load() instead of GetCurrent(): ReorderFolders (Form1.cs:4946), ReorderPresetsInFolder (4954), InsertIntoFolderOrder (4973), InsertIntoPresetOrder (5010), RenamePresetInFolderOrder (5085), RefreshFavoritesList (5197), and ReorderFavoriteItems (5477) — only the constructor's Load at 349 is legitimate. ConfigurationService.Load() (Services/ConfigurationService.cs:46-103) re-reads config.json from disk, JSON-parses the whole file (all presets), and GZip-decompresses + deserializes the entire SavedState blob — which contains every host row of the fleet (ApplicationState.Hosts, Models/AppConfiguration.cs:348-358). The reorder handlers then call Save() (108-145), which copies a .bak, re-GZips the fleet, re-serializes the entire config with Formatting.Indented, and rewrites the file — all synchronously on the UI thread, once per drop during a drag-reorder session. RefreshFavoritesList additionally runs on every 150ms search-debounce tick while the Favorites tab is active (Form1.cs:9002-9010 -> 5197), so typing in the preset filter re-reads and re-inflates the whole config per tick. As a secondary hazard, Load() replaces _cachedConfig (ConfigurationService.cs:63) — the very instance that PresetManager (Services/PresetManager.cs:32-35, mutate-then-Save at 1024-1041) and Form1 itself (e.g. 3946) mutate via GetCurrent() — so any in-memory mutation not yet saved is silently discarded by the next reorder/refresh.",
+    "recommendation": "Replace these Load() calls with _configService.GetCurrent() (the cache is always warm after the constructor's Load), or better, route the mutations through the existing ConfigurationService.Update(config => ...) API so read-modify-write is one code path and the cached instance is never swapped out from under other components. Reserve Load() for startup and explicit reload-from-disk actions.",
+    "user_benefit": "Removes a per-drop disk read+gunzip+rewrite of the whole config (noticeable hitches when the fleet/preset set is large or the config dir is AV-scanned), and closes a lost-update window where unsaved in-memory config changes are silently thrown away by an unrelated tree reorder.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "4946, 4954, 4973, 5010, 5085, 5197, 5477",
+        "note": "Load() in drag/reorder/favorites-refresh handlers"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+        "lines": "46-103",
+        "note": "Load() = File.ReadAllText + full parse + gunzip of the fleet state + _cachedConfig replacement at line 63"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/ConfigurationService.cs",
+        "lines": "108-145",
+        "note": "Save() = .bak copy + re-GZip SavedState + indented full serialize + WriteAllText, synchronous"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Models/AppConfiguration.cs",
+        "lines": "348-358",
+        "note": "ApplicationState.Hosts holds the full fleet rows inside SavedState"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "9002-9010",
+        "note": "150ms search debounce -> RefreshFavoritesList -> Load() per tick on the Favorites tab"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/PresetManager.cs",
+        "lines": "32-35, 1024-1041",
+        "note": "PresetManager mutates the GetCurrent() instance — aliasing hazard when Load() swaps the cache"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-015",
+    "title": "Forced blocking full GC with LOH compaction on every history list selection change makes browsing history stutter",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "form1-b",
+    "lens": "perf",
+    "existing_state": "ApplySelectedHistoryEntry's finally block (Form1.cs:8328-8335) calls RunHistorySwitchGc whenever the selected entry id differs from the last one (gate at 8256-8260) — i.e. on every distinct selection, including arrow-keying down the history list. RunHistorySwitchGc -> RunGcCompaction (Form1.cs:1332-1343) performs GCSettings.LargeObjectHeapCompactionMode = CompactOnce; GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect() — a blocking gen2 collection with LOH compaction, unconditionally, with no payload-size threshold and no cooldown. On a long session with a sizable managed heap (big outputs, many cached strings) each collection costs tens to hundreds of milliseconds, so each item the user selects adds a visible hitch. A smarter mechanism already exists right next to it: CacheLoadedHistoryPayload (Form1.cs:1126-1138) triggers MaybeCompactAfterPayloadSwap (1305-1311), which only compacts when a large payload (>= LargeHistoryPayloadCharThreshold) was actually released and respects AutomaticHistoryCompactionCooldown (1319-1330). The per-switch GC is redundant with — and undermines — that gated path.",
+    "recommendation": "Delete the RunHistorySwitchGc call from ApplySelectedHistoryEntry's finally block (and the _lastHistorySelectionGcEntryId bookkeeping at 8256-8260/8330) and rely solely on the existing threshold+cooldown compaction in MaybeCompactAfterPayloadSwap/MaybeCompactAfterPayloadClear. If memory pressure was the original motivation, raise the cooldown/threshold rather than forcing a collection per click.",
+    "user_benefit": "Scrolling through run history becomes smooth instead of hitching on every entry; the existing size-gated compaction still reclaims memory after genuinely large payloads.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "8256-8260, 8328-8335",
+        "note": "per-selection trigger in ApplySelectedHistoryEntry finally"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "1332-1343",
+        "note": "RunGcCompaction: LOH CompactOnce + double GC.Collect + WaitForPendingFinalizers, no gate"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "1126-1138, 1305-1330",
+        "note": "existing threshold- and cooldown-gated compaction path this duplicates"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-016",
+    "title": "'Save All' history export hydrates every payload from disk sequentially on the UI thread with no progress or cancel",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "form1-b",
+    "lens": "perf",
+    "existing_state": "SaveAllHistory (Form1.cs:14288-14342) loops over every history entry (14309-14325) and calls TryLoadHistoryPayload per entry on the UI thread; each call performs a disk read plus full JSON deserialize of the run payload via _historyStorage.TryLoadRunPayload (Form1.cs:1232-1236). Each loaded payload also displaces the single-entry selection cache through CacheLoadedHistoryPayload (Form1.cs:1238-1242 -> 1126-1138), and the body is rewritten with a double string Replace chain (CRLF -> LF -> CRLF) at 14322, allocating two full copies of each multi-megabyte output. With MaxHistoryEntries in the hundreds and large run outputs, the form freezes for the entire export with no progress indication and no way to cancel; the only feedback is the final missing-payload warning dialog (14327-14335).",
+    "recommendation": "Move the export loop to a background task: snapshot the entry list, then read each payload off the UI thread (add a path that bypasses CacheLoadedHistoryPayload so the export does not churn the selection cache), writing to the StreamWriter as it goes. Show a simple progress dialog with a cancel button (entries exported / total). Replace the double Replace with a single normalization while writing lines (e.g. a TextWriter that normalizes line endings), avoiding the two full-string copies per entry.",
+    "user_benefit": "Exporting a large history archive no longer locks the application for the duration; the user sees progress and can cancel instead of waiting on an apparently hung window.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "14303-14342",
+        "note": "sequential per-entry hydration loop and double Replace at 14322, all on UI thread"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "1201-1258",
+        "note": "TryLoadHistoryPayload: disk load + deserialize per entry; caches each payload into the single-entry selection cache (1238-1242)"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-017",
+    "title": "Find-in-output rescans the entire 2MB output buffer on every keystroke",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "dialogs-general",
+    "lens": "perf",
+    "existing_state": "The find bar triggers a full search on every character typed: FindDialog.cs:174-180 wires TextChanged to FindNext(highlightFirst:true), which calls Form1.FindFromDialog (Form1.cs:14499) -> BuildMatchList (Form1.cs:14583-14599). BuildMatchList reads txtOutput.Text twice (null-check at 14587, assignment at 14591); txtOutput is a plain WinForms TextBox (Form1.Designer.cs:158) with MaxLength = 2,000,000 (Form1.Designer.cs:1324), and each .Text getter marshals the whole native buffer via WM_GETTEXT and allocates a fresh up-to-4MB string — so each keystroke costs ~8MB of allocation plus a full IndexOf scan, all on the UI thread. A 1-character first keystroke against a full buffer collects hundreds of thousands of int offsets into _findMatches, then FindIndex scans them linearly (14517). Toggling Match Case re-runs the whole pipeline too (FindDialog.cs:172, 263-269 -> UpdateFindStatus Form1.cs:14534-14556). After large multi-host runs (output throttled in via _uiOutputThrottler, Form1.cs:271/332, up to the 2M cap), typing a search term feels sluggish character by character.",
+    "recommendation": "In BuildMatchList, read txtOutput.Text exactly once per call, and cache that snapshot in a field while the find bar is visible — invalidate it from the single output append path (the throttler flush) instead of re-marshaling per keystroke. Add a short debounce (~100-150ms timer) on the FindDialog TextChanged handler so a 5-character term costs one scan, not five. Optionally cap _findMatches enumeration (e.g. stop at 10k and show '10000+') to bound list growth for 1-2 char terms.",
+    "user_benefit": "Searching big multi-host output stays instant instead of stuttering on every keystroke; this is the exact scenario (large fleet runs producing megabytes of output) the find bar exists for.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "14583-14599",
+        "note": "BuildMatchList: two txtOutput.Text reads + full IndexOf scan per invocation"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FindDialog.cs",
+        "lines": "174-180",
+        "note": "TextChanged -> FindNext on every keystroke, no debounce"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.Designer.cs",
+        "lines": "158, 1324",
+        "note": "txtOutput is a plain TextBox with MaxLength 2,000,000"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FindDialog.cs",
+        "lines": "172, 263-269",
+        "note": "Match Case toggle re-runs the full scan via UpdateFindStatus"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-018",
+    "title": "Every variable substitution copies the entire live run transcript (quadratic allocation on big runs)",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "scripting-core",
+    "lens": "perf",
+    "existing_state": "ScriptContext.SubstituteVariables (Services/Scripting/ScriptContext.cs:625-644) unconditionally takes the shared StateLock and materializes the whole pane transcript via _sharedState.OutputWindow.ToString() (line 635) on EVERY call — even when the input string contains no ${_outputwindow} or ${_output} token; it also always runs the ${_output} Replace (line 639). The transcript grows continuously during execution: SshExecutionService appends every received output chunk via outputWindowContext?.AppendOutputWindowText(e.Output) (Services/SshExecutionService.cs:1640, also 1803) under the same lock. SubstituteVariables has 109 call sites across 39 command classes (every send/print/http/notify/sftp/etc., typically several calls per step), so a loop-heavy script against verbose devices copies an ever-growing multi-megabyte string per interpolation — copies over 85KB land on the Large Object Heap. Relatedly, the shared FullOutput StringBuilder (ScriptContext.cs:108) is appended on every RecordCommandOutput/EmitOutput (lines 860, 883) with no cap — unlike localcmd, which has a per-command max_output_bytes.",
+    "recommendation": "In SubstituteVariables, only snapshot the transcript when the input actually references it: guard the lock/ToString with an Ordinal Contains check for ${_outputwindow} and the Replace with a Contains check for ${_output}. Optionally add a configurable character cap (keep-tail) on the shared Output/OutputWindow builders for runaway loop scripts, mirroring localcmd's max_output_bytes. Both changes are local to ScriptContext.cs.",
+    "user_benefit": "Long fleet runs and scheduled jobs with chunky device output stop progressively slowing down and churning the GC/LOH; the live-output handler also stops contending on the lock during interpolation-heavy loops.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptContext.cs",
+        "lines": "625-644",
+        "note": "unconditional lock + OutputWindow.ToString() + Replace on every substitution"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+        "lines": "1637-1643",
+        "note": "per-chunk AppendOutputWindowText keeps the transcript growing during the run"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptContext.cs",
+        "lines": "108, 855-893",
+        "note": "unbounded shared Output StringBuilder appended on every command output and EmitOutput"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-019",
+    "title": "Every reference to a list variable re-parses and double-copies the whole list; lambda bodies are re-parsed per element — big-output scripts go quadratic",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "scripting-functions",
+    "lens": "perf",
+    "existing_state": "The engine's standard pattern for processing command output is split-into-lines followed by count/filter/map/foreach over the list. Three compounding O(n) costs are paid on EVERY evaluation: (1) when any function argument names a List<string> variable, JsonUtilities.ResolveJsonValue builds a brand-new List<object> by running ParseJsonValue on every item (Services/Scripting/JsonUtilities.cs:317-327) — per item that is a Trim, bool/null comparisons, long.TryParse, double.TryParse, and for any line starting with a brace/bracket an exception-guarded JsonSerializer.Deserialize attempt (69-108). (2) The receiving function immediately converts that List<object> straight back to List<string> by ToString-ing every item (ValueResolver.ResolveListValue, Services/Scripting/ValueResolver.cs:159-165; CollectionFunctions.ResolveList round-trip at Functions/CollectionFunctions.cs:280-284). So count(lines) on a 50k-line output performs ~100k parse/ToString operations and two full list copies just to return a count — and a while-loop conditioned on count(lines) pays that every iteration, i.e. O(n^2). (3) Inside map/filter/find/any/all/count, the lambda body string is re-tokenized from scratch for every element — LambdaExpression.Evaluate constructs a new ExpressionParser(Body, context) per item (Services/Scripting/LambdaExpression.cs:74-78), each call re-walking the full dispatch chain. Additionally map() stringifies its results (CollectionFunctions.cs:34-40), forcing the next pipeline stage to re-parse everything again. None of this is observable on 100-item lists, but this app's domain is multi-host fleets producing tens of thousands of output lines, where chained set/filter/map steps and loop conditions stall the run for seconds between SSH commands.",
+    "recommendation": "Three contained changes, no semantics change: (a) in ResolveJsonValue, return List<string> variables as-is instead of eagerly per-item ParseJsonValue-ing them (JsonUtilities.cs:318-327) — every verified consumer either ToStrings the items back or handles List<string> explicitly; keep the conversion only inside the JSON-serialization paths that genuinely need typed items (JsonUtilities.cs:48, 164, 279). (b) Parse the lambda body once per collection call: cache the tokenized form on the LambdaExpression instance (or a small static LRU keyed by body string) and let ExpressionParser accept the pre-parsed form. (c) In ParseJsonValue, pre-validate with a cheap structural check (Utf8JsonReader try-parse) before the exception-guarded Deserialize so JSON-looking non-JSON lines do not throw per item. Add a benchmark-style test over a 100k-line synthetic output to lock in the improvement.",
+    "user_benefit": "Scripts that parse large command output (config dumps, log greps, inventory listings) across a fleet stop stalling for seconds per step/loop iteration; the engine's per-element cost drops by roughly an order of magnitude in the common split-then-filter pattern.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/JsonUtilities.cs",
+        "lines": "317-327",
+        "note": "List<string> variable -> new List<object> with per-item ParseJsonValue on every reference"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/JsonUtilities.cs",
+        "lines": "69-108",
+        "note": "ParseJsonValue per-item TryParses + exception-guarded Deserialize for brace/bracket items"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ValueResolver.cs",
+        "lines": "159-175",
+        "note": "immediate ToString round-trip back to List<string>"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/LambdaExpression.cs",
+        "lines": "74-78",
+        "note": "new ExpressionParser constructed and body re-parsed for every list element"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Functions/CollectionFunctions.cs",
+        "lines": "34-40, 280-284",
+        "note": "map stringifies results; ResolveList performs the resolve/round-trip per call"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-020",
+    "title": "http command creates a fresh HttpClient and handler per step — no connection reuse in loops, and timeouts over 100s silently broken",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "scripting-commands-a",
+    "lens": "perf",
+    "existing_state": "Every execution of an http: step constructs a new HttpClientHandler and HttpClient inside using blocks (Services/Scripting/Commands/HttpCommand.cs:92-93, handler built at 320-333) and disposes them when the step ends. In a foreach/while polling loop or a multi-host run, each request pays a full TCP + TLS handshake and leaves a socket in TIME_WAIT; nothing is pooled or reused — the textbook HttpClient anti-pattern, where sustained tight polling can exhaust ephemeral ports. A side effect of the per-step client: the default HttpClient.Timeout of 100s is never overridden, so a step declaring timeout: 300 (HttpCommand.cs:90, 94-95 only sets the CTS) is silently capped at ~100s by the client's own timeout, then misreported as having timed out after the configured seconds (192-196).",
+    "recommendation": "Cache clients keyed by handler-affecting options — (VerifyTls, FollowRedirects) is the full key today — in a small static ConcurrentDictionary<(bool,bool), HttpClient> (or one SocketsHttpHandler with PooledConnectionLifetime ~2 min per key). Set client.Timeout = Timeout.InfiniteTimeSpan and keep the existing per-step linked-CTS timeout (94-95), which also fixes the 100s cap on long timeout: values. The injectable _handlerFactory test seam (45-48) can stay; only the default path needs caching.",
+    "user_benefit": "Scripts that poll REST APIs in loops or fan HTTP calls across a fleet run noticeably faster (one TLS handshake instead of one per request) and stop risking ephemeral-port exhaustion on long runs; per-step timeouts over 100 seconds actually work.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/HttpCommand.cs",
+        "lines": "92-95",
+        "note": "fresh handler+client pair per step; CTS timeout layered on top of the default 100s client timeout"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/HttpCommand.cs",
+        "lines": "320-333",
+        "note": "CreateDefaultHandler — only FollowRedirects and VerifyTls vary, so a 2-key client cache covers all cases"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/HttpCommand.cs",
+        "lines": "192-196",
+        "note": "timeout catch reports the step's configured seconds even when the client's built-in 100s timeout fired first"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-021",
+    "title": "input validate regex compiled without the standard timeout — catastrophic backtracking freezes the whole app on the UI thread",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "scripting-commands-a",
+    "lens": "perf",
+    "existing_state": "The engine has a single source of truth for user-pattern safety — ScriptRegexDefaults.UserPatternTimeout (5s, Services/Scripting/ScriptRegexDefaults.cs:10) — and it is applied in ExtractCommand.cs:60 and ExpressionEvaluator.cs:98. InputCommand is the outlier: the user-supplied validate: pattern is compiled with new Regex(step.Input.Validate, RegexOptions.Compiled) and no timeout (Services/Scripting/Commands/InputCommand.cs:41), and IsMatch runs synchronously on the UI thread inside the dialog's OK handler (204-217, IsMatch at 209). A backtracking-prone pattern against a long pasted value hangs the UI thread indefinitely — and because ScriptPromptDialogRunner has already disabled the main form except the Stop button (which also lives on the now-frozen UI thread), there is no recovery short of killing the process.",
+    "recommendation": "Add a factory on ScriptRegexDefaults (e.g. CreateUserRegex(pattern, options) that always passes UserPatternTimeout) and route InputCommand.cs:41 — and any future user-pattern compilation — through it; catch RegexMatchTimeoutException in BtnOk_Click and surface it as the validation error. Dropping RegexOptions.Compiled for a once-per-prompt match is a free bonus.",
+    "user_benefit": "An innocent-looking validation regex can no longer hard-freeze the entire application mid-script with the main form locked; worst case the user sees a validation error after 5 seconds instead of reaching for Task Manager.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/InputCommand.cs",
+        "lines": "41",
+        "note": "new Regex(step.Input.Validate, RegexOptions.Compiled) — no timeout"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/InputCommand.cs",
+        "lines": "204-217",
+        "note": "IsMatch executes in BtnOk_Click on the UI thread"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptRegexDefaults.cs",
+        "lines": "10",
+        "note": "UserPatternTimeout = 5s exists as the intended standard"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ExtractCommand.cs",
+        "lines": "60",
+        "note": "extract applies the timeout — input is the inconsistent outlier"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-022",
+    "title": "parallel silently serializes any send steps — the shared shell session has a single-slot execution lock, so the most common use gets zero concurrency",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "scripting-commands-b",
+    "lens": "perf",
+    "existing_state": "ParallelCommand runs each branch via Task.Run against one shared ScriptContext (Services/Scripting/Commands/ParallelCommand.cs:40-61), with a comment at line 45 deferring to 'internal synchronization'. That synchronization is SshShellSession._commandExecutionLock, a SemaphoreSlim(1,1) (Services/SshShellSession.cs:75) acquired by every command-execution path: ExecuteAsync (536-552), the expect variant (573-594), and ExecuteWithRespondsAsync (615-653). So when a user puts send steps in parallel branches — the natural thing to try in an SSH tool — they execute strictly one at a time on the single shell channel. The user gets the threading overhead, the result-ordering complexity, and concurrent StepStarting/StepCompleted events, but no actual speedup; nothing warns them. Concurrency is only real for local/network utility steps (ping, portcheck, webhook, wait, dns).",
+    "recommendation": "Make the behavior honest at validation time: in ScriptParser validation (or a preflight in ParallelCommand), detect send/interactive steps inside parallel branches and emit a warning ('send steps inside parallel run sequentially on the shared SSH session'), plus a line in the script docs and the Flow Canvas parallel block's property panel. As a follow-up feature (separate, ~a week), real concurrency is achievable: the Rebex connection pool already exists, so parallel branches containing sends could each check out their own pooled channel for the branch duration.",
+    "user_benefit": "Users stop architecting scripts around a parallelism that does not exist for SSH commands, and understand why their parallel device interrogation takes exactly as long as sequential.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/ParallelCommand.cs",
+        "lines": "40-61",
+        "note": "Task.Run per branch over one shared ScriptContext/session; comment at 45 defers to session synchronization"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshShellSession.cs",
+        "lines": "75",
+        "note": "_commandExecutionLock = new SemaphoreSlim(1, 1)"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshShellSession.cs",
+        "lines": "536-552, 573-594, 615-653",
+        "note": "all three command execution paths serialize on the single-slot lock"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-023",
+    "title": "writefile JSON append re-reads, re-parses, deep-clones and rewrites the whole file on every append — quadratic across loops and fleet runs, and non-atomically",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "scripting-commands-b",
+    "lens": "perf",
+    "existing_state": "writefile with format: json, mode: append performs a full read-modify-write cycle per step: File.ReadAllText of the existing file (Services/Scripting/Commands/WriteFileCommand.cs:221), JsonNode.Parse of the entire content plus DeepClone of every appended item (246-265), re-serialization of the whole document (pretty-printed by default, 294-298), then File.WriteAllText of the complete file (101). Appending one record inside a foreach loop, or once per host across a fleet run (each host re-runs the script and appends to the same results file), costs O(current file size) every time — total work grows quadratically. A 1,000-host run accumulating per-host result objects parses and rewrites a steadily growing file 1,000 times. The rewrite is also plain WriteAllText with no temp+replace, unlike the project's own JsonFileWriter.WriteJsonAtomic convention (Utilities/JsonFileWriter.cs), so a crash mid-rewrite loses the entire accumulated results file, not just the last record. By contrast the jsonl path is already O(1) per append (AppendJsonLine reads only the final byte via FileEndsWithLineBreak, 364-387).",
+    "recommendation": "Two-part fix: (1) make the rewrite atomic by routing the merged-JSON write through JsonFileWriter.WriteJsonAtomic (temp + File.Replace) instead of File.WriteAllText at WriteFileCommand.cs:101; (2) kill the quadratic re-parse by caching the parsed JsonNode per resolved path on ScriptContext for the duration of a run (merge into the cached node, serialize from it), or — cheaper — emit a one-time hint when json-append is used inside a loop pointing users at format: jsonl, which already appends in O(1). Also hoist the per-call new JsonSerializerOptions (294-297, 392-397) to two static instances.",
+    "user_benefit": "Large fleet runs that accumulate results into a JSON file stop slowing down as the file grows, and a crash or kill mid-run no longer destroys every previously collected result.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/WriteFileCommand.cs",
+        "lines": "217-233",
+        "note": "append mode: ReadAllText of entire existing file per step"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/WriteFileCommand.cs",
+        "lines": "242-281",
+        "note": "JsonNode.Parse of whole file + DeepClone per item + full re-serialization"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/WriteFileCommand.cs",
+        "lines": "98-102",
+        "note": "merged content written back via plain File.WriteAllText — non-atomic full rewrite"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/WriteFileCommand.cs",
+        "lines": "364-387",
+        "note": "contrast: JSONL append is O(1), reads only the file's last byte"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/JsonFileWriter.cs",
+        "lines": "",
+        "note": "existing project convention for atomic JSON writes, unused here"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-024",
+    "title": "Sync-over-async per host pins a blocked threadpool thread each — parallel runs starve the threadpool that their own read loops need",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "L",
+    "area": "ssh-execution",
+    "lens": "perf",
+    "existing_state": "Every per-host execution is a Task.Run wrapper (Services/SshExecutionService.cs:397, 446, 593, 1072) around synchronous methods that internally block on real async work with .GetAwaiter().GetResult(): ExecuteWithPool blocks on CreateSessionAsync (2092-2093) and ExecuteBatchAsync (2148-2149); ExecuteWithoutPool on InitializeAsync (2266) and ExecuteBatchAsync (2291-2292); the three script backends at 1517-1518, 1562-1563, 1649, 1697-1698, 1755-1756. The pool's CreateConnectionAsync then spawns further Task.Run calls for Connect/Login (Services/SshConnectionPool.cs:386-391, 408-413, 430-435, 449-454). At ParallelHostCount=100, ~100 threadpool threads sit blocked while the async machinery they wait on — the shell sessions' polling-delay continuations, the pool's 5s keepalive timer callback (SshConnectionPool.cs:118-122), progress/output event continuations — competes for the starved pool. The CLR injects extra threads slowly, so large parallel folder runs ramp up stuttering over their first tens of seconds and live output turns laggy precisely when the most hosts are in flight.",
+    "recommendation": "Two tiers. Cheap mitigation (hours): schedule per-host work with TaskCreationOptions.LongRunning (dedicated threads, no pool depletion) at the four Task.Run wrap sites, or bump ThreadPool.SetMinThreads when a parallel folder run starts. Real fix (about a week): make the per-host pipeline genuinely async end-to-end — ExecuteSingleHost/ExecuteScriptOnHost/ExecutePresetOnHost become async Task<ExecutionResult>, every .GetAwaiter().GetResult() becomes await, and the Task.Run wrappers disappear. The signatures are private to SshExecutionService so the refactor does not ripple into Form1.",
+    "user_benefit": "High-parallelism folder runs actually achieve their configured parallelism from the first second, output stops lagging during big runs, and pool keepalives stop getting delayed behind blocked threads on long sessions.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+        "lines": "1517-1518, 1562-1563, 1649, 1697-1698, 1755-1756, 2092-2093, 2148-2149, 2266, 2291-2292",
+        "note": "GetAwaiter().GetResult() blocking sites inside Task.Run-wrapped per-host work"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshConnectionPool.cs",
+        "lines": "386-391, 408-413, 118-122",
+        "note": "each blocked host additionally spawns inner Task.Run for Connect/Login; keepalive timer competes for the same pool"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-025",
+    "title": "Editor restyles the entire document (plus fold levels and indicators) on every keystroke",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "editor",
+    "lens": "perf",
+    "existing_state": "Every text change queues RefreshEditorVisuals (UI/ScintillaScriptEditorControl.cs:595-611, coalesced once per message-loop tick at 613-639 — effectively once per keystroke during typing). That refresh does O(document) work on the UI thread: ApplySyntaxHighlighting (1700-1739) calls ConfigureBaseStyles which runs StyleClearAll and wipes the per-color style cache every time (1775, 1810-1811, so all custom styles are re-allocated per keystroke), pulls the full document via _editor.Text (1717), resets styling for the whole buffer (StartStyling(0)/SetStyling(TextLength), 1713-1714), and passes Enumerable.Range(0, Lines.Count) to the highlighter (1717) — even though YamlSshSyntaxHighlighter.BuildHighlights already accepts changed-line indices (Services/Editor/YamlSshSyntaxHighlighter.cs:62-78); each line then runs ~8 regexes (80-154) and every span is applied with its own StartStyling/SetStyling interop call (1721-1738). The same tick also re-clears and refills both squiggle indicator ranges across the whole document (ApplyDiagnosticsVisuals, 2192-2222), recomputes fold levels for ALL lines with a per-line native Lines[index].Text pull when folding is on (UpdateFoldLevels, 2001-2053, esp. 2017), and marshals the full text out twice more for validation gating (RequestValidationOrClear, 2247 and 2251). The only perf budget test runs on a 500-line script with a 50ms p95 keystroke allowance (SSH_Helper.Tests/UI/ScintillaScriptEditorPerformanceTests.cs:41-58); cost scales roughly linearly with document size, so multi-thousand-line presets get visibly laggy typing.",
+    "recommendation": "Make the keystroke path incremental: (1) move ConfigureBaseStyles/StyleClearAll out of the per-refresh path — run it only on theme/font/settings changes, keeping the color-to-style cache alive; (2) track the modified line range (Scintilla Insert/Delete notifications or diff the changed region in Editor_TextChanged) and feed only those lines to BuildHighlights — the incremental API already exists and is unused; restyle just that range instead of SetStyling(TextLength); (3) restrict UpdateFoldLevels to the changed lines plus the lines whose header status can flip (previous content line); (4) pull _editor.Text once per refresh tick and share the snapshot between highlighting and RequestValidationOrClear. Keep the existing full-document path for load/theme-switch. Extend the perf test with a 5,000-line variant to lock the win in.",
+    "user_benefit": "Typing stays instant in large YAML presets instead of degrading linearly with script size; today every keystroke pays for restyling the whole document.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+        "lines": "1700-1739",
+        "note": "ApplySyntaxHighlighting: full _editor.Text pull, SetStyling over whole buffer, all lines passed to highlighter, per-span interop loop"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+        "lines": "1768-1812",
+        "note": "ConfigureBaseStyles: StyleClearAll (1775) + style cache wiped (1810-1811) on every refresh tick"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+        "lines": "2001-2053",
+        "note": "UpdateFoldLevels: all lines, per-line native Lines[index].Text at 2017"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+        "lines": "2238-2257",
+        "note": "RequestValidationOrClear marshals full _editor.Text twice more per tick"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/YamlSshSyntaxHighlighter.cs",
+        "lines": "62-78",
+        "note": "BuildHighlights already accepts changedLineIndices — incremental API exists, never used incrementally"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SSH_Helper.Tests/UI/ScintillaScriptEditorPerformanceTests.cs",
+        "lines": "41-58",
+        "note": "perf budget only covers a 500-line script (p95 keystroke <= 50ms)"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-026",
+    "title": "Open completion popup re-runs two synchronous full-document analyses per keystroke",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "editor",
+    "lens": "perf",
+    "existing_state": "While the completion popup is visible, each typed character triggers ShowCompletionPopup synchronously inside Editor_TextChanged (UI/ScintillaScriptEditorControl.cs:603-608) AND again via the selection-change branch of Editor_UpdateUI (715-740 -> RefreshVisibleCompletionPopup 1168-1176) — both land in ShowCompletionPopupCore which marshals the entire document out of the native control (_editor.Text, 1036-1039) and runs ScriptAutocompleteProvider.GetCompletion. In interpolation context (typing inside ${...} or {{...}}), GetCompletion (Services/Editor/ScriptAutocompleteProvider.cs:311-319) calls BuildInterpolationCompletion -> GetInterpolationSymbols (450-468) -> ExtractDynamicSymbols (640-794), which scans every line of the script with ~7 regex matches per line, one of which is an inline NON-compiled Regex.Match constructed fresh for each vars line (line 691). So one keystroke with the popup open costs 2 full text marshals + 2 full-document regex scans on the UI thread, on top of the refresh pipeline. The same ExtractDynamicSymbols full scan plus a complete ScriptParser.Parse also runs on every hover dwell (Form1.cs:690-722). The completion perf budget is 120ms p95 at only 500 lines (SSH_Helper.Tests/UI/ScintillaScriptEditorPerformanceTests.cs:45,57).",
+    "recommendation": "Three cheap fixes: (1) coalesce the popup re-query into the existing per-tick queue (QueueRefreshAndValidation pattern) so TextChanged + UpdateUI collapse to one GetCompletion per keystroke, sharing a single text snapshot; (2) hoist the inline vars regex at ScriptAutocompleteProvider.cs:691 into a static compiled field like every other regex in the file; (3) memoize ExtractDynamicSymbols on (text length, hash or document version) — the result is identical between the popup query and the hover resolver, so Form1's dwell path (Form1.cs:717) gets the cached list too.",
+    "user_benefit": "Autocomplete stays responsive while typing inside variables on big scripts; today the most interactive moment (popup open, mid-word) is exactly when the editor does double full-document scans per character.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+        "lines": "603-608",
+        "note": "TextChanged re-queries the popup synchronously while visible"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+        "lines": "715-740",
+        "note": "UpdateUI selection change triggers a second ShowCompletionPopupCore for the same keystroke"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/ScintillaScriptEditorControl.cs",
+        "lines": "1036-1039",
+        "note": "ShowCompletionPopupCore marshals full _editor.Text per query"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptAutocompleteProvider.cs",
+        "lines": "640-794",
+        "note": "ExtractDynamicSymbols scans all lines, ~7 regexes per line; uncompiled inline Regex.Match at 691"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "690-722",
+        "note": "hover dwell re-parses the whole script and re-runs ExtractDynamicSymbols with no caching"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-027",
+    "title": "Terminal pump busy-polls and rebuilds full screen snapshots on a timer even when the session is completely idle",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "terminal",
+    "lens": "perf",
+    "existing_state": "Every open interactive terminal spins a dedicated loop for its whole lifetime: PumpFullAsync (Services/Terminal/InteractiveTerminalService.cs:2108-2270) takes ioLock, calls the blocking scripting.Process(2ms), reads cursor/history state, then sleeps only 2ms (active) or 8ms (idle) — roughly 100-250 wakeups per second per window. Rendering is purely timer-driven: renderDue (2219-2236) fires every 120ms at idle / 20ms when active with no did-data-actually-arrive gate, so BuildScreenSnapshot (3333-3469) walks every cell (screen.GetCell per cell, 4,320 cells at the default 120x36, several times that maximized) and allocates fresh char[] + two int[] arrays (~43KB+) per snapshot — only for the hash check at 2252 to discard it as identical. The headless capture pump is hotter still (2ms process + 4ms delay, 2052-2053) and runs for the entire max_seconds of a capture step. The Rebex DataReceived handlers (707, 1297, 1706) already know exactly when bytes arrive, but that signal never reaches the render scheduler.",
+    "recommendation": "Set a dirty flag from the DataReceived handlers (or from scripting.Process's returned TerminalState) and gate BuildScreenSnapshot on dirty || viewportChanged instead of wall-clock intervals. Add idle backoff to the loop delay (e.g., escalate 8ms -> 50-100ms after a few cycles with no data, no pending input, and no scroll), resetting to fast cadence the moment input is enqueued or data arrives. This removes the constant per-window CPU burn without changing perceived latency.",
+    "user_benefit": "Idle terminal windows stop consuming a steady slice of CPU for hours; laptops stay cool and capture steps that watch a command for minutes no longer cost a hot polling thread each.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "2128-2132",
+        "note": "processTimeoutMs=2, activeDelayMs=2, idleDelayMs=8, activeRenderIntervalMs=20, idleRenderIntervalMs=120"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "2219-2236",
+        "note": "renderDue is purely interval-based; activity only toggles 20ms vs 120ms, never suppresses the rebuild"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "3333-3469",
+        "note": "BuildScreenSnapshot: per-cell GetCell loop + 3 array allocations per snapshot"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "2252-2255",
+        "note": "identical snapshots are discarded by hash after being fully built"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "2052-2103",
+        "note": "headless capture pump: 2ms Process + 4ms delay loop for the entire capture duration"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-028",
+    "title": "Capture transcript caps count lines only — no byte cap — and the full transcript is copied 3-4x and persisted whole into history",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "terminal",
+    "lens": "perf",
+    "existing_state": "The interactive transcript cap is 500,000 lines and the mirror cap 50,000 lines (Services/Terminal/InteractiveTerminalService.cs:71-76), enforced purely by counting CR/LF in AppendTranscriptWithCap (2420-2465) and GetMirrorChunkPrefixLengthWithinCaps (2545-2599). There is no character/byte cap anywhere, so newline-poor output (e.g., cat-ing a minified JSON/log blob — exactly what capture mode is used for) grows the transcript StringBuilder without bound regardless of the line cap. Even within the cap, a full 500k-line transcript (~50-60MB at typical widths) is materialized repeatedly: transcriptBuilder.ToString() (1184), the PrependStartupPromptIfMissing concat (2898), CleanTranscriptForAudit's Normalize pass (2962-2977), and in window mode InteractiveCommand re-normalizes and emits the entire transcript as one RawChunk to the UI (Services/Scripting/Commands/InteractiveCommand.cs:35-39). The final copy is stored on InteractiveTerminalSessionDetails and rides ExecutionDetails into the history JSON on disk (Form1.cs:1756, 13094) plus optionally a script variable (InteractiveCommand.cs:43-46).",
+    "recommendation": "Add a character cap alongside the line cap in AppendTranscriptWithCap / ApplyMirrorOutputCap (e.g., 10-20MB for the transcript, ~1MB for mirror, reusing the existing cap-notice mechanism), and truncate the transcript that gets persisted into history/session details to a saner audit size. Both checks slot into the existing GetMirrorChunkPrefixLengthWithinCaps scan with a length counter, so this is a small, well-tested-area change (the cap helpers already have unit coverage).",
+    "user_benefit": "A single runaway capture step can no longer balloon the process by tens-to-hundreds of MB (or bloat history JSON files that are reloaded every time the run is opened); worst-case memory becomes predictable.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "71-76",
+        "note": "caps defined in lines only (500k transcript / 50k mirror)"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "2545-2599",
+        "note": "cap scan counts only CR/LF; a chunk with no newlines is always appended in full with addedLines=0"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "1184, 2898, 2962-2977",
+        "note": "full-transcript copies: ToString, prefix concat, audit Normalize"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/Commands/InteractiveCommand.cs",
+        "lines": "35-46",
+        "note": "whole transcript re-normalized + emitted as one RawChunk, and stored into a capture variable"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "1756, 13094",
+        "note": "InteractiveSessions (incl. full transcript) mapped into history payloads"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-029",
+    "title": "Flow Canvas per-node/per-edge store selectors do linear scans — O(edges x nodes) on every store update, fired at high rate during runs and drags",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "flowcanvas-ui",
+    "lens": "perf",
+    "existing_state": "The canvas is one flat zustand store (FlowCanvas/src/stores/useFlowStore.ts:26-38); every set() re-runs every mounted component's selectors, and several hot ones are linear scans. Every AnimatedEdge subscribes to five selectors (nodes/AnimatedEdge.tsx:12-19), three of which scan per evaluation: selectEdgePathStatus does edges.find + nodes.find x2 plus a per-edge selectIterationScope ancestor walk that itself calls nodes.find per hop (stores/selectors/edgePath.ts:106-131, iterationScope.ts:33-48); selectEdgeIsRunningFrontier does edges.find + edges.some over all edges (edgePath.ts:83-90); selectEdgeIsBranch does edges.find + nodes.find. Every BaseBlock runs selectIterationScope too (nodes/BaseBlock.tsx:110), and with heatmap on additionally scans the entire blockTimings map for the max duration (BaseBlock.tsx:95-103); BranchBandsLayer subscribes to the whole nodes array and recomputes computeBranchBands unmemoized on every nodes change (nodes/BranchBandsLayer.tsx:13-22). Store updates fire at high rate during runs: one execution-update message fans out to ~8 separate set() calls (setBlockState is itself two sets — the Map plus updateNodeData, executionSlice.ts:64-77; then setBlockTiming, timeline add/update, setVariablesWithChanges, setLoopIteration, setBranchTaken, recordIterationEvent — messageBridge.ts:231-313), run-output chunks land every 50ms (Form1.cs:118, 13984), and node dragging fires onNodesChange per mousemove (graphSlice.ts:243-326). Net cost is O(E x (N+E)) per update — on a 150-block graph, hundreds of thousands of find() iterations per second inside WebView2, degrading the packet animation and drag smoothness exactly when the user is watching the run.",
+    "recommendation": "Three coordinated changes: (1) maintain id-indexed lookups (nodesById, edgesById, outEdgesBySource, id-to-parent index) in graphSlice alongside the arrays — or a module-level WeakMap memo keyed on the arrays — and use them in edgePath.ts/iterationScope.ts instead of find/some; (2) compute path status for ALL edges once per relevant state change (blockStates/branchTaken/loopIterations/pathVisible/iterationSelections) into a single Map<edgeId, status> selector and have each AnimatedEdge subscribe to map.get(id); (3) batch the execution-update handler's ~8 writes into one set() so one message produces one notification. Also precompute maxTimingDuration in executionSlice when setBlockTiming runs, and memoize computeBranchBands on a layout version counter.",
+    "user_benefit": "Smooth live-run animation and node dragging on realistic preset sizes; the canvas stops burning CPU during exactly the moments the user is watching it work — this is the scaling ceiling for big flows.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/selectors/edgePath.ts",
+        "lines": "83-90, 106-131",
+        "note": "edges.find/edges.some/nodes.find per edge per evaluation; selectIterationScope called per edge"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/selectors/iterationScope.ts",
+        "lines": "33-48",
+        "note": "ancestor walk with nodes.find per hop — called per block and per edge"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/nodes/AnimatedEdge.tsx",
+        "lines": "12-19",
+        "note": "five store subscriptions per edge instance"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/nodes/BaseBlock.tsx",
+        "lines": "95-103, 110-116",
+        "note": "per-block full blockTimings scan when heatmap on; per-block iterScope subscription"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/nodes/BranchBandsLayer.tsx",
+        "lines": "13-22",
+        "note": "subscribes to whole nodes array; computeBranchBands recomputed unmemoized every nodes change"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/messageBridge.ts",
+        "lines": "231-313",
+        "note": "one execution-update fires ~8 separate set() calls"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/executionSlice.ts",
+        "lines": "64-77",
+        "note": "setBlockState is two store updates (Map + updateNodeData), rewriting the nodes array per step event"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 2
+  },
+  {
+    "id": "PERF-030",
+    "title": "Run Output console re-splits and re-renders the entire 5000-line buffer on every 50ms chunk, on both the append and render sides",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "M",
+    "area": "flowcanvas-ui",
+    "lens": "perf",
+    "existing_state": "runOutput is one monolithic string in the main canvas store: appendRunOutput concatenates the chunk then splits the ENTIRE buffer on newlines and re-joins it (up to 5000 lines / hundreds of KB) to enforce the cap on every message (FlowCanvas/src/stores/slices/executionSlice.ts:119-127). The host throttles output to 50ms batches and forwards each flush via SendRunOutputAppend (Form1.cs:118, 332, 13977-13985), so verbose multi-host runs fire this ~20x/second — and execution-started auto-switches the dock to the Run tab so the console is mounted during runs (stores/messageBridge.ts:215-222, 333-341). On the render side RunOutputView re-derives all lines per update (full split + per-line trailing-CR replace, RunOutputView.tsx:46) and re-renders the complete list — up to 5000 divs with index keys, each re-running the classifyRunOutputLine regex when Color is on and the highlight() substring scan when Find is open, with no virtualization (panels/RunOutputView.tsx:127-135, 164-177); matchCount additionally rescans the whole lowercased buffer per chunk (32-39). Because runOutput lives in the main canvas store, each append also wakes every canvas subscriber (edges, blocks — compounding the selector-scan finding). The detached run-output window (?panel=runoutput) runs the identical component full-time.",
+    "recommendation": "Store the console as a line array (ring buffer): split only the incoming chunk, append, and drop from the head — O(chunk) instead of O(buffer); carry the trailing partial line separately. Render via a memoized per-line Row component (line text + color mode + query as props) so unchanged lines skip reconciliation, classify each line once at append time, and add simple windowed rendering (fixed-height monospace rows make manual virtualization ~50 lines of code — no library needed). Compute matchCount incrementally or only while the find bar is open and the query changes. Consider moving runOutput into a small separate vanilla zustand store so 20Hz console churn never wakes canvas subscribers.",
+    "user_benefit": "Verbose runs against a fleet stream into the Run Output tab (and detached window) without making the whole canvas WebView chug at exactly the moment the user is watching live wires and block states.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/executionSlice.ts",
+        "lines": "119-127",
+        "note": "appendRunOutput splits the full buffer per chunk to enforce MAX_RUN_OUTPUT_LINES=5000"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/panels/RunOutputView.tsx",
+        "lines": "32-39, 46, 127-135, 164-177",
+        "note": "full-buffer matchCount scan, full re-split, full 5000-row map with per-line regex classify + highlight, index keys, no virtualization"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "118, 332, 13977-13985",
+        "note": "host batches output every 50ms (UiOutputThrottleMs) then SendRunOutputAppend per flush — up to 20 chunks/sec reach React"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/messageBridge.ts",
+        "lines": "215-222, 333-341",
+        "note": "execution-started auto-switches the dock to the Run tab, so the console is mounted during runs"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 2
+  },
+  {
+    "id": "PERF-031",
+    "title": "Flow Canvas timeline grows unbounded, snapshots full unsanitized variables per step, and patches by mapping the whole array",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "flowcanvas-state",
+    "lens": "perf",
+    "existing_state": "Every step that enters 'running' appends a TimelineEntry carrying a FULL snapshot of all current variables (FlowCanvas/src/stores/messageBridge.ts:250-271), with no cap and none of the sanitization the iteration log applies (iterationSlice.ts:12-32 strips heavy _outputwindow/_output keys and truncates strings at 2000 chars; the host-tunable iterationHistoryCap at iterationSlice.ts:8 has no timeline equivalent). Each new generation of variable values arrives as fresh objects from the JSON message, so timeline entries genuinely retain them: a loop over 100 hosts with multi-KB ${_output} values retains every generation until the next run or canvas close. Mechanically it is also quadratic: addTimelineEntry spreads the whole entries array per append (timelineSlice.ts:35-42) and updateTimelineEntry maps the entire array on every step completion (timelineSlice.ts:44-50). Entries accumulate whether or not the Timeline panel is open.",
+    "recommendation": "In messageBridge.ts:253-262, run the variables snapshot through the same sanitizer iterationSlice uses (export sanitizeVars or a shared util) before storing. Add a cap to timelineEntries (reuse iterationHistoryCap or a sibling setting; drop oldest). Replace the full-array map in updateTimelineEntry with a reverse indexOf for the newest open entry for that nodeId and replace by index; skip snapshot capture entirely while the Timeline panel has never been opened to make it free by default.",
+    "user_benefit": "Long, loop-heavy multi-host runs stop bloating WebView2 memory by tens-to-hundreds of MB and stop adding per-step array-copy cost; the canvas stays responsive across a full workday session.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/messageBridge.ts",
+        "lines": "250-271",
+        "note": "full variables snapshot per 'running' event, unsanitized"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/timelineSlice.ts",
+        "lines": "35-50",
+        "note": "unbounded append (array spread) + whole-array map per completion"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/iterationSlice.ts",
+        "lines": "8, 12-32",
+        "note": "the sanitizer + cap that exist for the iteration log but not the timeline"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-032",
+    "title": "Flow Canvas property edits commit O(graph) store updates per keystroke, and undo deep-clones the entire snippet-laden graph (100-deep) at every snapshot",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "flowcanvas-ui",
+    "lens": "perf",
+    "existing_state": "Despite the name, useBufferedInput.onChange calls commitIfNeeded on every keystroke (FlowCanvas/src/panels/Properties.tsx:52-56) — the buffer only guards against external overwrites, not commit frequency. Each commit runs updateNodeProp, which builds a Map of ALL nodes, walks the _isChildOf ancestor chain, and produces a brand-new nodes array plus isDirty/export-status churn (stores/slices/graphSlice.ts:510-562); the new array identity re-renders React Flow and re-runs the full per-node/per-edge selector fan-out plus BranchBandsLayer — per keystroke. On top, undo snapshots JSON.parse(JSON.stringify()) ALL nodes and edges into a 100-deep stack (stores/slices/undoSlice.ts:5, 30-44; undo/redo double-clone again at 46-98), captured synchronously at pointer-down of every block drag (App.tsx:169-174), every connect/add/delete/branch-edit (graphSlice.ts:356, 423, 430, 461, 565), the first keystroke of each 500ms property-edit burst (Properties.tsx:1551-1566), paste, comment ops, auto-layout, and band moves. For imported presets each node's data.props._yamlSnippet holds its step's original YAML verbatim — a container's snippet contains its ENTIRE nested subtree text (Services/FlowCanvasBridge.cs:18-20, 419) — so a large script's text is duplicated once per nesting level per snapshot, accumulating up to 100 full graph copies (tens of MB) across a session, with a perceptible synchronous stringify/parse hitch at every drag start.",
+    "recommendation": "Commit on blur/Enter or debounce the commit ~250-300ms (the local buffer already gives instant visual feedback in the field) — the per-keystroke commitIfNeeded call in onChange is the one line to change. Make updateNodeProp touch only the edited node plus its ancestor containers instead of remapping every node (it already computes the exact id set). For undo, exploit the store's existing immutability: snapshot the array references (structural sharing — all mutation paths already produce new node/edge objects) instead of deep JSON clones, or strip _yamlSnippet from snapshots and reattach by id on restore; consider lowering MAX_HISTORY or capping by estimated bytes.",
+    "user_benefit": "Typing into a send block's commands field on a big preset stops doing O(graph) work plus multi-MB clones per keystroke burst — the most direct 'why does typing feel laggy' cause on the canvas — and the pointer-down hitch when dragging blocks on large imported scripts disappears.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/panels/Properties.tsx",
+        "lines": "52-56, 1551-1566",
+        "note": "onChange -> commitIfNeeded per keystroke; pushDebouncedSnapshot fires a full deep-clone snapshot once per 500ms burst"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/graphSlice.ts",
+        "lines": "510-562",
+        "note": "updateNodeProp builds a Map of all nodes + remaps the whole array + isDirty + export-status clear per call"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/stores/slices/undoSlice.ts",
+        "lines": "5, 30-44, 46-98",
+        "note": "JSON deep clone of all nodes+edges (incl. _yamlSnippet) per snapshot, 100-deep history; undo/redo clone again"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/FlowCanvas/src/App.tsx",
+        "lines": "169-174",
+        "note": "synchronous snapshot at every drag start"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/FlowCanvasBridge.cs",
+        "lines": "18-20, 419",
+        "note": "_yamlSnippet on every node; container snippets contain whole subtree text"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 2
+  },
+  {
+    "id": "PERF-033",
+    "title": "Unsaved-preset save prompt renders the entire diff line-by-line into a RichTextBox — UI freeze on large presets",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "ui-utilities",
+    "lens": "perf",
+    "existing_state": "UnsavedPresetDiffDialog (shown whenever a preset with unsaved changes is switched away from or saved — constructed at Form1.cs:6126 and 12099) always builds the FULL diff: PopulateDiff calls InlineDiffBuilder.Build with includeAllLines: true and a line budget equal to the combined line count of both versions (UI/UnsavedPresetDiffDialog.cs:299-305, 527-535). InlineDiffBuilder's includeAllLines path emits every line including all unchanged context (Utilities/InlineDiffBuilder.cs:165-175). RenderLines then performs two AppendText calls plus a Select + SelectionColor pair per line on a visible RichTextBox (UnsavedPresetDiffDialog.cs:320-331), guarded only by SuspendLayout (317) — which does not stop RichTextBox character-format message round-trips or repaints. For a multi-thousand-line YAML preset that is thousands of EM_SETCHARFORMAT operations on the UI thread. Worse, above 2,000,000 LCS cells (~1,400x1,400 lines) InlineDiffBuilder switches to a positional fallback (InlineDiffBuilder.cs:15, 37-39, 62-97) in which one inserted line marks every subsequent line as removed+added — maximizing the number of colored lines precisely when the preset is biggest.",
+    "recommendation": "Two cheap fixes in UI/UnsavedPresetDiffDialog.cs: (1) render in one shot — build the colored document as an RTF string and assign _txtDiff.Rtf once, or at minimum suspend painting with WM_SETREDRAW and coalesce consecutive lines of the same kind into a single Select/SelectionColor call; (2) default PopulateDiff to the collapsed view InlineDiffBuilder already supports (contextLines: 2, modest maxOutputLines) with a 'Show full diff' toggle, so the unbounded includeAllLines path is opt-in rather than the only mode.",
+    "user_benefit": "The save prompt is on a high-frequency interaction path (every preset switch with unsaved edits). For large YAML presets this removes a multi-second beachball exactly at the moment the user is trying to make a quick save/discard decision.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/UnsavedPresetDiffDialog.cs",
+        "lines": "299-305, 527-535",
+        "note": "includeAllLines: true with budget = total line count of both versions"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/UnsavedPresetDiffDialog.cs",
+        "lines": "315-336",
+        "note": "RenderLines: per-line AppendText + Select + SelectionColor; only SuspendLayout"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/InlineDiffBuilder.cs",
+        "lines": "15, 37-39, 62-97",
+        "note": "MaxLcsCells=2M cap; positional fallback turns one insertion into removed+added for every following line"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/InlineDiffBuilder.cs",
+        "lines": "165-175",
+        "note": "includeAllLines path emits all Equal lines too"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+        "lines": "6126, 12099",
+        "note": "dialog construction sites on the preset save/switch path"
+      }
+    ],
+    "mockup_idea": "Before/after of the dialog: 'before' shows a wall of thousands of colored lines (and a frozen cursor); 'after' shows only changed hunks separated by collapse markers with a 'Show full diff' link at the bottom.",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-034",
+    "title": "Every dotnet build runs a full FlowCanvas npm build — no incrementality, and CI rebuilds it twice per release",
+    "category": "PERF",
+    "severity": "medium",
+    "effort": "S",
+    "area": "models-samples-build",
+    "lens": "perf",
+    "existing_state": "The BuildFlowCanvas MSBuild target (SSH_Helper.csproj:95-97) runs npm run build (which is tsc && vite build, a full TypeScript compile + production bundle) BeforeTargets=BeforeBuild with no Inputs/Outputs, so MSBuild can never skip it as up-to-date. Every dotnet build, every F5 in the IDE, and every dotnet test (the test project references SSH_Helper, so building tests triggers it too) pays the full frontend build even when nothing under FlowCanvas/ changed. The only escape is remembering to pass -p:SkipFlowCanvasBuild=true manually. In CI, the release job runs two publishes back-to-back (.github/workflows/build-release.yml:84-87, standard + portable), and each independently re-runs the identical npm build — wasted minutes per release, and the two exes get different BuildTimestamp values (csproj:33-35) for the same tag.",
+    "recommendation": "Make the target incremental: add Inputs=@(FlowCanvasSources) (a glob over FlowCanvas/src/**, package.json, package-lock.json, vite.config.ts, index.html) and Outputs pointing at a stamp file the target touches after a successful npm build (e.g. FlowCanvas/dist/.buildstamp). MSBuild then skips the npm step when dist is newer than all sources. In build-release.yml, pass -p:SkipFlowCanvasBuild=true on the second (portable) publish since dist/ is already built — or rely on the new stamp. This removes tens of seconds from every inner-loop build with zero behavior change.",
+    "user_benefit": "The single biggest recurring time tax in the dev loop disappears: C#-only edits build at .NET speed instead of paying tsc+Vite every time, and release CI gets meaningfully faster.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SSH_Helper.csproj",
+        "lines": "95-97",
+        "note": "BuildFlowCanvas target: Exec npm run build, BeforeBuild, no Inputs/Outputs"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/.github/workflows/build-release.yml",
+        "lines": "84-87",
+        "note": "two dotnet publish invocations, each re-triggering the npm build"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/SSH_Helper.csproj",
+        "lines": "33-35",
+        "note": "BuildTimestamp computed per build — the two release exes diverge"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-035",
+    "title": "Folder runs re-parse and re-validate every script preset per host, and library imports are re-read from disk on every editor validation",
+    "category": "PERF",
+    "severity": "low",
+    "effort": "S",
+    "area": "scripting-core",
+    "lens": "perf",
+    "existing_state": "Two redundant parse paths. (1) The single-script multi-host path parses and validates exactly once for all hosts (Services/SshExecutionService.cs:505-516), but the folder path does not: ExecutePresetOnHost -> ExecuteScriptTextOnHost runs a fresh ScriptParser.Parse + Validate(enforceCanonicalSyntax) + ScriptDependencyAnalyzer.AnalyzeSshRequirements for every (host, preset) pair (1105-1132), and FindSingleHostOnlyFolderPresets parses each preset once more in preflight (901-925) — a 100-host x 10-preset folder run performs ~1,000 redundant YamlDotNet parse+validate passes (plus 1,000 dependency analyses) on already-oversubscribed worker threads, where 10 would do. (2) Every ScriptParser.Validate call rebuilds the subroutine registry (Services/Scripting/ScriptParser.cs:4238-4242), and ScriptSubroutineRegistryBuilder.LoadImports does File.ReadAllText + a full Parse + Validate for each imported library file with no caching (Services/Scripting/ScriptSubroutineRegistryBuilder.cs:100-118); the Scintilla editor's live linting runs this on every debounce tick while typing (Services/Editor/ScriptEditorValidationService.cs:57, 73-83, 118-128), so editing a script with imports hits the disk and re-parses every library several times per minute.",
+    "recommendation": "In ExecuteFolderAsync, pre-parse each selected script preset once into a Dictionary<presetName, (Script, SshRequirementResult)> (merged with the FindSingleHostOnlyFolderPresets preflight pass so parsing happens exactly once) and pass the parsed Script down — ExecuteScriptOnHost (1280) already accepts a Script + SshRequirementResult, so ExecutePresetOnHost just needs a parsed-preset overload; parse failures then surface once up front instead of per host mid-run. Add a parsed-library cache keyed by (absolute path, File.GetLastWriteTimeUtc) — a static ConcurrentDictionary in ScriptSubroutineRegistryBuilder suffices — so unchanged library files are parsed once per session.",
+    "user_benefit": "Snappier editor linting for users who maintain shared YAML libraries, and thousands of redundant parse/validate cycles plus their GC churn removed from large folder runs.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+        "lines": "1105-1132",
+        "note": "per-host per-preset Parse + Validate + AnalyzeSshRequirements"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+        "lines": "505-516, 901-925",
+        "note": "single-preset path parses once for all hosts; folder preflight parses the same presets yet again"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptSubroutineRegistryBuilder.cs",
+        "lines": "100-118",
+        "note": "File.ReadAllText + Parse + Validate per import, every Validate, no cache"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptEditorValidationService.cs",
+        "lines": "57, 73-83, 118-128",
+        "note": "debounced editor loop re-runs Parse+Validate (and thus import IO) repeatedly while typing"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 2
+  },
+  {
+    "id": "PERF-036",
+    "title": "UI thread performs whole-buffer terminal reads under the pump's ioLock; selection copy issues one Rebex call per row",
+    "category": "PERF",
+    "severity": "low",
+    "effort": "S",
+    "area": "terminal",
+    "lens": "perf",
+    "existing_state": "Clipboard and scrollback actions run synchronously on the UI thread while holding the same ioLock the pump contends for: Copy All (system menu, Forms/InteractiveTerminalForm.cs:242-244, 488-507) invokes BuildClipboardText which pulls the entire history+screen region (up to 10,036 rows at the hardcoded 10k scrollback) in one GetRegionText call under ioLock (Services/Terminal/InteractiveTerminalService.cs:892-901 wiring, 3471-3495 implementation); Clear Scrollback copies and rewrites the visible screen cell-by-cell (cols x rows SetCell calls) under the same lock (3543-3576). Worst is drag-select auto-copy (fires on every mouse-up): BuildSelectionClipboardText calls screen.GetRegionText once per selected row (3516-3538), so selecting a few thousand scrollback rows issues thousands of individual Rebex region calls on the UI thread while the 2ms-cadence pump holds/contends the lock — a perceptible freeze on large selections during heavy output.",
+    "recommendation": "In BuildSelectionClipboardText, fetch the full-width row span in a single GetRegionText(0, startSourceRow, columns, rowCount) call (the pattern BuildClipboardText already uses) and slice the first/last rows' columns in memory — one lock acquisition, one Rebex call. Optionally move Copy All's buffer read onto a worker task that takes the lock off the UI thread and sets the clipboard via BeginInvoke.",
+    "user_benefit": "Selecting or copying large scrollback regions during active output no longer stutters the window or stalls the terminal pump.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "3516-3538",
+        "note": "per-row GetRegionText loop inside selection extraction"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "902-911, 1871-1880",
+        "note": "SelectionTextProvider invoked under ioLock from the UI thread"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+        "lines": "3471-3495, 3543-3576",
+        "note": "Copy All single-call pattern to reuse; Clear Scrollback per-cell rewrite under the same lock"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/InteractiveTerminalViewportControl.cs",
+        "lines": "298-318",
+        "note": "auto-copy on mouse-up triggers the extraction synchronously"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  },
+  {
+    "id": "PERF-037",
+    "title": "Embedded Flow Canvas dist extractions accumulate forever — already 91 copies / 49 MB on this machine",
+    "category": "PERF",
+    "severity": "low",
+    "effort": "S",
+    "area": "cross-startup",
+    "lens": "perf",
+    "existing_state": "FlowCanvasDistLocator extracts the embedded React bundle to a per-BuildTimestamp directory under flow-canvas-dist in AppData (Utilities/FlowCanvasDistLocator.cs:114-119) — a fresh directory for every distinct build — and nothing anywhere deletes prior version directories. Verified live: this machine currently holds 91 timestamped directories totaling 49 MB, growing ~0.5 MB per build/release; since the app self-updates via GitHub releases, end users accumulate one copy per update indefinitely. The same pattern exists for scintilla-native per packageVersion (Utilities/ScintillaNativeBootstrap.cs:61-72; 2.3 MB here, slower-growing). Additionally, extraction skips any file that already exists without size/integrity check (FlowCanvasDistLocator.cs:136-137, ScintillaNativeBootstrap.cs:115-118), so a partially-written file from a crashed first extraction is trusted forever.",
+    "recommendation": "After a successful extraction in ExtractEmbeddedDistToAppData, enumerate sibling directories under flow-canvas-dist and best-effort Directory.Delete(recursive:true) every one except the current version segment (swallow IOException for dirs locked by a concurrent instance). Apply the same sweep to scintilla-native. While there, replace the bare File.Exists skip with a length comparison against the resource stream so truncated extractions self-heal.",
+    "user_benefit": "Stops silent unbounded AppData growth on every release for every user (already ~50 MB on the dev machine) and removes the corrupt-canvas-until-AppData-is-manually-deleted failure mode from interrupted extractions.",
+    "evidence": [
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/FlowCanvasDistLocator.cs",
+        "lines": "103-148",
+        "note": "per-BuildTimestamp extraction dir; no cleanup of old versions; File.Exists skip at 136-137"
+      },
+      {
+        "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/ScintillaNativeBootstrap.cs",
+        "lines": "56-72, 113-118",
+        "note": "same versioned-extraction pattern, same no-cleanup and existence-only skip"
+      },
+      {
+        "file": "C:/Users/nos/AppData/Local/SSH_Helper/flow-canvas-dist",
+        "lines": "",
+        "note": "live evidence: 91 version directories, 49 MB total"
+      }
+    ],
+    "mockup_idea": "",
+    "merged_from": 1
+  }
+]

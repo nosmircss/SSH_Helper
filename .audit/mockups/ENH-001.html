@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ENH-001 mockup</title>
+<style>
+body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+h1{font-size:11px;font-weight:600;color:#8294a8;margin:0 0 10px;letter-spacing:.04em}
+h1 b{color:#4cc9f0;font-weight:600}
+.row{display:flex;gap:14px;align-items:flex-start}
+.col{flex:1;min-width:0}
+.cap{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+.cap .ok{color:#2bd97c}.cap .bad{color:#ff5c5c}
+.ed{background:#0e1320;border:1px solid #1c2330;border-radius:6px;padding:7px 0}
+.ln{display:flex;line-height:19px;white-space:pre;font-size:11.5px}
+.ln .n{width:24px;text-align:right;color:#3d4a5c;padding-right:9px;flex:none}
+.k{color:#4cc9f0}.fn{color:#ffb454}.cm{color:#5b6b7e;font-style:italic}
+.sq{text-decoration:underline wavy #ff5c5c;text-decoration-skip-ink:none;text-underline-offset:3px}
+.tip{position:relative;margin:10px 4px 0;background:#131a26;border:1px solid #2a3447;border-left:3px solid #ff5c5c;border-radius:4px;padding:6px 9px;font-size:11px;color:#c9d4e3}
+.tip:before{content:"";position:absolute;top:-6px;left:118px;border:6px solid transparent;border-bottom-color:#2a3447;border-top:0}
+.tip i{color:#8294a8;font-style:normal;font-size:10px;display:block;margin-bottom:2px;letter-spacing:.08em}
+.box{border:1px solid #1c2330;border-radius:6px;padding:7px 10px;margin-top:8px;font-size:11px}
+.box .t{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin-bottom:5px}
+.box p{margin:3px 0;line-height:1.45}
+.pass{color:#2bd97c}
+.r{color:#ff5c5c}.a{color:#ffb454}.g{color:#2bd97c}.m{color:#8294a8}
+.x{color:#ff5c5c;margin-right:6px}
+.note{margin-top:12px;font-size:10.5px;color:#8294a8;border-top:1px solid #1c2330;padding-top:8px}
+.note b{color:#c9d4e3;font-weight:600}
+code{color:#ffb454}
+</style></head><body>
+<h1><b>ENH-001</b> — validate expressions before run: today a one-character typo silently flips which branch runs fleet-wide</h1>
+<div class="row">
+
+<div class="col">
+<p class="cap">Before — <span class="ok">validation passes</span>, lint silent</p>
+<div class="ed">
+<div class="ln"><span class="n">1</span><span class="k">steps:</span></div>
+<div class="ln"><span class="n">2</span>  - <span class="k">send:</span> get system status</div>
+<div class="ln"><span class="n">3</span>    <span class="k">register:</span> out</div>
+<div class="ln"><span class="n">4</span>  - <span class="k">set:</span> errors = <span class="fn">lenth</span>(out)</div>
+<div class="ln"><span class="n">5</span>  - <span class="k">if:</span> errors==0</div>
+<div class="ln"><span class="n">6</span>    <span class="k">then:</span></div>
+<div class="ln"><span class="n">7</span>      - <span class="k">send:</span> execute reboot</div>
+</div>
+<div class="box"><span class="pass">&#10003; Validation passed — 0 issues</span></div>
+<div class="box">
+<div class="t">What actually happens at run time</div>
+<p><span class="a">&#9888;</span> <code>lenth(out)</code> → FormatException: Unknown function — thrown <span class="a">mid-run</span>, after commands already hit 10.20.4.11</p>
+<p><span class="r">&#10007;</span> <code>errors==0</code> → no spaced operator found → literal text "errors==0" is truthy → <span class="r">then-branch runs on all 24 hosts</span> → <code>execute reboot</code> sent everywhere</p>
+</div>
+</div>
+
+<div class="col">
+<p class="cap">After — <span class="bad">expression check in Validate()</span></p>
+<div class="ed">
+<div class="ln"><span class="n">1</span><span class="k">steps:</span></div>
+<div class="ln"><span class="n">2</span>  - <span class="k">send:</span> get system status</div>
+<div class="ln"><span class="n">3</span>    <span class="k">register:</span> out</div>
+<div class="ln"><span class="n">4</span>  - <span class="k">set:</span> errors = <span class="sq"><span class="fn">lenth</span></span>(out)</div>
+<div class="ln"><span class="n">5</span>  - <span class="k">if:</span> <span class="sq">errors==0</span></div>
+<div class="ln"><span class="n">6</span>    <span class="k">then:</span></div>
+<div class="ln"><span class="n">7</span>      - <span class="k">send:</span> execute reboot</div>
+</div>
+<div class="tip"><i>HOVER · line 5</i>Comparison operators need surrounding spaces — did you mean <code>errors == 0</code>? Without spaces this condition always evaluates <span class="r">TRUE</span>.</div>
+<div class="box">
+<div class="t">Validation — 2 errors</div>
+<p><span class="x">&#10007;</span><span class="m">line 4</span>  Unknown function '<span class="a">lenth</span>' — did you mean '<span class="g">length</span>'?</p>
+<p><span class="x">&#10007;</span><span class="m">line 5</span>  '<span class="a">errors==0</span>' has no spaced operator — always true</p>
+</div>
+</div>
+
+</div>
+<p class="note"><b>One dry-parse pass in Validate()</b> (unspaced operators · unknown functions vs FunctionRegistry · unbalanced quotes/parens · bad <code>matches</code> regex) lights up both the live Scintilla lint and the pre-run dialog — no runtime changes.</p>
+</body></html>

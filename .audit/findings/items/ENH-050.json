@@ -1,0 +1,26 @@
+{
+ "id": "ENH-050",
+ "title": "table output: hard truncation without ellipsis, unbounded auto-width, no sort/limit",
+ "category": "ENH",
+ "severity": "low",
+ "effort": "M",
+ "area": "scripting-commands-b",
+ "lens": "ux",
+ "existing_state": "TableCommand's AlignText chops any cell at the column width with a bare Substring — no ellipsis or any indicator that data was cut (Services/Scripting/Commands/TableCommand.cs:410-413), so a fixed-width 12 column renders 192.168.100.250 as 192.168.100. with nothing marking the loss. Auto-sized columns go the other way: width = longest cell with no cap (:86-89), so one row whose 'output' field contains a 600-character blob stretches that column for every row, making the whole table unreadable. TableOptions offers only data/columns/into/align/show_header (Services/Scripting/Models/ScriptStep.cs:1546-1572) — no max_width, no wrap, no sort_by, no limit, so a 200-host result table cannot be ordered by latency or trimmed to the top offenders without pre-processing in script code.",
+ "recommendation": "In TableCommand: (1) when truncating, reserve one char for a '…' suffix in AlignText; (2) add max_width on TableColumn and a table-level default that caps auto-sizing at :86-89; (3) add optional wrap: true to break long cells across continuation lines instead of truncating; (4) add sort_by (field name) + desc and limit applied to rows before rendering. All changes are local to TableCommand + TableOptions, plus autocomplete/canvas property surfacing.",
+ "user_benefit": "Fleet-wide report tables (the main reason table exists) stay readable and honest: no invisible data loss, no one bad cell destroying the layout, and 'top 20 slowest hosts by latency' becomes a two-option table instead of a foreach+set sorting contraption.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\TableCommand.cs",
+   "lines": "410-413, 86-89",
+   "note": "Substring truncation with no ellipsis; auto width = unbounded longest cell"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Models\\ScriptStep.cs",
+   "lines": "1546-1598",
+   "note": "TableOptions/TableColumn: no max_width, wrap, sort, or limit fields"
+  }
+ ],
+ "mockup_idea": "Before/after monospace render. Before: a 4-column host table where one host's 'status' cell is a 300-char error dump stretching the column across three screen widths, and a fixed width:12 'ip' column showing '192.168.100.' with no hint of truncation. After: same data with max_width: 40 — status shows 'Connection refused after 3 retries, las…', ip column intact, rows sorted by latency desc with 'limit: 20'.",
+ "merged_from": 1
+}

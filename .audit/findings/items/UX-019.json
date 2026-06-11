@@ -1,0 +1,36 @@
+{
+ "id": "UX-019",
+ "title": "'Prefer SSH agent when available' setting is a silent no-op",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "ssh-execution",
+ "lens": "ux",
+ "existing_state": "Settings exposes a 'Prefer SSH agent when available' checkbox (SettingsDialog.cs:459, persisted at 2675) and the value is plumbed into both the execution service and the pool (Form1.cs:358, 5732). But TryLoginWithAgent unconditionally returns false in both places — SshExecutionService.cs:2855-2868 ('The current SSH library does not expose agent-backed authentication APIs') and SshConnectionPool.cs:689-697 — so every connection silently falls back to key/password. The fallback notice is debug-mode-only (SshDebugLog at 2862/2867). Agent detection also only checks SSH_AUTH_SOCK/SSH_AGENT_PID env vars (2871-2879), which Windows OpenSSH-agent and Pageant users typically don't have set anyway. A user who enables this believes their key never leaves the agent while the app is actually using stored passwords/key files.",
+ "recommendation": "Short term (S): make the UI honest — disable the checkbox with a '(not supported by the current SSH library)' suffix, or show an inline warning when checked, and remove the dead plumbing. Longer term (L, separate decision): implement real agent auth against the Windows OpenSSH agent named pipe (\\\\.\\pipe\\openssh-ssh-agent) / Pageant shared-memory protocol and have the agent perform signing, falling back as today.",
+ "user_benefit": "Removes a misleading security setting: users no longer believe agent-held keys are in use when they aren't, and the eventual real implementation lets keys stay in the agent instead of as passphrase-protected files on disk.",
+ "evidence": [
+  {
+   "file": "SettingsDialog.cs",
+   "lines": "459, 2558, 2675",
+   "note": "Checkbox exists, loads and saves Credentials.PreferSshAgent"
+  },
+  {
+   "file": "Services/SshExecutionService.cs",
+   "lines": "2855-2879",
+   "note": "TryLoginWithAgent always returns false; fallback notice is debug-only; agent detection is env-var-only"
+  },
+  {
+   "file": "Services/SshConnectionPool.cs",
+   "lines": "689-697",
+   "note": "Pool's TryLoginWithAgent also a stub returning false"
+  },
+  {
+   "file": "Form1.cs",
+   "lines": "358, 5732",
+   "note": "Setting actively plumbed to service and pool, reinforcing the impression it works"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

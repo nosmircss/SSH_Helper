@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX-037 — silent canvas load failures</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 12px; background: #0b0e13; color: #c9d4e3;
+    font: 12px/1.45 "Cascadia Code", Consolas, monospace;
+  }
+  .cap {
+    font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase;
+    color: #8294a8; margin: 0 0 5px 2px;
+  }
+  .cap b { color: #ff5c5c; font-weight: 600; }
+  .cap b.ok { color: #2bd97c; }
+  .win {
+    border: 1px solid #1c2330; border-radius: 6px; overflow: hidden;
+    background: #0d1118;
+  }
+  .bar {
+    display: flex; align-items: center; gap: 6px;
+    background: #11161f; border-bottom: 1px solid #1c2330;
+    padding: 4px 8px; font-size: 10px; color: #8294a8;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #1c2330; }
+  .canvas {
+    position: relative; height: 118px;
+    background-image: radial-gradient(circle, #1c2330 1px, transparent 1px);
+    background-size: 15px 15px;
+  }
+  .row { display: flex; gap: 10px; margin-top: 12px; }
+  .row .col { flex: 1; min-width: 0; }
+  .row .canvas { height: 150px; }
+
+  /* BEFORE: ghost of the stale graph */
+  .ghost {
+    position: absolute; width: 128px; padding: 4px 7px;
+    border: 1px dashed #1c2330; border-radius: 5px;
+    color: #3a4658; font-size: 10px; background: rgba(13,17,24,.6);
+  }
+  .stale-tag {
+    position: absolute; top: 8px; right: 10px; font-size: 9px;
+    color: #ff5c5c; opacity: .75;
+  }
+  .nothing {
+    position: absolute; left: 0; right: 0; bottom: 10px; text-align: center;
+    color: #445163; font-size: 10.5px; font-style: italic;
+  }
+
+  /* AFTER: centered error card */
+  .card {
+    position: absolute; inset: 0; margin: auto; width: 88%; height: fit-content;
+    background: #11161f; border: 1px solid #3a2330; border-left: 3px solid #ff5c5c;
+    border-radius: 6px; padding: 9px 11px;
+  }
+  .card.amber { border-color: #3a2f1c; border-left-color: #ffb454; }
+  .card h3 { margin: 0 0 4px; font-size: 11.5px; font-weight: 600; color: #ff5c5c; }
+  .card.amber h3 { color: #ffb454; }
+  .card .msg {
+    background: #0b0e13; border: 1px solid #1c2330; border-radius: 4px;
+    padding: 5px 7px; font-size: 10px; color: #c9d4e3; margin: 0 0 7px;
+    white-space: pre-wrap;
+  }
+  .btns { display: flex; gap: 6px; align-items: center; }
+  .btn {
+    font-size: 10px; padding: 3px 9px; border-radius: 4px;
+    border: 1px solid #1c2330; color: #8294a8; background: #0d1118;
+  }
+  .btn.pri { border-color: #1f4656; color: #4cc9f0; background: #0e1a22; }
+  .log { font-size: 9px; color: #8294a8; margin-left: auto; }
+  .log i { color: #2bd97c; font-style: normal; }
+  .foot { margin-top: 10px; font-size: 10px; color: #8294a8; }
+  .foot b { color: #c9d4e3; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<p class="cap"><b>Before</b> — TextToGraph throws → swallowed catch. Blank canvas on fresh open; on the reuse path, the <i>previous preset's</i> graph stays — fully editable.</p>
+<div class="win">
+  <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Flow Canvas — fortigate-health-check</div>
+  <div class="canvas">
+    <span class="stale-tag">stale — still showing "switch-vlan-audit"</span>
+    <div class="ghost" style="top:18px;left:36px">▶ send · show vlan brief</div>
+    <div class="ghost" style="top:58px;left:36px">⎇ if · {{out}} contains "110"</div>
+    <div class="nothing">no banner, no log — is my script empty, or is the canvas broken?</div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col">
+    <p class="cap"><b class="ok">After</b> — load error becomes a canvas banner</p>
+    <div class="win">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Flow Canvas — fortigate-health-check</div>
+      <div class="canvas">
+        <div class="card">
+          <h3>⚠ Couldn't load this preset into the canvas</h3>
+          <p class="msg">TextToGraph: unknown step type 'paralel'
+at steps/4 (foreach 192.168.10.0/24 → steps/1)</p>
+          <div class="btns">
+            <span class="btn pri">Open YAML editor</span>
+            <span class="btn">Copy details</span>
+            <span class="log"><i>✓</i> SshDebugLog</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <p class="cap"><b class="ok">After</b> — 10 s ready-handshake watchdog</p>
+    <div class="win">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Flow Canvas — fortigate-health-check</div>
+      <div class="canvas">
+        <div class="card amber">
+          <h3>⚠ Flow Canvas failed to start</h3>
+          <p class="msg">React app never signalled ready (10 s).
+Likely a broken FlowCanvas/dist after an update.
+Press F12 for DevTools.</p>
+          <div class="btns">
+            <span class="btn pri">Reload canvas</span>
+            <span class="btn">Copy details</span>
+            <span class="log">status label re-shown</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="foot">Fix is small: <b>1)</b> error banner from the swallowed catch in Form1.LoadCurrentScriptIntoCanvas, <b>2)</b> a timer after NavigationCompleted that re-shows the status label if <b>_reactReady</b> never fires, <b>3)</b> handler exceptions to SshDebugLog instead of Debug-only.</p>
+
+</body>
+</html>

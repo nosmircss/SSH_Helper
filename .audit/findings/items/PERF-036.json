@@ -1,0 +1,36 @@
+{
+ "id": "PERF-036",
+ "title": "UI thread performs whole-buffer terminal reads under the pump's ioLock; selection copy issues one Rebex call per row",
+ "category": "PERF",
+ "severity": "low",
+ "effort": "S",
+ "area": "terminal",
+ "lens": "perf",
+ "existing_state": "Clipboard and scrollback actions run synchronously on the UI thread while holding the same ioLock the pump contends for: Copy All (system menu, Forms/InteractiveTerminalForm.cs:242-244, 488-507) invokes BuildClipboardText which pulls the entire history+screen region (up to 10,036 rows at the hardcoded 10k scrollback) in one GetRegionText call under ioLock (Services/Terminal/InteractiveTerminalService.cs:892-901 wiring, 3471-3495 implementation); Clear Scrollback copies and rewrites the visible screen cell-by-cell (cols x rows SetCell calls) under the same lock (3543-3576). Worst is drag-select auto-copy (fires on every mouse-up): BuildSelectionClipboardText calls screen.GetRegionText once per selected row (3516-3538), so selecting a few thousand scrollback rows issues thousands of individual Rebex region calls on the UI thread while the 2ms-cadence pump holds/contends the lock — a perceptible freeze on large selections during heavy output.",
+ "recommendation": "In BuildSelectionClipboardText, fetch the full-width row span in a single GetRegionText(0, startSourceRow, columns, rowCount) call (the pattern BuildClipboardText already uses) and slice the first/last rows' columns in memory — one lock acquisition, one Rebex call. Optionally move Copy All's buffer read onto a worker task that takes the lock off the UI thread and sets the clipboard via BeginInvoke.",
+ "user_benefit": "Selecting or copying large scrollback regions during active output no longer stutters the window or stalls the terminal pump.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "3516-3538",
+   "note": "per-row GetRegionText loop inside selection extraction"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "902-911, 1871-1880",
+   "note": "SelectionTextProvider invoked under ioLock from the UI thread"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "3471-3495, 3543-3576",
+   "note": "Copy All single-call pattern to reuse; Clear Scrollback per-cell rewrite under the same lock"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/UI/InteractiveTerminalViewportControl.cs",
+   "lines": "298-318",
+   "note": "auto-copy on mouse-up triggers the extraction synchronously"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

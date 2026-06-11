@@ -1,0 +1,26 @@
+{
+ "id": "UX-031",
+ "title": "Job import failures all collapse to 'No valid jobs found' — corrupt file, wrong format, and empty export are indistinguishable",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "jobs-scheduling",
+ "lens": "ux",
+ "existing_state": "JobExportService.ImportFromFile and ImportFromString wrap everything in catch-all blocks that return an empty list (Services/JobExportService.cs:71-86 and 92-107): unreadable file, malformed JSON, a non-.sshjobs JSON file, a clipboard string that isn't a GZip+Base64 export blob, and a genuinely empty export all produce the identical result. JobListDialog.ProcessImportedJobs then shows the single generic message 'No valid jobs found in the import data.' (JobListDialog.cs:1420-1427). A teammate who pastes the wrong clipboard content or picks the wrong file gets no clue whether the data was bad, the format was wrong, or the export really contained nothing — contrast with the same dialog's export path, which does surface the real exception (JobListDialog.cs:1166-1170).",
+ "recommendation": "Change the two import methods to return a small result type (Jobs + ErrorKind/ErrorMessage) or throw typed exceptions caught at the call sites. Distinguish at minimum: file not found / not readable, JSON parse failure ('not a valid .sshjobs file'), decode failure ('clipboard does not contain an SSH Helper job export'), unsupported Version, and genuinely zero jobs. Surface the specific message in ProcessImportedJobs's warning dialog.",
+ "user_benefit": "When sharing jobs between teammates' machines — the entire point of .sshjobs/clipboard export — a failed import tells the user what actually went wrong instead of gaslighting them about an 'empty' file.",
+ "evidence": [
+  {
+   "file": "Services/JobExportService.cs",
+   "lines": "71-86, 92-107",
+   "note": "catch { return new List<JobDefinition>(); } on both import paths"
+  },
+  {
+   "file": "JobListDialog.cs",
+   "lines": "1420-1427",
+   "note": "Single generic 'No valid jobs found in the import data.' for every failure mode"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

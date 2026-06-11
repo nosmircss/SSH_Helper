@@ -1,0 +1,36 @@
+{
+ "id": "BUG-008",
+ "title": "Conditions and when: guards silently resolve typo'd/undefined variables, flipping branches with no diagnostic",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "M",
+ "area": "scripting-core",
+ "lens": "correctness",
+ "existing_state": "Condition evaluation resolves an unknown identifier to a value that depends on syntax, never an error. In ValueResolver.ResolveExpressionValue an undefined bare token returns the literal token string (ValueResolver.cs:288) and a `${var}`/`{{var}}` form returns empty string (ValueResolver.cs:272-273 via SubstituteVariables, which yields empty for missing vars at ScriptContext.cs:559-565,704). So `when: \"${enabled} == true\"` where the real column is `enable` evaluates AreEqual(\"\", \"true\") = false (ExpressionEvaluator.cs:155-167,399-416) and the step is silently skipped, while bare `when: enabled` with `enabled` undefined falls through to a truthiness check of the literal string \"enabled\" and evaluates TRUE (ExpressionEvaluator.cs:206-207, ValueResolver.IsTruthyValue:357-359). The executor treats a skipped guard as an intentional success (ScriptExecutor.cs:348-365) and `matches` swallows regex errors returning false (ExpressionEvaluator.cs:100-103). Crucially, conditions/when:/set RHS get no parse-time validation at all — only grid columns get a pre-run warning via the dependency analyzer; a typo in a local/loop variable is invisible. The same silent-empty resolution governs `if`, `elif`, and `while`, so a misspelled variable silently takes the wrong branch (or loops zero/forever) across the whole fleet.",
+ "recommendation": "Distinguish 'undefined variable' from 'empty value' in condition resolution: when a referenced identifier is neither a defined variable, a known built-in, nor a literal, surface a warning through EmitOutput (and ideally fail the step under a strict mode) instead of coercing to empty/literal. Add a parse-time lint pass that flags identifiers in conditions/when:/set RHS that are not defined vars, declared params, grid columns, or built-ins, reusing the reference-collection the ScriptDependencyAnalyzer already does.",
+ "user_benefit": "A one-character typo in a condition stops silently inverting branch logic across every host; the author sees a warning instead of a run that 'worked' but did the wrong thing.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ValueResolver.cs",
+   "lines": "272-288",
+   "note": "undefined token returns literal or empty, never an error"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ExpressionEvaluator.cs",
+   "lines": "205-207",
+   "note": "no-operator expression falls to truthy check of unresolved token"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs",
+   "lines": "348-365",
+   "note": "when: false (incl. from typo) skips the step as intentional success"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptContext.cs",
+   "lines": "559-565",
+   "note": "missing variable resolves to empty string"
+  }
+ ]
+}

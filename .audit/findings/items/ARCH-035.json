@@ -1,0 +1,41 @@
+{
+ "id": "ARCH-035",
+ "title": "Manual 'Validate Script' duplicates the validation pipeline with different flags than the inline squiggles",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "editor",
+ "lens": "perf",
+ "existing_state": "There are two independent validation entry points with divergent configuration. Inline: ScriptEditorValidationService runs Validate(enforceCanonicalSyntax:true, allowLibraryDefinitions:true) plus YAML hygiene lints (ScriptEditorValidationService.cs:124-128, 147-150). Manual: the right-click 'Validate Script' menu instantiates its own ScriptParser and calls Validate(script, scriptText, enforceCanonicalSyntax:true) (Form1.cs:5785-5790), leaving allowLibraryDefinitions at its default false (ScriptParser.cs:4185) and skipping the hygiene lints entirely. Concrete contradiction today: open a 'library: true' preset — the editor shows zero squiggles, but the menu pops 'Library scripts cannot be executed directly' (gated at ScriptParser.cs:4206-4209); conversely, hygiene warnings shown as squiggles never appear in the manual report. The service even exposes ValidateNowAsync purpose-built for on-demand validation, but it is only called by tests (ScriptEditorValidationService.cs:60-63). JobEditorDialog wires a third copy of the editor/validation stack (JobEditorDialog.cs:61-63, 175), so any future flag change must now be replicated in three places.",
+ "recommendation": "Make ScriptEditorValidationService the single validation front door: route validateScriptToolStripMenuItem_Click through ValidateNowAsync (or a shared static options struct holding the canonical flag set) and format the MessageBox/output text from the returned EditorDiagnostics. If the manual command is intentionally stricter about library scripts (an 'is this runnable?' check), pass that as an explicit named option in the shared struct so the divergence is declared in one place rather than an accidental default. This also collapses the Form1/JobEditorDialog flag duplication.",
+ "user_benefit": "The validate menu and the inline squiggles stop contradicting each other — today a library preset looks clean in the editor but fails the explicit validate command, with no hint why.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "5775-5820",
+   "note": "manual validate creates its own parser (5785) and calls Validate without allowLibraryDefinitions (5790)"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptEditorValidationService.cs",
+   "lines": "124-128, 147-150",
+   "note": "inline path uses allowLibraryDefinitions:true and adds hygiene lints"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Scripting/ScriptParser.cs",
+   "lines": "4202-4209",
+   "note": "library error emitted only when allowLibraryDefinitions=false — the observable divergence"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Editor/ScriptEditorValidationService.cs",
+   "lines": "60-63",
+   "note": "ValidateNowAsync exists for exactly this but is unused in production"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobEditorDialog.cs",
+   "lines": "61-63, 175",
+   "note": "third independently-wired validation stack"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

@@ -1,0 +1,41 @@
+{
+ "id": "UX-017",
+ "title": "Job dashboard: no search/filter, user sort wiped every 5 seconds, single-select blocks the built bulk export, and Delete silently destroys run history and stored credentials with no undo",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "dialogs-jobs-history",
+ "lens": "ux",
+ "existing_state": "JobListDialog's jobs grid is rebuilt from scratch by a 5-second timer (JobListDialog.cs:179-180) and three change events, and RefreshJobList always does Rows.Clear() + OrderBy(j => j.Name) (:502-504) — so any header sort the user applies (e.g. by Next Run or Last Result) is silently reverted within 5 seconds. The toolbar (BuildToolStrip, :191-223) has no search/filter box, so with dozens of jobs the only way to find one is scanning the alphabetical list. The grid is MultiSelect=false (:303) even though the export pipeline is fully plural-aware — GetSelectedJobs iterates SelectedRows (:783-812), the save dialog defaults to 'exported-jobs' for >1 job (:1154), and ExportToFile/ExportToString take lists (:1161, 1186) — making multi-job export, bulk enable/disable, and bulk delete unreachable dead code; Enable/Disable, Delete, and Run Now all call GetActiveJobId (:1061-1107). Separately, DeleteSelectedJob's confirmation is just 'Delete job X?' (:1377-1380) yet the action irreversibly deletes the job, every run-history record (_historyService.DeleteAllHistory, :1382-1383), and — via JobStorageService.Delete's default cleanupCredentials:true — the job's stored Credential Manager secret (Services/JobStorageService.cs:147-158), with no undo (unlike preset deletion, which has snapshot restore via JobStorageService.RestoreSnapshots, :203-222).",
+ "recommendation": "Coordinated JobListDialog upgrade: (1) remember the user's sort column/direction before Rows.Clear() in RefreshJobList and re-apply after rebuild (or switch to a sortable BindingList); (2) add a toolbar filter TextBox that hides non-matching rows by job name/target text; (3) set MultiSelect=true and extend UpdateJobActionState (:886-904) for multi-row semantics (Enable/Disable/Delete/Export act on all selected; Edit/Run Now require exactly one), turning _selectedJobId/SelectActiveJob (:566-586) into a set; (4) expand the delete confirmation to enumerate consequences ('Delete 3 jobs? This also permanently deletes their run history (87 runs) and stored credentials' — run counts via GetRunsForJob, credential mode is on the JobDefinition); (5) optionally add undo by snapshotting deleted JobDefinitions via the existing RestoreSnapshots pattern and deferring DeleteAllHistory by a grace period.",
+ "user_benefit": "The scheduler dashboard becomes practical at 30+ jobs: sorting that sticks, type-to-filter, real bulk operations — and a misclick no longer wipes months of run history and a stored password behind a confirmation that never warned about either.",
+ "evidence": [
+  {
+   "file": "JobListDialog.cs",
+   "lines": "179-180, 502-504",
+   "note": "5s timer full rebuild; OrderBy(Name) discards user sort"
+  },
+  {
+   "file": "JobListDialog.cs",
+   "lines": "191-223, 303",
+   "note": "Toolbar has no filter box; MultiSelect=false"
+  },
+  {
+   "file": "JobListDialog.cs",
+   "lines": "783-812, 1140-1197",
+   "note": "GetSelectedJobs and both export handlers are plural-aware but can only ever see one row"
+  },
+  {
+   "file": "JobListDialog.cs",
+   "lines": "1096-1107, 1369-1385",
+   "note": "Enable/Disable/Delete/Run Now act on GetActiveJobId only; delete confirm omits history destruction at :1383"
+  },
+  {
+   "file": "Services/JobStorageService.cs",
+   "lines": "147-158, 203-222",
+   "note": "Delete defaults cleanupCredentials:true (removes CredMan secret); RestoreSnapshots already exists as an undo building block"
+  }
+ ],
+ "mockup_idea": "Confirm dialog before/after: Before — 'Delete job Backup-Core1?' [OK][Cancel]. After — 'Delete 3 jobs (Backup-Core1, Backup-Core2, Cert-Check)? This also permanently deletes 87 history runs and 2 stored credentials.' [Delete][Cancel], followed by a transient '3 jobs deleted — Undo' strip; toolbar shows a filter box and a sort that survives refresh.",
+ "merged_from": 3
+}

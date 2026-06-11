@@ -1,0 +1,36 @@
+{
+ "id": "UX-045",
+ "title": "ScriptSamples README teaches a syntax the samples are forbidden to use, documents 15 of ~43 commands, and NOT_CONVERTED.md denies a feature that shipped",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "S",
+ "area": "models-samples-build",
+ "lens": "ux",
+ "existing_state": "ScriptSamples/README.md is the first doc a script author meets, and it is stale on three axes. (1) Its 'Available Commands' table (README.md:23-41) lists 15 commands, omitting the interactive family, try/switch/parallel/repeat, localcmd, vault, notify, ping/dns/portcheck, sftp, parse, table, http, and more (~43 exist per ScriptParser's command registry). (2) All its examples use compact inline syntax (e.g. '- send: show ip interface brief', README.md:69-130) while the repo's own CI test enforces canonical map syntax on every sample file (SSH_Helper.Tests/Scripting/CanonicalCommandMapSyntaxTests.cs:238-243, enforceCanonicalSyntax: true) — the README teaches a style the adjacent samples are prohibited from demonstrating. (3) The directory tree (README.md:134-158) omits libraries/, qa/, and several newer samples. Separately, ScriptSamples/fortigate/NOT_CONVERTED.md:3 and 47-53 still claims local command execution 'is not supported' and lists it as a 'Future Consideration' — but localcmd shipped with a full option set (Services/Scripting/ScriptParser.cs:65, 145, 1117-1119), so the four 'unconvertible' FortiGate scripts (clearblocks, listblocks, smart_block/unblock) are now convertible and nobody has revisited.",
+ "recommendation": "Rewrite README.md examples in canonical map syntax, replace the hand-maintained command table with a complete one (or a thin index that deep-links to SCRIPTING.md's per-command sections), and regenerate the directory tree. Convert the four FortiGate scripts using localcmd and delete NOT_CONVERTED.md (or shrink it to a changelog note). Optionally add a small test asserting every command name in ScriptParser's registry appears in the README table so it cannot rot again.",
+ "user_benefit": "New script authors learn the style the codebase actually standardizes on and discover the full command surface instead of a third of it; FortiGate users get four real automation scripts instead of a doc explaining why they can't have them.",
+ "evidence": [
+  {
+   "file": "ScriptSamples/README.md",
+   "lines": "23-41, 69-130, 134-158",
+   "note": "15-command table, compact-syntax examples, stale directory tree"
+  },
+  {
+   "file": "SSH_Helper.Tests/Scripting/CanonicalCommandMapSyntaxTests.cs",
+   "lines": "238-243",
+   "note": "samples must pass enforceCanonicalSyntax: true — opposite of README's style"
+  },
+  {
+   "file": "ScriptSamples/fortigate/NOT_CONVERTED.md",
+   "lines": "3, 47-53",
+   "note": "claims local command execution unsupported / 'future consideration'"
+  },
+  {
+   "file": "Services/Scripting/ScriptParser.cs",
+   "lines": "65, 145, 1117-1119",
+   "note": "localcmd is fully implemented (command registry, option schema, parse case)"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

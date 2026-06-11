@@ -1,0 +1,36 @@
+{
+ "id": "ARCH-029",
+ "title": "Three near-duplicate ~500-line session orchestration loops are already drifting apart and are untestable",
+ "category": "ARCH",
+ "severity": "medium",
+ "effort": "L",
+ "area": "terminal",
+ "lens": "perf",
+ "existing_state": "RunCaptureWindowLoopAsync (Services/Terminal/InteractiveTerminalService.cs:589-1201), RunCaptureHeadlessLoopAsync (1203-1622) and RunWindowLoopAsync (1624-2034) are three hand-copied variants of the same session loop, each holding ~20 closure-captured mutable locals (transcript builders, cap counters, alt-screen flags, completion flags). The 109-line DataReceived handler is duplicated nearly verbatim (707-815 vs 1297-1405, third variant 1706-1768); the 5-step mirror-cap ceremony repeats six times (940-974, 1077-1102, 1416-1450, 1523-1548); the try/catch handler-detach blocks repeat nine times (1104-1154, 1550-1581, 1950-1981). Two parallel close-reason state machines coexist for the same vocabulary: string + Interlocked completionSignaled in the capture loops (645-653, 1248-1256) vs an int enum + TrySetCloseReason/ResolveCloseReason in the window loop (2379-2398). Drift is already observable: the windowed capture transcript gets PrependStartupPromptIfMissing unconditionally (line 1189, also window mode at 2022) but the headless capture path never calls it (1592-1613), so the same `interactive: {command: ...}` step yields a differently-shaped transcript depending on show_window when mirror_output is off. None of this orchestration has any automated coverage (grep for PumpFullAsync/RunCaptureWindowLoop/RunWindowLoopAsync/ScreenUpdateDispatcher in SSH_Helper.Tests returns zero hits) — only the static helpers are tested, because the loop state lives in closures.",
+ "recommendation": "Extract the shared per-session state into two small classes: a TranscriptAssembler owning transcriptBuilder + caps + pending buffer + alt-screen flag + line counting (the block of locals at 618-634 / 1226-1242 / 1647-1654), and a CompletionSignal owning the TCS + close-reason CAS (replacing both state machines with one). The three loops then collapse into one parameterized loop with a small mode strategy (windowed/headless, capture/plain). This makes every future cap/transcript fix a single edit, makes the prompt-prefix divergence impossible, and finally lets the 1,450 LOC of lifecycle logic be unit-tested.",
+ "user_benefit": "Transcript and capture fixes stop needing to be applied three times (and silently missed, as the headless prompt-prefix divergence shows); the riskiest untested code in the terminal becomes testable.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "589-1201, 1203-1622, 1624-2034",
+   "note": "the three loop bodies"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "707-815, 1297-1405",
+   "note": "DataReceived handler duplicated nearly verbatim between the two capture loops"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "1189, 1592-1613",
+   "note": "drift: PrependStartupPromptIfMissing applied to windowed-capture transcript but absent from headless-capture transcript"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/Terminal/InteractiveTerminalService.cs",
+   "lines": "645-653, 2379-2398",
+   "note": "two parallel close-reason mechanisms (string CAS vs int-enum CAS) for the same close-reason vocabulary"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

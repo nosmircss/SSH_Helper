@@ -1,0 +1,36 @@
+{
+ "id": "BUG-022",
+ "title": "Deleting a running job leaves an uncancellable fleet execution, recreates orphaned history, and can resurrect the job in jobs.json",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "dialogs-jobs-history",
+ "lens": "reliability",
+ "existing_state": "UpdateJobActionState keeps Delete enabled while a job is running (JobListDialog.cs:896, 902 — only Run Now/Cancel are gated on isRunning). DeleteSelectedJob (JobListDialog.cs:1369-1385) confirms with just \"Delete job 'X'?\" then removes the job and all history without checking IsJobRunning or calling CancelJob. Three concrete consequences: (1) the in-flight SSH execution keeps running against every target host, and since the grid row is gone there is no remaining UI surface to cancel it (JobExecutionService.CancelJob needs the jobId from a row, Services/JobExecutionService.cs:274-282) — it runs to completion no matter what. (2) When it finishes, JobHistoryService's JobCompleted subscription (Services/JobHistoryService.cs:36-47) writes the run payload, recreating job-history/<deleted-id>/ immediately after DeleteAllHistory wiped it — an orphan directory nothing can ever clean up because the only delete path requires the job row. (3) For One-Time jobs, HandlePostExecution holds the captured JobDefinition reference and calls _jobStorage.Save(job) on success or scheduled failure (Services/JobExecutionService.cs:875-888); Save unconditionally re-inserts it (_jobs[job.Id] = job, JobStorageService.cs:135) — the deleted job literally reappears in jobs.json complete with hosts and credentials.",
+ "recommendation": "In DeleteSelectedJob, check _executionService.IsJobRunning first: either block with \"Cancel the running job before deleting\" or offer \"Cancel and delete\" (call CancelJob, then delete). In JobExecutionService, make the post-run writers tolerant of deletion: HandlePostExecution should re-fetch via _jobStorage.Get(job.Id) and skip Save when null (CompleteJob at lines 827-832 already does exactly this), and JobHistoryService.OnJobCompleted could accept a job-exists predicate to skip writing history for deleted ids.",
+ "user_benefit": "Deleting a job actually stops it; no zombie SSH runs against the fleet, no undeleteable history directories, and no one-time jobs rising from the dead in jobs.json.",
+ "mockup_idea": "Before/after of the delete confirmation: current generic \"Delete job 'X'?\" vs a running-aware dialog showing a live-run warning with [Cancel run and delete] / [Keep job] buttons.",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\JobListDialog.cs",
+   "lines": "886-904, 1369-1385",
+   "note": "Delete enabled while running; no IsJobRunning check or CancelJob before delete"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobExecutionService.cs",
+   "lines": "875-888, 820-833, 274-282",
+   "note": "HandlePostExecution saves the captured job object back (resurrection); CompleteJob shows the correct Get-then-skip pattern; CancelJob requires the jobId"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobHistoryService.cs",
+   "lines": "36-47",
+   "note": "JobCompleted subscription writes run history unconditionally, recreating the deleted job's history dir"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\JobStorageService.cs",
+   "lines": "134-139",
+   "note": "Save unconditionally re-inserts _jobs[job.Id] = job and persists"
+  }
+ ]
+}

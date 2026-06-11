@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>ENH-027 — Scheduler settings UI</title>
+<style>
+*{box-sizing:border-box}
+body{margin:12px;background:#0b0e13;color:#c9d4e3;font:12px/1.5 "Cascadia Code",Consolas,monospace}
+.cols{display:flex;gap:12px;align-items:stretch}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px 2px}
+.cap b{color:#4cc9f0;font-weight:600}
+.panel{flex:1;border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden}
+/* BEFORE: raw json */
+.filebar{padding:5px 10px;border-bottom:1px solid #1c2330;color:#8294a8;font-size:11px;background:#10151e}
+pre{margin:0;padding:10px 12px;font-size:11px;line-height:1.55;color:#8294a8;overflow-x:auto}
+.k{color:#c9d4e3}.v{color:#4cc9f0}
+.hl{background:#151c28;display:inline-block;width:100%;border-left:2px solid #ffb454;padding-left:6px;margin-left:-8px}
+.note{margin:8px 10px;padding:6px 8px;border:1px dashed #1c2330;border-radius:4px;font-size:10.5px;color:#8294a8}
+.note .warn{color:#ffb454}.note .bad{color:#ff5c5c}
+/* AFTER: settings dialog */
+.titlebar{padding:5px 10px;border-bottom:1px solid #1c2330;background:#10151e;font-size:11px;color:#c9d4e3}
+.tabs{display:flex;gap:2px;padding:6px 8px 0;border-bottom:1px solid #1c2330;background:#0e1219;font-size:10px;color:#8294a8;flex-wrap:wrap}
+.tab{padding:3px 7px;border:1px solid transparent;border-bottom:0;border-radius:4px 4px 0 0}
+.tab.on{color:#4cc9f0;border-color:#1c2330;background:#10151e;position:relative;top:1px}
+.new{font-size:9px;color:#2bd97c;border:1px solid #2bd97c55;border-radius:3px;padding:0 3px;margin-left:4px}
+.form{padding:12px 14px;display:flex;flex-direction:column;gap:11px}
+.row label{display:block;color:#c9d4e3;margin-bottom:3px}
+.ctl{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.spin{display:inline-flex;align-items:stretch;border:1px solid #2a3447;border-radius:3px;background:#0b0e13}
+.spin .val{padding:1px 8px;color:#c9d4e3;min-width:42px;text-align:right}
+.spin .ud{display:flex;flex-direction:column;border-left:1px solid #2a3447;color:#8294a8;font-size:6px;line-height:1}
+.spin .ud span{padding:1px 3px}
+.unit{color:#8294a8;font-size:11px}
+.hint{font-size:10.5px;color:#8294a8;margin-top:2px}
+.live{color:#2bd97c;font-size:10px}
+.restart{color:#ffb454;font-size:10px}
+.btns{display:flex;justify-content:flex-end;gap:8px;padding:8px 12px;border-top:1px solid #1c2330;background:#10151e}
+.btn{border:1px solid #2a3447;border-radius:3px;padding:2px 14px;font-size:11px;color:#c9d4e3}
+.btn.pri{border-color:#4cc9f0;color:#4cc9f0}
+.foot{margin-top:10px;font-size:10.5px;color:#8294a8}
+.foot b{color:#c9d4e3;font-weight:600}
+</style></head>
+<body>
+<div class="cols">
+
+<div class="col">
+  <p class="cap">Before — hand-edit <b>config.json</b>, then guess</p>
+  <div class="panel">
+    <div class="filebar">%LocalAppData%\SSH_Helper\config.json &nbsp;·&nbsp; notepad</div>
+<pre>  "Environments": [ "Prod-Fleet", "Lab" ],
+<span class="hl">  <span class="k">"MaxConcurrentJobs"</span>: <span class="v">3</span>,</span>
+  <span class="k">"DefaultMaxHistoryRuns"</span>: <span class="v">50</span>,
+  <span class="k">"DefaultHistoryRetentionDays"</span>: <span class="v">30</span>,
+  <span class="k">"MaxJobOutputCharsPerHost"</span>: <span class="v">1048576</span>,
+  "SavedStateCompressed": "gz64:H4sIAAA…",</pre>
+    <div class="note"><span class="bad">No settings UI at all</span> — these four knobs are undocumented JSON fields. Per-job overrides <em>do</em> have editor UI; the global defaults don't.</div>
+    <div class="note"><span class="warn">Silent restart trap:</span> MaxConcurrentJobs is read once into a SemaphoreSlim at startup — edit it to 8 while 200-device nightly backups run and <em>nothing changes</em>, with no hint why.</div>
+  </div>
+</div>
+
+<div class="col">
+  <p class="cap">After — <b>Scheduler</b> tab in Settings</p>
+  <div class="panel">
+    <div class="titlebar">Settings</div>
+    <div class="tabs">
+      <span class="tab">General</span><span class="tab">Updates</span><span class="tab">Appearance</span><span class="tab">Vault</span><span class="tab">Notifications</span><span class="tab on">Scheduler<span class="new">NEW</span></span>
+    </div>
+    <div class="form">
+      <div class="row">
+        <label>Max concurrent jobs</label>
+        <div class="ctl"><span class="spin"><span class="val">3</span><span class="ud"><span>▲</span><span>▼</span></span></span>
+        <span class="restart">⟳ takes effect after restart</span></div>
+        <div class="hint">Jobs beyond the limit are queued, not skipped.</div>
+      </div>
+      <div class="row">
+        <label>Default history retention</label>
+        <div class="ctl">keep <span class="spin"><span class="val">50</span><span class="ud"><span>▲</span><span>▼</span></span></span><span class="unit">runs</span>
+        &nbsp;/&nbsp; <span class="spin"><span class="val">30</span><span class="ud"><span>▲</span><span>▼</span></span></span><span class="unit">days</span>
+        <span class="live">● applies live</span></div>
+        <div class="hint">Per-job overrides in the Job Editor still win.</div>
+      </div>
+      <div class="row">
+        <label>Max output per host</label>
+        <div class="ctl"><span class="spin"><span class="val">1024</span><span class="ud"><span>▲</span><span>▼</span></span></span><span class="unit">KB</span>
+        <span class="live">● applies live</span></div>
+        <div class="hint">Longer output is truncated with a marker in job history.</div>
+      </div>
+    </div>
+    <div class="btns"><span class="btn pri">OK</span><span class="btn">Cancel</span></div>
+  </div>
+</div>
+
+</div>
+<p class="foot"><b>Decision:</b> the three history fields are already read at run-time, so they apply live for free. Only concurrency needs either a semaphore swap on save — or, minimum viable, the amber restart note shown above.</p>
+</body></html>

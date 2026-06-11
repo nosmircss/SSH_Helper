@@ -1,0 +1,31 @@
+{
+ "id": "PERF-012",
+ "title": "Job editor Hosts tab freezes on large host imports — it uses the naive grid-fill paths the main grid was already optimized away from",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "S",
+ "area": "dialogs-jobs-history",
+ "lens": "perf",
+ "existing_state": "The job editor's per-job host grid fills row-by-row, cell-by-cell on the live grid. ApplyHostGridSnapshot (JobEditorDialog.cs:898-939) does Rows.Add() per row plus a string-keyed gridRow.Cells[columnName].Value assignment per cell, with no redraw suppression or bulk AddRange; it is the path behind Copy from Main Grid (JobEditorDialog.cs:1890-1908), Import CSV (1861-1888), and the initial PopulateHostGrid (794-801, called at 1611). Ctrl+V routes to HostGridUtilities.PasteClipboardText (JobEditorDialog.cs:1829-1836 -> Utilities/HostGridUtilities.cs:224-273), which grows the grid one Rows.Add(new DataGridViewRow()) at a time INSIDE the per-cell inner loop. The grid has RowPostPaint and CellPainting handlers wired (JobEditorDialog.cs:1394-1395), so every add invalidates and repaints. Form1's main grid had exactly this problem and was fixed: Form1.PasteFromClipboard (Form1.cs:9604-9693) documents the pathology in comments ('the grid services thousands of paint messages', 'O(rows^2) work') and implements WM_SETREDRAW suppression, handler detachment, and off-grid bulk row building — but that fix never reached the job editor's paths. Since Copy from Main Grid copies the entire main grid, a job targeting a few thousand hosts hits a multi-second UI freeze every time the Hosts tab is populated.",
+ "recommendation": "Port Form1's optimized bulk-fill technique into HostGridUtilities as a single shared ApplyRowsBulk(grid, columns, rows) helper (WM_SETREDRAW off, build DataGridViewRow objects off-grid with values pre-set, one Rows.AddRange, restore redraw) and call it from JobEditorDialog.ApplyHostGridSnapshot and HostGridUtilities.PasteClipboardText. This is a contained change: both call sites already funnel through these two methods.",
+ "user_benefit": "Copy-from-main-grid, CSV import, paste, and opening the editor for a large-fleet job become instant instead of freezing the dialog for seconds — the exact scenario this app is built for.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/JobEditorDialog.cs",
+   "lines": "898-939, 1861-1908, 1394-1395",
+   "note": "per-row/per-cell snapshot apply used by CSV import, Copy from Main Grid and initial load; paint handlers attached to the grid"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Utilities/HostGridUtilities.cs",
+   "lines": "224-273",
+   "note": "PasteClipboardText adds rows one at a time inside the per-cell loop, no redraw suppression"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Form1.cs",
+   "lines": "9604-9693",
+   "note": "main-grid paste already implements the fix (WM_SETREDRAW, off-grid bulk rows) with comments describing the exact pathology"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

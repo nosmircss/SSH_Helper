@@ -1,0 +1,26 @@
+{
+ "id": "PERF-024",
+ "title": "Sync-over-async per host pins a blocked threadpool thread each — parallel runs starve the threadpool that their own read loops need",
+ "category": "PERF",
+ "severity": "medium",
+ "effort": "L",
+ "area": "ssh-execution",
+ "lens": "perf",
+ "existing_state": "Every per-host execution is a Task.Run wrapper (Services/SshExecutionService.cs:397, 446, 593, 1072) around synchronous methods that internally block on real async work with .GetAwaiter().GetResult(): ExecuteWithPool blocks on CreateSessionAsync (2092-2093) and ExecuteBatchAsync (2148-2149); ExecuteWithoutPool on InitializeAsync (2266) and ExecuteBatchAsync (2291-2292); the three script backends at 1517-1518, 1562-1563, 1649, 1697-1698, 1755-1756. The pool's CreateConnectionAsync then spawns further Task.Run calls for Connect/Login (Services/SshConnectionPool.cs:386-391, 408-413, 430-435, 449-454). At ParallelHostCount=100, ~100 threadpool threads sit blocked while the async machinery they wait on — the shell sessions' polling-delay continuations, the pool's 5s keepalive timer callback (SshConnectionPool.cs:118-122), progress/output event continuations — competes for the starved pool. The CLR injects extra threads slowly, so large parallel folder runs ramp up stuttering over their first tens of seconds and live output turns laggy precisely when the most hosts are in flight.",
+ "recommendation": "Two tiers. Cheap mitigation (hours): schedule per-host work with TaskCreationOptions.LongRunning (dedicated threads, no pool depletion) at the four Task.Run wrap sites, or bump ThreadPool.SetMinThreads when a parallel folder run starts. Real fix (about a week): make the per-host pipeline genuinely async end-to-end — ExecuteSingleHost/ExecuteScriptOnHost/ExecutePresetOnHost become async Task<ExecutionResult>, every .GetAwaiter().GetResult() becomes await, and the Task.Run wrappers disappear. The signatures are private to SshExecutionService so the refactor does not ripple into Form1.",
+ "user_benefit": "High-parallelism folder runs actually achieve their configured parallelism from the first second, output stops lagging during big runs, and pool keepalives stop getting delayed behind blocked threads on long sessions.",
+ "evidence": [
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshExecutionService.cs",
+   "lines": "1517-1518, 1562-1563, 1649, 1697-1698, 1755-1756, 2092-2093, 2148-2149, 2266, 2291-2292",
+   "note": "GetAwaiter().GetResult() blocking sites inside Task.Run-wrapped per-host work"
+  },
+  {
+   "file": "C:/Users/nos/source/repos/nosmircss/Test/SSH_Helper/Services/SshConnectionPool.cs",
+   "lines": "386-391, 408-413, 118-122",
+   "note": "each blocked host additionally spawns inner Task.Run for Connect/Login; keepalive timer competes for the same pool"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

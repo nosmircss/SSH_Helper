@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FEAT-001 — Post-run failure triage</title>
+<style>
+  body{background:#0b0e13;color:#c9d4e3;font:12px "Cascadia Code",Consolas,monospace;margin:12px}
+  .cols{display:flex;gap:14px}
+  .col{flex:1;min-width:0}
+  .cap{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8294a8;margin:0 0 6px}
+  .cap b{color:#ff5c5c;font-weight:600}.cap i{color:#2bd97c;font-style:normal;font-weight:600}
+  .pane{border:1px solid #1c2330;border-radius:6px;background:#0e1219;overflow:hidden}
+  .status{padding:6px 9px;border-bottom:1px solid #1c2330;color:#8294a8;font-size:11px}
+  .status.bad{color:#c9d4e3;background:rgba(255,92,92,.08)}
+  .status.bad b{color:#ff5c5c;font-weight:600}.status.bad i{color:#2bd97c;font-style:normal;font-weight:600}
+  .strip{display:flex;align-items:center;gap:10px;padding:6px 9px;border-bottom:1px solid #1c2330;font-size:11px}
+  .strip .ok{color:#2bd97c}.strip .fail{color:#ff5c5c}.strip .canc{color:#ffb454}
+  .tgl{margin-left:auto;border:1px solid #4cc9f0;color:#4cc9f0;border-radius:4px;padding:2px 7px;font-size:10px;background:rgba(76,201,240,.12)}
+  .row{display:flex;gap:8px;padding:3px 9px;border-bottom:1px solid #141a25;white-space:nowrap;overflow:hidden}
+  .row:last-of-type{border-bottom:0}
+  .ic{width:12px;text-align:center}
+  .ok .ic{color:#2bd97c}.fail .ic{color:#ff5c5c}
+  .row.fail{background:rgba(255,92,92,.06)}
+  .ip{color:#c9d4e3;min-width:86px}.nm{color:#8294a8}
+  .more{padding:4px 9px;color:#8294a8;font-size:10px;font-style:italic}
+  .btns{display:flex;gap:8px;padding:7px 9px;border-top:1px solid #1c2330}
+  .btn{border:1px solid #1c2330;border-radius:4px;padding:3px 9px;font-size:11px;color:#c9d4e3;background:#131927}
+  .btn.run{border-color:#2bd97c;color:#2bd97c;background:rgba(43,217,124,.1)}
+  .btn.cy{border-color:#4cc9f0;color:#4cc9f0;background:rgba(76,201,240,.08)}
+  .menu{margin:10px 0 0 26px;width:230px;border:1px solid #1c2330;border-radius:5px;background:#131927;box-shadow:0 6px 16px rgba(0,0,0,.5);font-size:11px}
+  .mi{padding:4px 10px;color:#c9d4e3}
+  .mi.new{color:#2bd97c}
+  .mi.new::after{content:" NEW";font-size:8px;color:#0b0e13;background:#2bd97c;border-radius:3px;padding:0 3px;vertical-align:1px}
+  .sep{border-top:1px solid #1c2330;margin:3px 0}
+  .mlabel{font-size:9px;color:#8294a8;text-transform:uppercase;letter-spacing:.1em;margin:10px 0 3px 26px}
+  .note{margin-top:10px;font-size:10px;color:#8294a8}
+</style>
+</head>
+<body>
+<div class="cols">
+
+  <div class="col">
+    <p class="cap">Before — run on 200 hosts, 18 failed</p>
+    <div class="pane">
+      <div class="status">Completed execution on 200 hosts</div>
+      <div class="row ok"><span class="ic">&#10003;</span><span class="ip">10.20.1.2</span><span class="nm">core-sw-01</span></div>
+      <div class="row ok"><span class="ic">&#10003;</span><span class="ip">10.20.1.3</span><span class="nm">core-sw-02</span></div>
+      <div class="row fail" style="background:none"><span class="ic">&#10007;</span><span class="ip">10.20.4.13</span><span class="nm">edge-fw-03</span></div>
+      <div class="row ok"><span class="ic">&#10003;</span><span class="ip">10.20.2.7</span><span class="nm">dist-sw-07</span></div>
+      <div class="row ok"><span class="ic">&#10003;</span><span class="ip">10.20.2.8</span><span class="nm">dist-sw-08</span></div>
+      <div class="row fail" style="background:none"><span class="ic">&#10007;</span><span class="ip">10.20.4.21</span><span class="nm">edge-fw-09</span></div>
+      <div class="row ok"><span class="ic">&#10003;</span><span class="ip">10.20.3.5</span><span class="nm">acc-sw-15</span></div>
+      <div class="more">&#8230; 193 more rows — scroll &amp; scan for the other 16 &#10007;, copy IPs by hand, re-check grid rows, run again</div>
+    </div>
+    <div class="mlabel">History host pane &#8594; right-click</div>
+    <div class="menu">
+      <div class="mi">View Details</div>
+      <div class="mi">Export Host Output</div>
+      <div class="sep"></div>
+      <div class="mi">Save Entry</div>
+      <div class="mi">Delete</div>
+    </div>
+  </div>
+
+  <div class="col">
+    <p class="cap">After — triage in two clicks</p>
+    <div class="pane">
+      <div class="status bad">Completed: <i>182 succeeded</i>, <b>18 failed</b></div>
+      <div class="strip"><span class="ok">&#10003; 182</span><span class="fail">&#10007; 18</span><span class="canc">&#9632; 0</span><span class="tgl">&#9745; Show failed only</span></div>
+      <div class="row fail"><span class="ic">&#10007;</span><span class="ip">10.20.4.13</span><span class="nm">edge-fw-03</span></div>
+      <div class="row fail"><span class="ic">&#10007;</span><span class="ip">10.20.4.21</span><span class="nm">edge-fw-09</span></div>
+      <div class="row fail"><span class="ic">&#10007;</span><span class="ip">10.20.5.2</span><span class="nm">branch-fw-12</span></div>
+      <div class="row fail"><span class="ic">&#10007;</span><span class="ip">10.20.5.9</span><span class="nm">branch-fw-17</span></div>
+      <div class="row fail"><span class="ic">&#10007;</span><span class="ip">10.20.6.30</span><span class="nm">lab-sw-02</span></div>
+      <div class="more">&#8230; 13 more failed</div>
+      <div class="btns"><span class="btn cy">Check failed in grid</span><span class="btn run">&#9654; Run Checked (18)</span></div>
+    </div>
+    <div class="mlabel">History host pane &#8594; right-click</div>
+    <div class="menu">
+      <div class="mi">View Details</div>
+      <div class="mi">Export Host Output</div>
+      <div class="sep"></div>
+      <div class="mi new">Check failed hosts in grid (18)</div>
+      <div class="mi new">Re-run on failed hosts (18)</div>
+      <div class="sep"></div>
+      <div class="mi">Save Entry</div>
+      <div class="mi">Delete</div>
+    </div>
+    <p class="note">Re-run = check the 18 failed rows, uncheck the rest, invoke the existing ExecuteOnCheckedHosts() — Ansible's <span style="color:#ffb454">--limit @retry</span>, but built in. Per-host Success is already in HostHistoryEntry; no new data needed.</p>
+  </div>
+
+</div>
+</body>
+</html>

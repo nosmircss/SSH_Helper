@@ -1,0 +1,31 @@
+{
+ "id": "UX-024",
+ "title": "The ~112 built-in functions are invisible in the editor: no autocomplete, signature help, or hover docs",
+ "category": "UX",
+ "severity": "medium",
+ "effort": "M",
+ "area": "scripting-functions",
+ "lens": "ux",
+ "existing_state": "The Scintilla autocomplete provider (Services/Editor/ScriptAutocompleteProvider.cs) completes step commands (lines 116-161), top-level keys (163-178), required option keys (180-217), built-in symbols like _output/_prompt (92-104, 219-231), and host columns — but not one of the ~112 scripting functions (grep for regex_match/date_add/base64/ip_in_cidr across the file: zero matches). The Flow Canvas property panels are equally function-blind (same grep over FlowCanvas/src: zero matches). FunctionRegistry exposes RegisteredNames (Services/Scripting/FunctionRegistry.cs:90) but nothing consumes it, and it only covers 71 of the functions anyway — 20 legacy functions live in a hardcoded switch (Services/Scripting/JsonUtilities.cs:347-564) and the json.* family is a third dispatch path, so the registry under-reports the surface by ~40%. The registry stores only name→delegate (FunctionRegistry.cs:25); there is no arity/description/category metadata to drive tooling. Today a user writing `- set: x = ...` must memorize function names or keep SCRIPTING.md open.",
+ "recommendation": "Add a metadata layer to FunctionRegistry (signature string, one-line description, category) populated at registration in each IFunctionCategory.Register, plus a static table covering the 20 legacy JsonUtilities names and the json.* methods so one API enumerates the full surface. Then wire ScriptAutocompleteProvider to offer function completions with signature hints when the caret is in an expression position (after `set: x = `, inside if:/while:/assert: conditions), reusing its existing description-dictionary pattern (BuiltInSymbolDescriptions at line 219). Expose the same list to Flow Canvas property panels via the bridge for a function-picker/hint in expression fields. The same unified table powers the function-name lint in UX-010.",
+ "user_benefit": "Script authors stop alt-tabbing to SCRIPTING.md and stop guessing names like index_of vs indexof. This is table-stakes IDE behavior for what is now a full scripting language.",
+ "evidence": [
+  {
+   "file": "Services/Editor/ScriptAutocompleteProvider.cs",
+   "lines": "92-231",
+   "note": "Completes commands/keys/symbols; zero function names anywhere in the 1246-line file (verified by grep)"
+  },
+  {
+   "file": "Services/Scripting/FunctionRegistry.cs",
+   "lines": "25, 85-102",
+   "note": "Name→delegate dictionary only; RegisteredNames exists but is unconsumed and misses legacy + json.* names"
+  },
+  {
+   "file": "Services/Scripting/JsonUtilities.cs",
+   "lines": "343-564",
+   "note": "20 legacy functions (length, list, trim, upper, lower, replace, split, join, substring, sort, ...) dispatched outside the registry"
+  }
+ ],
+ "mockup_idea": "Side-by-side editor screenshot: before — user types 'set: x = reg' and gets nothing; after — popup listing regex_match(text, pattern[, group]), regex_match_all(text, pattern), regex_replace(text, pattern, repl) each with a one-line description, and a calltip showing the signature after '(' is typed.",
+ "merged_from": 1
+}

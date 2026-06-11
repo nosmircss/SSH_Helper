@@ -1,0 +1,36 @@
+{
+ "id": "ENH-039",
+ "title": "Datetime gaps: no date-to-epoch conversion, date_add discards your format, date_diff has no month/year units",
+ "category": "ENH",
+ "severity": "medium",
+ "effort": "S",
+ "area": "scripting-functions",
+ "lens": "ux",
+ "existing_state": "epoch() ignores its arguments entirely and always returns the current Unix time (Services/Scripting/Functions/DateTimeFunctions.cs:52-55), so the inverse of epoch_to_date does not exist — you cannot convert a parsed log timestamp to epoch for arithmetic or comparison with device uptime counters. date_add accepts any input format from the ParseFormats list but always emits hardcoded 'yyyy-MM-dd HH:mm:ss' (line 105) with no output-format argument (parse_date and epoch_to_date both already take one, lines 68-73 and 162-168 — date_add is the odd one out). date_diff supports seconds through weeks only; 'months' or 'years' silently falls into the default arm and returns seconds (lines 122-130). Also, now() and now_local() are byte-identical local-time implementations (lines 37-45) — a trap for anyone assuming now() is UTC like most scripting environments.",
+ "recommendation": "In DateTimeFunctions: make epoch(ts?) parse an optional timestamp via the existing TryParseDateTime and return its Unix seconds (no arg keeps current behavior); add an optional 4th output-format arg to date_add matching the parse_date convention; add months/years arms to date_diff using calendar arithmetic; and document explicitly in SCRIPTING.md that now() is local (or add a one-line note in the function's autocomplete description once that exists).",
+ "user_benefit": "Time math against device logs is constant in this domain — 'alert if last config save is older than 7 days' currently requires no clean path because you cannot get an epoch from a parsed date, and date_add silently reformatting timestamps breaks downstream parse_date calls.",
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\DateTimeFunctions.cs",
+   "lines": "52-55",
+   "note": "Epoch ignores argsString — no date→epoch conversion exists"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\DateTimeFunctions.cs",
+   "lines": "93-105",
+   "note": "date_add output format hardcoded; unknown unit silently returns input"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\DateTimeFunctions.cs",
+   "lines": "122-133",
+   "note": "date_diff: months/years fall to default seconds arm"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Functions\\DateTimeFunctions.cs",
+   "lines": "37-45",
+   "note": "now and now_local are identical local-time implementations"
+  }
+ ],
+ "mockup_idea": "",
+ "merged_from": 1
+}

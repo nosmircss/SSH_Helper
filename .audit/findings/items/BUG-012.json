@@ -1,0 +1,41 @@
+{
+ "id": "BUG-012",
+ "title": "on_error: continue is silently ignored by assert and extract failures (script stops anyway)",
+ "category": "BUG",
+ "severity": "high",
+ "effort": "S",
+ "area": "scripting-commands-a",
+ "lens": "correctness",
+ "existing_state": "The executor applies on_error only to thrown exceptions (ScriptExecutor.cs:517-531); a command that returns a plain Fail stops the host's script unconditionally (ScriptExecutor.cs:425-431). AssertCommand returns plain CommandResult.Fail for both evaluation errors and failed assertions (Services/Scripting/Commands/AssertCommand.cs:30, 56), and ExtractCommand returns plain Fail for empty-source, no-match-with-required, and regex parse/timeout errors (ExtractCommand.cs:35-37, 65-67, 108-119) — neither ever calls CommandResult.ApplyOnError. Yet the YAML surface actively accepts `on_error` on these steps: it is a generic step-level key (ScriptParser.cs:983) and the assert mapping explicitly parses a nested on_error and hoists it to the step root (ScriptParser.cs:3512-3515). So a user who writes `assert: {...}` / `extract: {...}` with `on_error: continue` gets no warning and the script still aborts mid-run on failure. Related inconsistency: user-cancel in choose and input also bypasses on_error with a plain Fail (ChooseCommand.cs:58-62, InputCommand.cs:61-65) while every other failure in those same commands honors ApplyOnError (ChooseCommand.cs:78, InputCommand.cs:82).",
+ "recommendation": "Route assert and extract failure returns through CommandResult.ApplyOnError(step, msg) like the other commands (one-line changes at AssertCommand.cs:30/56 and the Fail sites in ExtractCommand). For choose/input cancellation, either honor on_error too or make 'cancel always aborts' an explicit documented rule and have the parser warn when on_error is declared on steps where it cannot apply.",
+ "user_benefit": "A declared error-handling policy actually works: long fleet scripts with `on_error: continue` on validation/parsing steps no longer die mid-run on the first soft failure, and the behavior matches what the parser/editor accepts.",
+ "mockup_idea": "",
+ "merged_from": 1,
+ "evidence": [
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\AssertCommand.cs",
+   "lines": "26-31, 55-56",
+   "note": "plain Fail on eval error and failed assert; ApplyOnError never used"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ExtractCommand.cs",
+   "lines": "35-37, 65-67, 108-119",
+   "note": "plain Fail on empty source / no match / regex errors"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptExecutor.cs",
+   "lines": "425-431, 517-531",
+   "note": "executor stops on returned Fail; on_error applied only to exceptions"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\ScriptParser.cs",
+   "lines": "983, 3512-3515",
+   "note": "on_error accepted step-level and explicitly parsed under assert"
+  },
+  {
+   "file": "C:\\Users\\nos\\source\\repos\\nosmircss\\Test\\SSH_Helper\\Services\\Scripting\\Commands\\ChooseCommand.cs",
+   "lines": "58-62",
+   "note": "cancel path is plain Fail, bypassing on_error (same in InputCommand.cs:61-65)"
+  }
+ ]
+}
