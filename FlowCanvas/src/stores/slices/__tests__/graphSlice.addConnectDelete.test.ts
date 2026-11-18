@@ -47,6 +47,22 @@ const bottomConn = (source: string, target: string): Connection =>
   ({ source, target, sourceHandle: null, targetHandle: null });
 
 describe('add → connect → delete keeps loop-body _stepPath contiguous (real store)', () => {
+  it('switches portcheck between a single port and user-defined candidates without conflicting properties', () => {
+    useFlowStore.setState({
+      nodes: [node('probe', 'portcheck', { host: 'localhost', port: 2222, target: 'localhost:2222' })],
+    });
+    useFlowStore.getState().updateNodeProp('probe', 'ports', '22,222,2222');
+    let props = propsOf(useFlowStore.getState().nodes[0]);
+    expect(props.ports).toBe('22,222,2222');
+    expect(props).not.toHaveProperty('port');
+    expect(props).not.toHaveProperty('target');
+
+    useFlowStore.getState().updateNodeProp('probe', 'ports', '');
+    props = propsOf(useFlowStore.getState().nodes[0]);
+    expect(props.ports).toBeNull();
+    expect(props.port).toBe(22);
+  });
+
   beforeEach(() => {
     useFlowStore.setState({ nodes: [], edges: [], selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
     vi.clearAllMocks();

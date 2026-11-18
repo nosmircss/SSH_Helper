@@ -9,6 +9,22 @@ public class NetworkStepParserTests
 {
     private readonly ScriptParser _parser = new();
 
+    [Theory]
+    [InlineData("ports: []")]
+    [InlineData("ports: [22, 70000]")]
+    [InlineData("ports: [22, abc]")]
+    [InlineData("ports: [[22]]")]
+    [InlineData("port: 22\n      ports: [2222]")]
+    [InlineData("mode: banner")]
+    [InlineData("port: abc")]
+    [InlineData("timeout: 0")]
+    public void Validate_PortDiscovery_RejectsInvalidOptions(string options)
+    {
+        var yaml = "steps:\n  - portcheck:\n      host: localhost\n      " + options;
+        var script = _parser.Parse(yaml);
+        _parser.Validate(script, yaml).Should().NotBeEmpty();
+    }
+
     [Fact]
     public void IsYamlScript_NewNetworkStepKeywords_ReturnTrue()
     {

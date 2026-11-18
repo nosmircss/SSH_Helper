@@ -1197,6 +1197,11 @@ namespace SSH_Helper.Services.Scripting.Models
     /// </summary>
     public class PortcheckOptions
     {
+        public List<string>? Ports { get; set; }
+        public string? PortsFrom { get; set; }
+        public string Mode { get; set; } = "tcp";
+        internal bool HasExplicitPort { get; set; }
+
         /// <summary>
         /// Target host or IP.
         /// </summary>

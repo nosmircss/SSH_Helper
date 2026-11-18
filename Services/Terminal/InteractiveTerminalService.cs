@@ -55,6 +55,8 @@ namespace SSH_Helper.Services.Terminal
 
     public sealed class InteractiveTerminalService : IInteractiveTerminalService
     {
+        internal ConnectionPortResolver PortResolver { get; set; } = new();
+        internal Action<HostConnection>? BeforeConnectionForTesting { get; set; }
         private static readonly Regex AlternateScreenSequenceRegex = new(
             "\u001B\\[\\?(?:1049|1047|47)(?:;\\d+)?(?<mode>[hl])",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -367,6 +369,8 @@ namespace SSH_Helper.Services.Terminal
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                host = await context.ResolveCurrentHostAsync(PortResolver, cancellationToken);
+                BeforeConnectionForTesting?.Invoke(host);
                 client = new Ssh
                 {
                     Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds
@@ -479,6 +483,8 @@ namespace SSH_Helper.Services.Terminal
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                host = await context.ResolveCurrentHostAsync(PortResolver, cancellationToken);
+                BeforeConnectionForTesting?.Invoke(host);
                 client = new Ssh
                 {
                     Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds

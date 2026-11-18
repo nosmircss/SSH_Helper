@@ -488,6 +488,9 @@ namespace SSH_Helper.Services
         {
             var hosts = new List<HostConnection>();
             var defaultVaultProfileOverride = ResolveJobDefaultVaultProfile(job);
+            var environment = new EnvironmentService(_configService).GetActiveEnvironmentVariables();
+            var sshConfigEnabled = _configService.GetCurrent().SshConfig.EnableSshConfig;
+            var sshConfigService = new SshConfigService();
 
             foreach (var row in job.Hosts)
             {
@@ -495,15 +498,6 @@ namespace SSH_Helper.Services
                     continue;
 
                 var host = HostConnection.Parse(hostIp);
-
-                // Apply per-row overrides from columns
-                if (!TryGetExplicitPortFromHostValue(hostIp, out _) &&
-                    TryGetRowValue(row, "port", out var portStr)
-                    && int.TryParse(portStr, out var port)
-                    && port > 0 && port <= 65535)
-                {
-                    host.Port = port;
-                }
 
                 var rowHasVaultPath = TryGetRowValue(row, "vault_path", out var vaultPath)
                     && !string.IsNullOrWhiteSpace(vaultPath);
@@ -531,11 +525,8 @@ namespace SSH_Helper.Services
                         host.Password = pass;
                 }
 
-                // Copy all row columns as variables for {{variable}} substitution
-                foreach (var kvp in row)
-                {
-                    host.Variables[kvp.Key] = kvp.Value;
-                }
+                ConnectionPortPolicyService.Apply(host, row, environment,
+                    sshConfigEnabled ? sshConfigService.GetHostConfig(host.IpAddress) : null);
 
                 hosts.Add(host);
             }

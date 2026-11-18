@@ -105,6 +105,8 @@ namespace SSH_Helper.Services.Editor
 
         private static readonly string[] IntoDerivedSuffixes =
         [
+            "_port",
+            "_latency",
             "_status",
             "_headers",
             "_count",

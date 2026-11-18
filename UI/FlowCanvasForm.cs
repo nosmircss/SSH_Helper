@@ -312,6 +312,7 @@ namespace SSH_Helper.UI
         /// <summary>
         /// Sends the target host data to the React Host Bar.
         /// Pass null to indicate no valid host is available.
+        /// variables["port"] is the selected raw scalar/list policy; numeric port is compatibility only.
         /// </summary>
         public void SetTargetHost(object? hostData)
         {

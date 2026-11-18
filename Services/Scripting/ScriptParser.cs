@@ -129,7 +129,7 @@ namespace SSH_Helper.Services.Scripting
                 ["browser_callback_capture"] = ["start_url", "callback_path", "local_port", "capture_mode", "browser_mode", "show_after_seconds", "into", "required_fields", "timeout", "open_browser", "auto_close_browser", "completion_message", "failure_message", "quiet", "on_error"],
                 ["ping"] = ["host", "count", "timeout", "into", "on_error"],
                 ["dns"] = ["host", "type", "timeout", "into", "on_error"],
-                ["portcheck"] = ["host", "port", "timeout", "into", "on_error"],
+                ["portcheck"] = ["host", "port", "ports", "mode", "timeout", "into", "on_error"],
                 ["sftp"] = ["action", "local_path", "remote_path", "host", "port", "username", "password", "overwrite", "timeout", "into", "on_error"],
                 ["webhook"] = ["url", "method", "body", "headers", "into", "timeout", "on_error"],
                 ["parse"] = ["format", "from", "into", "sections"],
@@ -3220,12 +3220,45 @@ namespace SSH_Helper.Services.Scripting
                             options.Host = parser.Consume<Scalar>().Value;
                             break;
                         case "port":
+                            options.HasExplicitPort = true;
                             if (int.TryParse(parser.Consume<Scalar>().Value, out var port))
                                 options.Port = port;
+                            else
+                                AddStepParseError(step, "portcheck.port must be an integer");
+                            break;
+                        case "ports":
+                            if (parser.Accept<SequenceStart>(out _))
+                            {
+                                options.Ports = new List<string>();
+                                parser.Consume<SequenceStart>();
+                                while (!parser.Accept<SequenceEnd>(out _))
+                                {
+                                    if (parser.Accept<Scalar>(out _))
+                                        options.Ports.Add(parser.Consume<Scalar>().Value);
+                                    else
+                                    {
+                                        AddStepParseError(step, "portcheck.ports must contain only port values");
+                                        SkipValue(parser);
+                                    }
+                                }
+                                parser.Consume<SequenceEnd>();
+                            }
+                            else if (parser.Accept<Scalar>(out _))
+                                options.PortsFrom = parser.Consume<Scalar>().Value;
+                            else
+                            {
+                                AddStepParseError(step, "portcheck.ports must be a list or runtime variable");
+                                SkipValue(parser);
+                            }
+                            break;
+                        case "mode":
+                            options.Mode = parser.Consume<Scalar>().Value.ToLowerInvariant();
                             break;
                         case "timeout":
                             if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
                                 options.Timeout = timeout;
+                            else
+                                AddStepParseError(step, "portcheck.timeout must be an integer");
                             break;
                         case "into":
                             options.Into = parser.Consume<Scalar>().Value;
@@ -4349,7 +4382,7 @@ namespace SSH_Helper.Services.Scripting
                         $"{prefix}Line {step.LineNumber}: {stepType.ToString().ToLowerInvariant()} is not allowed in preconnect because it requires an active SSH session{lineContent}");
                 }
 
-                if ((enforceCanonicalSyntax || stepType == StepType.Interactive) && step.ParseErrors.Count > 0)
+                if ((enforceCanonicalSyntax || stepType is StepType.Interactive or StepType.Portcheck) && step.ParseErrors.Count > 0)
                 {
                     var lineContent = GetLineContent(lines, step.LineNumber);
                     foreach (var parseError in step.ParseErrors)
@@ -4909,6 +4942,21 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Portcheck requires 'host'{lineContent}");
+                        }
+                        if (step.Portcheck is { } portcheck)
+                        {
+                            var portError = Commands.PortcheckCommand.ValidateOptions(portcheck);
+                            if (portError != null)
+                                errors.Add($"{prefix}Line {step.LineNumber}: {portError}{GetLineContent(lines, step.LineNumber)}");
+                            if (portcheck.Ports != null)
+                            {
+                                foreach (var candidate in portcheck.Ports)
+                                {
+                                    if (!IsDynamicValue(candidate) &&
+                                        (!int.TryParse(candidate, out var number) || !Utilities.InputValidator.IsValidPort(number)))
+                                        errors.Add($"{prefix}Line {step.LineNumber}: Portcheck invalid port '{candidate}' (expected 1..65535)");
+                                }
+                            }
                         }
                         break;
 

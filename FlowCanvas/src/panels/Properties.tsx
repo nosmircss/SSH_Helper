@@ -1656,6 +1656,9 @@ export default function Properties() {
   const visibleSections = propertySections.filter((section) => groupedProperties[section.key].length > 0);
 
   const renderProperty = (propDef: PropertyDef) => {
+    if (blockData.blockType === 'portcheck' && propDef.key === 'port' && hasAnyValue(blockData.props?.ports)) {
+      return null;
+    }
     const fieldTestId = `properties-field-${propDef.key}-${propDef.type}`;
     const fieldValue = resolveDisplayedPropertyValue(blockData.blockType, propDef, blockData.props);
     const required = isPropertyRequired(blockData.blockType, propDef, blockData.props);

@@ -16,6 +16,34 @@ namespace SSH_Helper.Tests.Services;
 
 public class FlowCanvasBridgeTests
 {
+    [Theory]
+    [InlineData("[2222, 22]")]
+    [InlineData("\"${candidate_ports}\"")]
+    public void PortDiscovery_ForcedGraphExport_PreservesCandidatesWithoutDefaultPort(string ports)
+    {
+        var bridge = new FlowCanvasBridge();
+        var (nodes, edges) = bridge.TextToGraph($$"""
+            steps:
+              - portcheck:
+                  host: localhost
+                  ports: {{ports}}
+                  mode: ssh
+                  into: found
+            """);
+        var props = (JObject)nodes.First(n => n["data"]?["blockType"]?.ToString() == "portcheck")["data"]!["props"]!;
+        Assert.Null(props["port"]);
+        Assert.NotNull(props["ports"]);
+        props["_forceGraphExport"] = true;
+        props["timeout"] = 2;
+        var export = bridge.ExportGraphToYaml(new JObject { ["nodes"] = nodes, ["edges"] = edges });
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        var parser = new ScriptParser();
+        var script = parser.Parse(export.Yaml);
+        Assert.Empty(parser.Validate(script, export.Yaml, enforceCanonicalSyntax: true));
+        Assert.Equal("ssh", script.Steps[0].Portcheck!.Mode);
+        Assert.Equal(2, script.Steps[0].Portcheck!.Timeout);
+    }
+
     [Fact]
     public void TextToGraph_VaultStep_ImportsAsVaultBlock_WithPreviewAndExtractedProps()
     {

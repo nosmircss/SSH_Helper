@@ -83,6 +83,7 @@ namespace SSH_Helper.Services
         private const string PreconnectIdentityPassphraseVariable = "_ssh_identity_passphrase";
         private const string PreconnectUsernameVariable = "_ssh_username";
         private const string PreconnectPasswordVariable = "_ssh_password";
+        private const string PreconnectPortVariable = "_ssh_port";
 
         private static readonly Regex SensitiveSetOutputRegex = new(
             @"(?im)(Set\s+(_ssh_password|_ssh_identity_passphrase)\s*=\s*).*?$",
@@ -149,7 +150,7 @@ namespace SSH_Helper.Services
 
         private sealed class EffectiveScriptAuthContext
         {
-            public HostConnection Host { get; init; } = new();
+            public HostConnection Host { get; set; } = new();
             public string Username { get; init; } = string.Empty;
             public string Password { get; init; } = string.Empty;
             public ScriptContext? Context { get; init; }
@@ -208,6 +209,19 @@ namespace SSH_Helper.Services
         /// When enabled, connections are reused for subsequent executions.
         /// </summary>
         public bool UseConnectionPooling { get; set; }
+        internal ConnectionPortResolver PortResolver { get; set; } = new();
+        internal Action<HostConnection>? BeforeConnectionForTesting { get; set; }
+
+        private HostConnection ResolveConnectionPort(HostConnection host, string? portOverride,
+            StringBuilder output, CancellationToken token, bool? debugEnabledOverride = null) =>
+            PortResolver.ResolveAsync(host, portOverride, message =>
+            {
+                if (!(debugEnabledOverride ?? DebugMode))
+                    return;
+                var line = message + Environment.NewLine;
+                output.Append(line);
+                OnOutputReceived(host, line);
+            }, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Optional VaultService for resolving vault:// variable references during script execution.
@@ -1200,6 +1214,8 @@ namespace SSH_Helper.Services
 
             try
             {
+                host = ResolveConnectionPort(host, null, outputBuilder, cancellationToken);
+                BeforeConnectionForTesting?.Invoke(host);
                 if (UseConnectionPooling && _connectionPool != null)
                 {
                     SshDebugLog(host, "HOST", "Calling ExecuteWithPool", sw);
@@ -1313,6 +1329,14 @@ namespace SSH_Helper.Services
                     cancellationToken,
                     allowFileSelectionDialogs,
                     effectiveDebugMode);
+
+                if (sshRequirement == null || sshRequirement.RequiresSshSession)
+                {
+                    effectiveAuth.Host = ResolveConnectionPort(effectiveAuth.Host, null, outputBuilder, cancellationToken, effectiveDebugMode);
+                    if (effectiveAuth.Context != null)
+                        effectiveAuth.Context.SetVariable("port", effectiveAuth.Host.Variables["port"]);
+                    BeforeConnectionForTesting?.Invoke(effectiveAuth.Host);
+                }
 
                 if (sshRequirement != null && !sshRequirement.RequiresSshSession)
                 {
@@ -1768,6 +1792,7 @@ namespace SSH_Helper.Services
             bool allowFileSelectionDialogs)
         {
             context.DebugMode = effectiveDebugMode;
+            context.PortResolver = PortResolver;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
             context.VaultService = VaultService;
             context.NotificationService = NotificationService;
@@ -1925,21 +1950,18 @@ namespace SSH_Helper.Services
                 OnOutputReceived(host, FormatScriptOutput($"Preconnect completed for {host}", ScriptOutputType.Info));
             }
 
-            var effectiveHost = new HostConnection
-            {
-                IpAddress = host.IpAddress,
-                Port = host.Port,
-                Username = host.Username,
-                Password = host.Password,
-                IdentityFile = host.IdentityFile,
-                IdentityFilePassphrase = host.IdentityFilePassphrase,
-                HostKeyAlgorithms = host.HostKeyAlgorithms,
-                Ciphers = host.Ciphers,
-                Variables = BuildEffectiveHostVariables(host, context)
-            };
+            var effectiveHost = host.CloneForRun();
+            effectiveHost.Variables = BuildEffectiveHostVariables(host, context);
 
             var effectiveUsername = baseUsername;
             var effectivePassword = basePassword;
+
+            if (context.HasVariable(PreconnectPortVariable))
+            {
+                effectiveHost = ResolveConnectionPort(effectiveHost,
+                    context.GetVariableString(PreconnectPortVariable), outputBuilder, cancellationToken, effectiveDebugMode);
+                context.SetVariable("port", effectiveHost.Variables["port"]);
+            }
 
             if (context.HasVariable(PreconnectUsernameVariable))
             {
@@ -2013,6 +2035,8 @@ namespace SSH_Helper.Services
             SshTimeoutOptions? timeouts)
         {
             context.CurrentHost = host;
+            if (host.IsPortResolvedForRun)
+                context.SetVariable("port", host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
             context.ResolvedUsername = username;
             context.ResolvedPassword = password;
             context.Timeouts = timeouts;
@@ -2300,6 +2324,7 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Tests TCP reachability of a host by opening and closing a TCP connection.
         /// Uses a lightweight port check rather than SSH auth since hosts may not be SSH servers.
+        /// Discovery policies are resolved first using their configured unauthenticated probe mode.
         /// </summary>
         public async Task<Models.ConnectionTestResult> TestConnectionAsync(
             Models.HostConnection host, int timeoutMs, CancellationToken ct)
@@ -2307,6 +2332,12 @@ namespace SSH_Helper.Services
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
+                host = await PortResolver.ResolveAsync(host, null,
+                    message =>
+                    {
+                        if (DebugMode)
+                            OnOutputReceived(host, message + Environment.NewLine);
+                    }, ct);
                 using var tcpClient = new System.Net.Sockets.TcpClient();
                 var connectTask = tcpClient.ConnectAsync(host.IpAddress, host.Port);
                 var timeoutTask = Task.Delay(timeoutMs, ct);
@@ -2513,7 +2544,7 @@ namespace SSH_Helper.Services
             }
         }
 
-        private static bool ShouldRetryWithAlgorithmFallback(HostConnection host, Exception ex)
+        internal static bool ShouldRetryWithAlgorithmFallback(HostConnection host, Exception ex)
         {
             // Respect explicit user/ssh-config host key settings and only auto-fallback when none were configured.
             if (host.HostKeyAlgorithms is { Length: > 0 })
@@ -2522,7 +2553,7 @@ namespace SSH_Helper.Services
             return HasUnsupportedKeyAlgorithmError(ex);
         }
 
-        private static bool TrySetSshParameterAlgorithms(object sshParameters, string methodName, string[] algorithms)
+        internal static bool TrySetSshParameterAlgorithms(object sshParameters, string methodName, string[] algorithms)
         {
             var method = sshParameters
                 .GetType()
@@ -2687,7 +2718,7 @@ namespace SSH_Helper.Services
         {
             ProgressChanged?.Invoke(this, new SshProgressEventArgs
             {
-                Host = host,
+                Host = host.EventHost,
                 Message = message,
                 IsError = isError,
                 IsConnected = isConnected
@@ -2698,7 +2729,7 @@ namespace SSH_Helper.Services
         {
             OutputReceived?.Invoke(this, new SshOutputEventArgs
             {
-                Host = host,
+                Host = host.EventHost,
                 Output = output
             });
         }
@@ -2788,7 +2819,7 @@ namespace SSH_Helper.Services
         {
             ColumnUpdateRequested?.Invoke(this, new SshColumnUpdateEventArgs
             {
-                Host = host,
+                Host = host.EventHost,
                 ColumnName = columnName,
                 Value = value
             });
@@ -2798,7 +2829,7 @@ namespace SSH_Helper.Services
         {
             EnvironmentVariableUpdateRequested?.Invoke(this, new SshEnvironmentVariableUpdateEventArgs
             {
-                Host = host,
+                Host = host.EventHost,
                 Variable = variable,
                 Value = value
             });
@@ -2808,7 +2839,7 @@ namespace SSH_Helper.Services
         {
             CommandCompleted?.Invoke(this, new SshCommandCompletedEventArgs
             {
-                Host = host,
+                Host = host.EventHost,
                 Command = command
             });
         }
@@ -2835,7 +2866,7 @@ namespace SSH_Helper.Services
         /// Applies SSH algorithm preferences from the host connection settings.
         /// These settings typically come from the SSH config file.
         /// </summary>
-        private static void ApplyAlgorithmSettings(Ssh client, HostConnection host)
+        internal static void ApplyAlgorithmSettings(Ssh client, HostConnection host)
         {
             // Apply host key algorithms if specified
             // Rebex accepts OpenSSH-style algorithm IDs directly

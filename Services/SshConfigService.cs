@@ -73,7 +73,7 @@ namespace SSH_Helper.Services
         /// Gets the resolved SSH configuration for a specific host.
         /// Returns null if no matching configuration is found.
         /// </summary>
-        public SshHostConfig? GetHostConfig(string hostname, string? configPath = null)
+        public virtual SshHostConfig? GetHostConfig(string hostname, string? configPath = null)
         {
             var config = LoadConfig(configPath);
             if (config == null)

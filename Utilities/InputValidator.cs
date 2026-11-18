@@ -7,6 +7,29 @@ namespace SSH_Helper.Utilities
     /// </summary>
     public static class InputValidator
     {
+        public static bool TryParsePortCandidates(string value, out IReadOnlyList<int> ports, out string? error)
+        {
+            var parsed = new List<int>();
+            foreach (var token in value.Split(','))
+            {
+                if (!int.TryParse(token.Trim(), System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out var port) || !IsValidPort(port))
+                {
+                    ports = Array.Empty<int>();
+                    error = $"Invalid port token '{token}' in '{value}'; expected an integer from 1 to 65535";
+                    return false;
+                }
+                parsed.Add(port);
+            }
+            ports = parsed;
+            error = null;
+            return true;
+        }
+
+        public static bool TryParsePortCheckTimeout(string value, out int seconds) =>
+            int.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out seconds) && seconds is >= 1 and <= 2147483;
+
         /// <summary>
         /// Validates an IP address string (with optional port).
         /// </summary>

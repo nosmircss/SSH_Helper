@@ -94,6 +94,7 @@ namespace SSH_Helper.Services.Scripting
     /// </summary>
     public class ScriptContext
     {
+        internal ConnectionPortResolver PortResolver { get; set; } = new();
         private const string TimestampFormat = "yyyy-MM-dd HH:mm:ss";
         private static readonly Regex ArrayExpressionRegex = new(@"^(\w+)\[([^\]]+)\]$", RegexOptions.Compiled);
         private readonly Dictionary<string, object?> _variables;
@@ -112,6 +113,7 @@ namespace SSH_Helper.Services.Scripting
             public string LastCommandOutput { get; set; } = string.Empty;
             public SshShellSession? Session { get; set; }
             public HostConnection? CurrentHost { get; set; }
+            public Task<HostConnection>? ConnectionPortResolution { get; set; }
             public string? ResolvedUsername { get; set; }
             public string? ResolvedPassword { get; set; }
             public string? HistoryLabel { get; set; }
@@ -170,8 +172,68 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public HostConnection? CurrentHost
         {
-            get => _sharedState.CurrentHost;
-            set => _sharedState.CurrentHost = value;
+            get { lock (_sharedState.StateLock) return _sharedState.CurrentHost; }
+            set
+            {
+                lock (_sharedState.StateLock)
+                {
+                    if (ReferenceEquals(_sharedState.CurrentHost, value)) return;
+                    _sharedState.CurrentHost = value;
+                    _sharedState.ConnectionPortResolution = null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Shares one lazy connection selection across this run's parallel steps and call scopes.
+        /// The first operation owns discovery cancellation (parallel steps use the run token).
+        /// Other callers may cancel their wait without cancelling that operation. Failure/cancellation
+        /// is shared for this run, not retried by another waiting step or cached across runs.
+        /// </summary>
+        internal Task<HostConnection> ResolveCurrentHostAsync(ConnectionPortResolver resolver, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            HostConnection original;
+            Task<HostConnection> resolution;
+            TaskCompletionSource<HostConnection>? start = null;
+            lock (_sharedState.StateLock)
+            {
+                original = _sharedState.CurrentHost ??
+                    throw new InvalidOperationException("Current host connection details are required");
+                if (original.IsPortResolvedForRun) return Task.FromResult(original);
+                if (_sharedState.ConnectionPortResolution == null)
+                {
+                    start = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _sharedState.ConnectionPortResolution = start.Task;
+                }
+                resolution = _sharedState.ConnectionPortResolution;
+            }
+
+            // Reserve the shared task before invoking the resolver: reporting can re-enter context.
+            if (start != null)
+                _ = CompleteConnectionPortResolutionAsync(original, resolver, start, token);
+            return resolution.WaitAsync(token);
+        }
+
+        private async Task CompleteConnectionPortResolutionAsync(HostConnection original, ConnectionPortResolver resolver,
+            TaskCompletionSource<HostConnection> completion, CancellationToken token)
+        {
+            try
+            {
+                var effective = await resolver.ResolveAsync(original, null,
+                    message => EmitOutput(message, ScriptOutputType.Debug), token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                lock (_sharedState.StateLock)
+                {
+                    if (!ReferenceEquals(_sharedState.CurrentHost, original))
+                        throw new InvalidOperationException("Current host changed during connection port resolution");
+                    // Publish host and its runtime-port view together, without invalidating the shared task.
+                    _sharedState.CurrentHost = effective;
+                }
+                completion.TrySetResult(effective);
+            }
+            catch (OperationCanceledException ex) { completion.TrySetCanceled(ex.CancellationToken); }
+            catch (Exception ex) { completion.TrySetException(ex); }
         }
 
         /// <summary>
@@ -549,6 +611,11 @@ namespace SSH_Helper.Services.Scripting
 
             lock (_sharedState.StateLock)
             {
+                // Once connected, port is shared connection-runtime state, not a subroutine local.
+                // Before selection the original raw variable remains available to preconnect.
+                if (string.Equals(name, "port", StringComparison.OrdinalIgnoreCase) &&
+                    _sharedState.CurrentHost is { IsPortResolvedForRun: true } host)
+                    return host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 return _variables.TryGetValue(name, out var value) ? value : null;
             }
         }
@@ -585,6 +652,9 @@ namespace SSH_Helper.Services.Scripting
 
             lock (_sharedState.StateLock)
             {
+                if (string.Equals(name, "port", StringComparison.OrdinalIgnoreCase) &&
+                    _sharedState.CurrentHost is { IsPortResolvedForRun: true })
+                    return true;
                 return _variables.ContainsKey(name);
             }
         }
@@ -609,6 +679,8 @@ namespace SSH_Helper.Services.Scripting
             lock (_sharedState.StateLock)
             {
                 snapshot = new Dictionary<string, object?>(_variables, StringComparer.OrdinalIgnoreCase);
+                if (_sharedState.CurrentHost is { IsPortResolvedForRun: true } host)
+                    snapshot["port"] = host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
 
             snapshot["_timestamp"] = DateTime.Now.ToString(TimestampFormat);
@@ -1023,7 +1095,8 @@ namespace SSH_Helper.Services.Scripting
                 SubroutineRegistry = SubroutineRegistry,
                 CurrentSubroutine = currentSubroutine,
                 CallDepth = CallDepth + 1,
-                LoopDepth = 0
+                LoopDepth = 0,
+                PortResolver = PortResolver
             };
 
             if (initialVariables != null)

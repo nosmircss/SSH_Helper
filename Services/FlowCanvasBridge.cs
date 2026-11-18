@@ -2958,8 +2958,16 @@ namespace SSH_Helper.Services
                     if (step.Portcheck != null)
                     {
                         SetIfNotNull(props, "host", step.Portcheck.Host);
-                        props["port"] = step.Portcheck.Port;
-                        props["target"] = $"{step.Portcheck.Host}:{step.Portcheck.Port}"; // legacy UI field support
+                        if (step.Portcheck.Ports != null)
+                            props["ports"] = JArray.FromObject(step.Portcheck.Ports);
+                        else if (step.Portcheck.PortsFrom != null)
+                            props["ports"] = step.Portcheck.PortsFrom;
+                        else
+                        {
+                            props["port"] = step.Portcheck.Port;
+                            props["target"] = $"{step.Portcheck.Host}:{step.Portcheck.Port}"; // legacy UI field support
+                        }
+                        if (step.Portcheck.Mode != "tcp") props["mode"] = step.Portcheck.Mode;
                         if (step.Portcheck.Timeout != 5) props["timeout"] = step.Portcheck.Timeout;
                         SetIfNotNull(props, "into", step.Portcheck.Into);
                     }
@@ -3350,6 +3358,20 @@ namespace SSH_Helper.Services
             out string? error)
         {
             error = null;
+
+            if (string.Equals(commandKey, "portcheck", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.Equals(propName, "ports", StringComparison.OrdinalIgnoreCase) &&
+                    propValue.Type != JTokenType.Null && !string.IsNullOrWhiteSpace(propValue.ToString()))
+                {
+                    options.Remove("port");
+                }
+                else if (string.Equals(propName, "port", StringComparison.OrdinalIgnoreCase) &&
+                    propValue.Type != JTokenType.Null)
+                {
+                    options.Remove("ports");
+                }
+            }
 
             if (string.Equals(commandKey, "send", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(propName, "delay", StringComparison.OrdinalIgnoreCase))

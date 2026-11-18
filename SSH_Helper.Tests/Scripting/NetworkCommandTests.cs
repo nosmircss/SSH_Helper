@@ -18,6 +18,187 @@ namespace SSH_Helper.Tests.Scripting;
 
 public class NetworkCommandTests
 {
+    private sealed class LicensedSshTheoryAttribute : TheoryAttribute
+    {
+        public LicensedSshTheoryAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REBEX_LICENSE_KEY")))
+                Skip = "Requires REBEX_LICENSE_KEY for real Rebex handshake integration.";
+        }
+    }
+
+    [LicensedSshTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PortcheckCommand_SshProbe_RequiresMoreThanBannerAndHonorsDeadline(bool cancel)
+    {
+        Rebex.Licensing.Key = Environment.GetEnvironmentVariable("REBEX_LICENSE_KEY");
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using var cts = new CancellationTokenSource();
+        var step = new ScriptParser().Parse($$"""
+            steps:
+              - portcheck:
+                  host: 127.0.0.1
+                  port: {{port}}
+                  mode: ssh
+                  timeout: 1
+                  into: found
+                  on_error: continue
+            """).Steps[0];
+        var context = new ScriptContext();
+        var check = new PortcheckCommand().ExecuteAsync(step, context, cts.Token);
+        var accept = listener.AcceptTcpClientAsync();
+        if (await Task.WhenAny(accept, check) == check)
+            Assert.Fail($"Probe ended before connecting: {(await check).Message}");
+        using var peer = await accept.WaitAsync(TimeSpan.FromSeconds(5));
+        await peer.GetStream().WriteAsync(Encoding.ASCII.GetBytes("SSH-2.0-TestServer\r\n"));
+        if (cancel)
+        {
+            cts.Cancel();
+            await ((Func<Task>)(async () => await check)).Should().ThrowAsync<OperationCanceledException>();
+        }
+        else
+        {
+            var result = await check.WaitAsync(TimeSpan.FromSeconds(5));
+            result.SuppressedError.Should().BeTrue();
+            context.GetVariableString("found").Should().Be("timeout");
+        }
+        context.GetVariableString("found_port").Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("[1, '${available}']")]
+    [InlineData("\"${candidates}\"")]
+    [InlineData("candidates")]
+    public async Task PortcheckCommand_Candidates_SelectsOpenPort(string ports)
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var context = new ScriptContext();
+        context.SetVariable("available", port);
+        context.SetVariable("candidates", $"1, {port}");
+        var step = new ScriptParser().Parse($$"""
+            steps:
+              - portcheck:
+                  host: 127.0.0.1
+                  ports: {{ports}}
+                  into: found
+            """).Steps[0];
+
+        var result = await new PortcheckCommand().ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("found").Should().Be("open");
+        context.GetVariableString("found_port").Should().Be(port.ToString());
+    }
+
+    [Fact]
+    public async Task PortcheckCommand_RuntimeList_ValidatesAllCandidatesAndClearsStalePort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var context = new ScriptContext();
+        context.SetVariable("candidates", new List<string> { port.ToString(), "invalid" });
+        context.SetVariable("found_port", "2222");
+        var step = new ScriptParser().Parse("""
+            steps:
+              - portcheck:
+                  host: 127.0.0.1
+                  ports: candidates
+                  into: found
+            """).Steps[0];
+
+        var result = await new PortcheckCommand().ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain("invalid");
+        context.GetVariableString("found_port").Should().BeEmpty();
+        listener.Pending().Should().BeFalse("all inputs must be validated before attempting even an open candidate");
+    }
+
+    [Fact]
+    public async Task PortcheckCommand_Candidates_StopsAtFirstOpenPort()
+    {
+        using var first = new TcpListener(IPAddress.Loopback, 0);
+        using var second = new TcpListener(IPAddress.Loopback, 0);
+        first.Start();
+        second.Start();
+        var port = ((IPEndPoint)first.LocalEndpoint).Port;
+        var other = ((IPEndPoint)second.LocalEndpoint).Port;
+        var context = new ScriptContext();
+        var step = new ScriptParser().Parse($$"""
+            steps:
+              - portcheck:
+                  host: 127.0.0.1
+                  ports: [{{port}}, {{other}}]
+                  into: found
+            """).Steps[0];
+
+        var result = await new PortcheckCommand().ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("found_port").Should().Be(port.ToString());
+        second.Pending().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task PortcheckCommand_NoMatchingCandidates_ReportsEachPortAndClearsSelection()
+    {
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        var port = ((IPEndPoint)socket.LocalEndPoint!).Port;
+        var context = new ScriptContext();
+        context.SetVariable("found_port", "2222");
+        var step = new ScriptParser().Parse($$"""
+            steps:
+              - portcheck:
+                  host: 127.0.0.1
+                  ports: [{{port}}, {{port}}]
+                  into: found
+            """).Steps[0];
+        var result = await new PortcheckCommand().ExecuteAsync(step, context, CancellationToken.None);
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain("127.0.0.1").And.Contain($"{port}:");
+        context.GetVariableString("found_port").Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("22,,2222")]
+    [InlineData("0")]
+    [InlineData("22,65536")]
+    public async Task PortcheckCommand_InvalidRuntimeCandidates_Fails(string candidates)
+    {
+        var context = new ScriptContext();
+        context.SetVariable("candidates", candidates);
+        var step = new ScriptParser().Parse("""
+            steps:
+              - portcheck:
+                  host: localhost
+                  ports: candidates
+            """).Steps[0];
+        var result = await new PortcheckCommand().ExecuteAsync(step, context, CancellationToken.None);
+        result.Success.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task PortcheckCommand_Cancelled_DoesNotSuppressCancellation()
+    {
+        var step = new ScriptStep
+        {
+            Portcheck = new PortcheckOptions { Host = "localhost" },
+            OnError = "continue"
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var action = () => new PortcheckCommand().ExecuteAsync(step, new ScriptContext(), cts.Token);
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     [Fact]
     public async Task HttpCommand_Non2xx_AllowFailureTrue_DoesNotFailStep()
     {

@@ -200,9 +200,10 @@ namespace SSH_Helper
 
             var lblVariables = new Label
             {
-                Text = "Environment Variables",
+                Text = "Environment Variables\r\n" + ConnectionPortPolicyService.HelpText,
                 Dock = DockStyle.Top,
-                AutoSize = true,
+                AutoSize = false,
+                Height = 90,
                 Padding = new Padding(0, 0, 0, 6)
             };
 

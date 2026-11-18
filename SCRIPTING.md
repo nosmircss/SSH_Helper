@@ -1,5 +1,29 @@
 ﻿# SSH Helper Scripting Language Documentation
 
+## Automatic connection ports versus YAML portcheck
+
+Ordinary connections can use the existing environment/grid `port` variable:
+`22,222,2222` is an ordered discovery list; a single number is fixed and blank
+row values inherit environment defaults. `Host_IP:port` overrides both, including
+explicit `:22`. Existing row `port=22` remains fixed, not automatic.
+`port_check` selects `ssh` (default, unauthenticated handshake) or `tcp`.
+`port_check_timeout` is integer seconds per candidate, default **2**, range
+1–2147483. These settings independently inherit blank row cells and apply only
+to lists. Candidates are fully validated before probing; exhaustion never adds
+an implicit port and authentication failure never advances to another candidate.
+
+Preconnect finishes first and sees the original raw `${port}` list. A valid
+`_ssh_port` it produces overrides automatic policy without probing lower-priority
+lists (even malformed ones). Invalid `_ssh_port` fails explicitly. After selection,
+`${port}` and the current-host endpoint contain the actual port for this run;
+source rows and environment variables are never rewritten. Local-only scripts
+do not auto-probe; default-host SFTP resolves lazily and reuses an active selection.
+Explicit SFTP host/port options remain independent.
+
+The opt-in YAML `portcheck` command is unchanged: default mode **tcp**, default
+timeout **5 seconds**, with its existing captures and error behavior. Its transport
+is shared with automatic discovery, but its defaults are intentionally different.
+
 SSH Helper supports a powerful YAML-based scripting language for automating complex SSH workflows. This document provides complete reference documentation for all scripting features.
 
 ## Table of Contents
@@ -117,7 +141,8 @@ steps:                           # Required: list of execution steps
 Executable scripts may also declare `imports:` and `subroutines:`. Library files set `library: true` and may contain `subroutines:` only; they are meant to be imported, not executed directly.
 
 `preconnect:` runs once per host before SSH authentication and is intended for local bootstrap work (for example issuing short-lived certs/credentials).
-Supported SSH override variables set from preconnect are `_ssh_identity_file`, `_ssh_identity_passphrase`, `_ssh_username`, and `_ssh_password`.
+Supported SSH override variables set from preconnect are `_ssh_identity_file`, `_ssh_identity_passphrase`, `_ssh_username`, `_ssh_password`, and `_ssh_port`.
+`_ssh_port` must resolve to an integer from 1 through 65535. It changes the effective connection and `${port}` for this run only; it does not modify the saved host grid.
 Commands that require an active SSH shell (such as `send` and `interactive`) are not allowed inside `preconnect`.
 
 ### Auto-Detection
@@ -3496,7 +3521,7 @@ This enables safe indexing/length checks:
 
 ### portcheck - TCP Port Checks
 
-Checks TCP reachability for a host/port.
+Checks TCP reachability or completes an SSH handshake without authentication. With multiple candidates, checks them in the supplied order and stops at the first qualifying port.
 
 **Syntax:**
 ```yaml
@@ -3509,18 +3534,47 @@ Checks TCP reachability for a host/port.
 
 **Defaults:**
 - `port: 22`
+- `mode: tcp` (`ssh` completes SSH version/key exchange, not merely a banner read; no credentials are sent)
 - `timeout: 5` (seconds)
 - Required field: `host` (port is optional and defaults to `22`).
+- Specify either `port` or `ports`, not both.
+- `ports` accepts a YAML list, a runtime list variable, or comma-separated text from a variable/grid column. Bare variable names, `${variable}`, and `{{variable}}` are supported. Literal comma-separated text is also accepted.
+- All candidate values are validated before probing. Empty lists/items, non-integers, and ports outside `1..65535` fail explicitly.
+- Timeout applies separately to each candidate, including all SSH algorithm fallback attempts for that candidate. Cancellation stops discovery.
+- If no candidate qualifies, the step fails with per-port diagnostics. Existing `on_error: continue` can explicitly suppress failure.
+- SSH probing uses the current host's configured SSH algorithms and the application's compatibility fallbacks. It requires the same Rebex license as normal SSH connections. A successful handshake does not prove credentials will authenticate or establish server identity.
 
 **Capture Variables:**
 - `${into}`: `open`, `closed`, or `timeout`
 - `${into}_latency`: connection latency in ms when available (empty on timeout)
+- `${into}_port`: selected port on success; empty on failure. Existing status captures retain their meaning.
+
+**Discover and use an SSH port in the same run:**
+```yaml
+---
+preconnect:
+  - portcheck:
+      host: "${Host_IP}"
+      ports: [22, 222, 2222]       # Any user-defined ordered port list
+      mode: ssh                   # Use tcp for an open-port test instead
+      timeout: 5
+      into: discovered
+  - set: _ssh_port = discovered_port
+steps:
+  - send: hostname
+```
+
+To supply candidates dynamically, replace the `ports` line with `ports: "${candidate_ports}"`.
+Declare `candidate_ports` in `vars` as a YAML list, set it in an earlier step, or add a host-grid column named `candidate_ports` containing text such as `22,222,2222`.
+Discovery does not change saved host/grid values. Later authentication failures do not restart port discovery.
 
 ---
 
 ### sftp - SFTP Upload and Download
 
 Transfers files using SFTP (SSH.NET backend).
+
+**Compatibility:** SFTP does not support legacy DSA (`ssh-dss`) keys. Servers must offer another supported host key, such as Ed25519, ECDSA, or RSA. This does not change the separate Rebex-backed SSH shell and terminal connections.
 
 **Syntax:**
 ```yaml

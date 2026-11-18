@@ -650,10 +650,15 @@ namespace SSH_Helper.Services.Scripting
                         if (step.Portcheck != null)
                         {
                             ExtractVarReferences(step.Portcheck.Host, referencedVars);
+                            AnalyzeChoiceOptionsSourceReference(step.Portcheck.PortsFrom, referencedVars);
+                            if (step.Portcheck.Ports != null)
+                                foreach (var candidate in step.Portcheck.Ports)
+                                    ExtractVarReferences(candidate, referencedVars);
                             if (!string.IsNullOrWhiteSpace(step.Portcheck.Into))
                             {
                                 definedVars.Add(step.Portcheck.Into);
                                 definedVars.Add(step.Portcheck.Into + "_latency");
+                                definedVars.Add(step.Portcheck.Into + "_port");
                             }
                         }
                         break;

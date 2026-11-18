@@ -1,5 +1,42 @@
 # SSH Helper
 
+## Automatic SSH port discovery
+
+Set environment variable `port=22,222,2222` and leave the row's optional `port`
+cell blank to check those ports in order. A scalar is a fixed port and never
+probes; existing row `22` cells remain fixed **22** until you clear them.
+
+| Environment `port` | Row `port` | `Host_IP` | Selected policy |
+|---|---|---|---|
+| `22,222,2222` | blank | `router` | Discover 22 → 222 → 2222 |
+| `22,222,2222` | `22` | `router` | Fixed 22 |
+| `22,222,2222` | `2200,2222` | `router` | Discover 2200 → 2222 |
+| `2222` | whitespace | `router` | Fixed 2222 |
+| blank | blank | `router` | SSH-config port when enabled, otherwise 22 |
+| `bad,list` | `also,bad` | `router:22` | Fixed 22; lower policies ignored |
+
+`port_check=ssh` (default) checks version exchange and cryptographic negotiation
+without authentication. Use `port_check=tcp` for socket-only checks.
+`port_check_timeout` is integer seconds **per candidate**, default **2**, with
+range 1–2147483. Each option independently inherits environment defaults when
+its row cell is blank. Options are only validated for discovery lists.
+
+The entire selected list is validated before network access; empty tokens,
+invalid numbers and out-of-range ports fail explicitly. Order and duplicates
+are preserved. Each new connection intent starts at the first candidate,
+even with a warm pool; pool reuse happens only after selection. Each candidate
+has one deadline across algorithm fallback tiers. A candidate timeout continues
+to the next port; cancelling the run stops discovery. Exhaustion never adds 22.
+Discovery progress and selected-endpoint messages appear only in debug mode;
+failures remain visible with debug disabled.
+Authentication or connection failure after selection does not try another port.
+
+Manual runs, scheduled jobs, in-app separate terminals and default-current-host
+SFTP use the same policy. Jobs snapshot the active environment at run start.
+Local-only scripts do not probe. Selected ports are runtime-only: saved rows,
+environments, job definitions and credential keys are unchanged. There is no
+persistent winner cache. See [SCRIPTING.md](SCRIPTING.md) for preconnect overrides.
+
 SSH Helper is a Windows Forms desktop app for executing SSH commands and YAML automation across many hosts, with presets/folders, scheduler jobs, Flow Canvas visual authoring, and persistent execution history.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -52,6 +89,10 @@ SSH Helper is a Windows Forms desktop app for executing SSH commands and YAML au
 2. CSV must include `Host_IP`.
 3. Additional columns become variables (`${column_name}` and `{{column_name}}`).
 4. You can also add/edit rows manually in the host grid.
+
+When exiting with unsaved CSV changes, **Yes** saves before closing, **No**
+closes without saving the CSV, and **Cancel** keeps the app open. Any unsaved
+preset changes are confirmed separately.
 
 ### Run Commands or Presets
 

@@ -764,6 +764,13 @@ namespace SSH_Helper
             _lblHostCount.TextAlign = ContentAlignment.MiddleLeft;
             _lblHostCount.Padding = new Padding(8, 0, 0, 0);
             tab.Controls.Add(_lblHostCount);
+            tab.Controls.Add(new Label
+            {
+                Text = ConnectionPortPolicyService.HelpText,
+                Dock = DockStyle.Bottom,
+                Height = 48,
+                Padding = new Padding(8, 2, 8, 2)
+            });
 
             _gridHosts.Dock = DockStyle.Fill;
             _gridHosts.AllowUserToAddRows = true;

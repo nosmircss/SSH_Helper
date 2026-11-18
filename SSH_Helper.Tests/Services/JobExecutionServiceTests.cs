@@ -50,6 +50,34 @@ public class JobExecutionServiceTests : IDisposable
 
     #region Helpers
 
+    [Theory]
+    [InlineData("router", " ", "22,222,2222", ConnectionPortSource.Environment)]
+    [InlineData("router", "22", "22", ConnectionPortSource.Row)]
+    [InlineData("router", "2200,2222", "2200,2222", ConnectionPortSource.Row)]
+    [InlineData("router:22", "bad,list", "22", ConnectionPortSource.Endpoint)]
+    public void BuildHostConnections_ConnectionPortUsesEnvironmentSnapshot(
+        string address, string rowPort, string expected, ConnectionPortSource source)
+    {
+        var environments = new EnvironmentService(_configService);
+        environments.UpdateActiveEnvironmentVariable("port", "22,222,2222");
+        environments.UpdateActiveEnvironmentVariable("port_check_timeout", "3");
+        using var service = CreateService();
+        var job = CreateTestJob();
+        job.Hosts = new()
+        {
+            new() { ["Host_IP"] = address, ["PoRt"] = rowPort, ["port_check"] = "tcp" }
+        };
+        var hosts = InvokePrivate<List<HostConnection>>(service, "BuildHostConnections", job);
+        var host = hosts.Single();
+        host.PortPolicy!.RawPort.Should().Be(expected);
+        host.PortPolicy.Source.Should().Be(source);
+        host.PortPolicy.RawCheck.Should().Be("tcp");
+        host.PortPolicy.RawTimeout.Should().Be("3");
+        environments.UpdateActiveEnvironmentVariable("port", "2200");
+        host.PortPolicy.RawPort.Should().Be(expected);
+        job.Hosts[0]["PoRt"].Should().Be(rowPort);
+    }
+
     private JobDefinition CreateTestJob(
         string name = "TestJob",
         ScheduleType schedule = ScheduleType.Recurring,

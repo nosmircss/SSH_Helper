@@ -1,7 +1,7 @@
 import { useFlowStore } from '../stores/useFlowStore';
 
 /** Key columns to suppress from the variables display (already shown explicitly). */
-const SUPPRESSED_KEYS = new Set(['Host_IP', 'port', 'username', 'password']);
+const SUPPRESSED_KEYS = new Set(['host_ip', 'port', 'username', 'password']);
 
 /** Max number of extra variable chips to show before truncating. */
 const MAX_VARS = 4;
@@ -39,10 +39,14 @@ export default function HostBar() {
 
   // Collect non-empty variables that aren't already shown explicitly.
   const extraVars = Object.entries(targetHost.variables)
-    .filter(([k, v]) => !SUPPRESSED_KEYS.has(k) && v !== '')
+    .filter(([k, v]) => !SUPPRESSED_KEYS.has(k.toLowerCase()) && v !== '')
     .slice(0, MAX_VARS);
 
-  const showPort = targetHost.port !== 22;
+  // variables.port carries the selected raw policy; numeric port is legacy compatibility only.
+  const rawPort = Object.entries(targetHost.variables)
+    .find(([key]) => key.toLowerCase() === 'port')?.[1]?.trim();
+  const displayPort = rawPort || String(targetHost.port);
+  const showPort = Boolean(rawPort) || targetHost.port !== 22;
 
   return (
     <div
@@ -64,7 +68,7 @@ export default function HostBar() {
 
       <Chip label="Host" value={targetHost.ip} labelColor={labelColor} valueColor={valueColor} />
       {showPort && (
-        <Chip label="Port" value={String(targetHost.port)} labelColor={labelColor} valueColor={valueColor} />
+        <Chip label="Port" value={displayPort} labelColor={labelColor} valueColor={valueColor} />
       )}
       {targetHost.username && (
         <Chip label="User" value={targetHost.username} labelColor={labelColor} valueColor={valueColor} />

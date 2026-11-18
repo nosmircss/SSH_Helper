@@ -7,6 +7,28 @@ namespace SSH_Helper.Tests.Scripting;
 
 public class ScriptDependencyAnalyzerTests
 {
+    [Theory]
+    [InlineData("candidate_ports")]
+    [InlineData("\"${candidate_ports}\"")]
+    public void AnalyzePresets_PortCandidates_TracksInputAndSelectedPort(string ports)
+    {
+        var result = new ScriptDependencyAnalyzer().AnalyzePresets(new[]
+        {
+            new PresetInfo
+            {
+                Commands = $$"""
+                    steps:
+                      - portcheck:
+                          host: localhost
+                          ports: {{ports}}
+                          into: found
+                      - print: "${found_port}"
+                    """
+            }
+        });
+        result.ReferencedColumns.Should().BeEquivalentTo("candidate_ports");
+    }
+
     [Fact]
     public void AnalyzePresets_WithSimpleReferences_ReportsAllMissingCandidates()
     {

@@ -50,7 +50,7 @@
   </ItemGroup>
 
   <!-- Copy rebex.key to output if it exists (for local development) -->
-  <ItemGroup Condition="Exists('rebex.key')">
+  <ItemGroup Condition="'$(SkipRebexKeyCopy)' != 'true' and Exists('rebex.key')">
     <None Include="rebex.key" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
@@ -68,7 +68,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Rebex.SshShell" Version="7.0.9561" />
     <PackageReference Include="Scintilla5.NET" Version="6.1.1" GeneratePathProperty="true" />
-    <PackageReference Include="SSH.NET" Version="2024.1.0" />
+    <PackageReference Include="SSH.NET" Version="2026.0.1" />
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
   </ItemGroup>
 
@@ -97,10 +97,7 @@
   </Target>
 
   <!-- Embed FlowCanvas dist assets so single-file publish can extract them at runtime -->
-  <Target Name="IncludeFlowCanvasDistEmbeddedResources"
-          BeforeTargets="AssignTargetPaths"
-          DependsOnTargets="BuildFlowCanvas"
-          Condition="Exists('FlowCanvas\dist\index.html')">
+  <Target Name="IncludeFlowCanvasDistEmbeddedResources" BeforeTargets="AssignTargetPaths" DependsOnTargets="BuildFlowCanvas" Condition="Exists('FlowCanvas\dist\index.html')">
     <ItemGroup>
       <_FlowCanvasDistFile Include="FlowCanvas\dist\**\*" />
       <EmbeddedResource Include="@(_FlowCanvasDistFile)">
@@ -111,8 +108,7 @@
 
   <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveReferences">
     <ItemGroup>
-      <Reference Remove="@(Reference)"
-                 Condition="'%(Reference.Identity)' != '' and $([System.String]::Copy('%(Reference.Identity)').EndsWith('Microsoft.Web.WebView2.Wpf.dll'))" />
+      <Reference Remove="@(Reference)" Condition="'%(Reference.Identity)' != '' and $([System.String]::Copy('%(Reference.Identity)').EndsWith('Microsoft.Web.WebView2.Wpf.dll'))" />
     </ItemGroup>
   </Target>
 

@@ -542,6 +542,17 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
 
           if (n.id === id) {
             nextProps[key] = value;
+            if (currentData.blockType === 'portcheck' && key === 'ports') {
+              const hasCandidates = Array.isArray(value) ? value.length > 0 : String(value ?? '').trim().length > 0;
+              if (hasCandidates) {
+                delete nextProps.port;
+                delete nextProps.target;
+              } else {
+                nextProps.ports = null;
+                nextProps.port = 22;
+                delete nextProps.target;
+              }
+            }
           }
           if (containersToForceExport.has(n.id)) {
             nextProps['_forceGraphExport'] = true;

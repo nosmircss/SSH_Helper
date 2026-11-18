@@ -112,7 +112,7 @@ namespace SSH_Helper
 
         #region Constants
 
-        private const string ApplicationVersion = "0.51.23";
+        private const string ApplicationVersion = "0.51.24";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -134,7 +134,9 @@ namespace SSH_Helper
         private static readonly Dictionary<string, string> SpecialHostGridColumnTooltips = new(StringComparer.OrdinalIgnoreCase)
         {
             [CsvManager.HostColumnName] = "Host IP/DNS/custom",
-            ["port"] = "Optional per-host SSH port. Host_IP with explicit :port overrides this value.",
+            ["port"] = ConnectionPortPolicyService.HelpText,
+            ["port_check"] = "Discovery only: ssh (default, no authentication) or tcp. Blank inherits environment.",
+            ["port_check_timeout"] = "Discovery seconds per candidate; default 2. Blank inherits environment.",
             ["username"] = "Optional per-host SSH username override.",
             ["password"] = "Optional per-host SSH password override.",
             ["vault_path"] = "Optional Vault credential path for per-host username/password resolution."
@@ -3931,15 +3933,13 @@ namespace SSH_Helper
 
         private void Form1_FormClosing(object? sender, FormClosingEventArgs e)
         {
-            if (!_exitConfirmed &&
-                e.CloseReason != CloseReason.WindowsShutDown &&
+            if (e.CloseReason != CloseReason.WindowsShutDown &&
                 e.CloseReason != CloseReason.TaskManagerClosing)
             {
-                if (!ConfirmExitWorkflow())
-                {
-                    e.Cancel = true;
+                // WinForms may have already cancelled closing because a control failed validation.
+                e.Cancel = !_exitConfirmed && !ConfirmExitWorkflow();
+                if (e.Cancel)
                     return;
-                }
             }
 
             _jobExecutionService?.Stop();
@@ -4329,6 +4329,15 @@ namespace SSH_Helper
                 dgv_variables.Columns[e.ColumnIndex].Name == "Host_IP")
             {
                 ClearConnectionTestVisualState(dgv_variables.Rows[e.RowIndex], e.ColumnIndex);
+            }
+            if (e.RowIndex >= 0 && !dgv_variables.Rows[e.RowIndex].IsNewRow)
+            {
+                var row = dgv_variables.Rows[e.RowIndex];
+                var host = HostConnection.Parse(GetCellValue(row, CsvManager.HostColumnName));
+                ConnectionPortPolicyService.Apply(host, GetRowVariables(row),
+                    _environmentService.GetActiveEnvironmentVariables(), null);
+                row.ErrorText = ConnectionPortPolicyService.GetAdvisory(host) ?? "";
+                SendTargetHostToCanvas();
             }
         }
 
@@ -13302,6 +13311,7 @@ namespace SSH_Helper
         {
             // Check if SSH config is enabled
             var sshConfigEnabled = _configService.GetCurrent().SshConfig.EnableSshConfig;
+            var environmentVariables = _environmentService.GetActiveEnvironmentVariables();
             var vaultCredentialProvider = _vaultService != null
                 ? new VaultCredentialProvider(_vaultService)
                 : null;
@@ -13315,16 +13325,12 @@ namespace SSH_Helper
                     continue;
 
                 var host = HostConnection.Parse(hostIp);
-                if (!TryGetExplicitPortFromHostValue(hostIp, out _))
-                {
-                    var rowPort = GetCellValue(row, "port");
-                    if (int.TryParse(rowPort, out var parsedPort) && InputValidator.IsValidPort(parsedPort))
-                    {
-                        host.Port = parsedPort;
-                    }
-                }
-
                 host.Username = GetCellValue(row, "username");
+                var rowVariables = GetRowVariables(row);
+                var credentialIdentity = ConnectionPortPolicyService.CaptureLegacyCredentialIdentity(
+                    hostIp, rowVariables, tsbUsername.Text);
+                ConnectionPortPolicyService.Apply(host, rowVariables, environmentVariables,
+                    sshConfigEnabled ? _sshConfigService.GetHostConfig(host.IpAddress) : null);
                 var passwordValue = GetCellValue(row, "password");
                 var vaultPathValue = GetCellValue(row, "vault_path");
                 var vaultResolved = false;
@@ -13345,12 +13351,11 @@ namespace SSH_Helper
                 var useCredentialManager = IsCredentialManagerAvailable;
                 if (!vaultResolved && useCredentialManager)
                 {
-                    var resolvedUsername = string.IsNullOrWhiteSpace(host.Username) ? tsbUsername.Text : host.Username;
                     if (!string.IsNullOrWhiteSpace(passwordValue))
                     {
-                        StoreHostPassword(host.ToString(), resolvedUsername, passwordValue);
+                        StoreHostPassword(credentialIdentity.HostKey, credentialIdentity.Username, passwordValue);
                     }
-                    else if (TryResolveHostPassword(host.ToString(), resolvedUsername, out var storedPassword))
+                    else if (TryResolveHostPassword(credentialIdentity.HostKey, credentialIdentity.Username, out var storedPassword))
                     {
                         passwordValue = storedPassword;
                     }
@@ -13358,33 +13363,9 @@ namespace SSH_Helper
 
                 host.Password = passwordValue;
 
-                // Collect all variables from the row (skip the select checkbox column)
-                foreach (DataGridViewColumn col in dgv_variables.Columns)
-                {
-                    if (string.IsNullOrEmpty(col.Name)) continue;
-                    host.Variables[col.Name] = row.Cells[col.Index].Value?.ToString() ?? "";
-                }
-
                 if (!string.IsNullOrEmpty(host.Password))
                 {
                     host.Variables["password"] = host.Password;
-                }
-
-                var environmentVariables = _environmentService.GetActiveEnvironmentVariables();
-                foreach (var kvp in environmentVariables)
-                {
-                    if (!host.Variables.TryGetValue(kvp.Key, out var currentValue) ||
-                        string.IsNullOrWhiteSpace(currentValue))
-                    {
-                        host.Variables[kvp.Key] = kvp.Value;
-                    }
-                }
-
-                // Apply SSH config settings if enabled (grid values take precedence)
-                if (sshConfigEnabled)
-                {
-                    var sshConfig = _sshConfigService.GetHostConfig(host.IpAddress);
-                    host.ApplySshConfig(sshConfig);
                 }
 
                 yield return host;
@@ -13396,6 +13377,15 @@ namespace SSH_Helper
             if (!dgv_variables.Columns.Contains(columnName))
                 return "";
             return row.Cells[columnName].Value?.ToString() ?? "";
+        }
+
+        private Dictionary<string, string> GetRowVariables(DataGridViewRow row)
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataGridViewColumn column in dgv_variables.Columns)
+                if (!string.IsNullOrEmpty(column.Name) && column.Name != SelectColumnName)
+                    values[column.Name] = row.Cells[column.Index].Value?.ToString() ?? "";
+            return values;
         }
 
         private static bool TryGetExplicitPortFromHostValue(string hostValue, out int port)
@@ -13456,24 +13446,20 @@ namespace SSH_Helper
         private object BuildHostPayload(DataGridViewRow row)
         {
             var ip = GetCellValue(row, CsvManager.HostColumnName);
-            var portStr = GetCellValue(row, "port");
             var username = GetCellValue(row, "username");
-
-            var variables = new Dictionary<string, string>();
-            foreach (DataGridViewColumn col in dgv_variables.Columns)
-            {
-                if (col.Name == SelectColumnName) continue;
-                var val = row.Cells[col.Index].Value?.ToString() ?? "";
-                if (!string.IsNullOrEmpty(val))
-                    variables[col.Name] = val;
-            }
+            // Pure capture only: preview must never fetch credentials or probe.
+            var host = HostConnection.Parse(ip);
+            ConnectionPortPolicyService.Apply(host, GetRowVariables(row),
+                _environmentService.GetActiveEnvironmentVariables(),
+                _configService.GetCurrent().SshConfig.EnableSshConfig
+                    ? _sshConfigService.GetHostConfig(host.IpAddress) : null);
 
             return new
             {
                 ip,
-                port = int.TryParse(portStr, out var p) ? p : 22,
+                port = host.Port,
                 username = string.IsNullOrWhiteSpace(username) ? tsbUsername.Text : username,
-                variables
+                variables = host.Variables
             };
         }
 

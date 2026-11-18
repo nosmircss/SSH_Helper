@@ -10,6 +10,78 @@ namespace SSH_Helper.Tests.Services;
 public class SshExecutionServicePreconnectTests
 {
     [Fact]
+    public async Task ExecuteScriptAsync_PreconnectDiscovery_UsesRuntimeListAndDoesNotAffectNextRun()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        using var service = new SshExecutionService();
+        var host = new HostConnection
+        {
+            IpAddress = "127.0.0.1",
+            Port = 22,
+            Variables = new Dictionary<string, string> { ["Host_IP"] = "127.0.0.1", ["port"] = "22" }
+        };
+        var script = $$"""
+            vars:
+              candidates: [{{port}}, 22]
+            preconnect:
+              - portcheck:
+                  host: "${Host_IP}"
+                  ports: "${candidates}"
+                  mode: tcp
+                  into: found
+              - set: _ssh_port = found_port
+            steps:
+              - print: "selected=${port}"
+            """;
+
+        var results = await service.ExecuteScriptAsync(new[] { host }, script, "", "", SshTimeoutOptions.Default);
+        results[0].Success.Should().BeTrue();
+        results[0].Output.Should().Contain($"selected={port}");
+        host.Port.Should().Be(22);
+        host.Variables["port"].Should().Be("22");
+        var nextRun = await service.ExecuteScriptAsync(new[] { host },
+            "steps:\n  - print: 'selected=${port}'", "", "", SshTimeoutOptions.Default);
+        nextRun[0].Output.Should().Contain("selected=22");
+    }
+
+    [Theory]
+    [InlineData("2222", true)]
+    [InlineData("0", false)]
+    [InlineData("65536", false)]
+    [InlineData("\"bad\"", false)]
+    [InlineData("22.5", false)]
+    [InlineData("\"\"", false)]
+    public async Task ExecuteScriptAsync_PreconnectPortOverride_IsValidatedAndRunLocal(string value, bool valid)
+    {
+        using var service = new SshExecutionService();
+        var host = new HostConnection
+        {
+            IpAddress = "127.0.0.1",
+            Port = 22,
+            Variables = new Dictionary<string, string> { ["port"] = "22" }
+        };
+        var script = $$"""
+            preconnect:
+              - set: _ssh_port = {{value}}
+            steps:
+              - print: "selected=${port}"
+            """;
+
+        var results = await service.ExecuteScriptAsync(new[] { host }, script, "", "", SshTimeoutOptions.Default);
+
+        results[0].Success.Should().Be(valid);
+        if (valid)
+            results[0].Output.Should().Contain("selected=2222");
+        else
+            results[0].ErrorMessage.Should().Contain("_ssh_port");
+        host.Port.Should().Be(22);
+        host.Variables.Should().ContainKey("port").WhoseValue.Should().Be("22");
+        host.Variables.Should().NotContainKey("_ssh_port");
+    }
+
+    [Fact]
     public void BuildEffectiveHostVariables_PromptBuiltIn_IsNotPropagatedToMergedHostVariables()
     {
         var host = new HostConnection

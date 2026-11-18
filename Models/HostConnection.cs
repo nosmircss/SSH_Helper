@@ -6,7 +6,25 @@ namespace SSH_Helper.Models
     public class HostConnection
     {
         public string IpAddress { get; set; } = string.Empty;
-        public int Port { get; set; } = 22;
+        private int _port = 22;
+        public int Port { get => _port; set { _port = value; HasExplicitPort = true; } }
+        public bool HasExplicitPort { get; private set; }
+        internal bool HasEndpointPort { get; private set; }
+        public ConnectionPortPolicy? PortPolicy { get; set; }
+        public bool IsPortResolvedForRun { get; internal set; }
+        // Run clones carry identity, never credentials/history under a discovered endpoint.
+        internal HostConnection? OriginalHost { get; set; }
+        internal HostConnection EventHost => OriginalHost ?? this;
+
+        internal HostConnection CloneForRun()
+        {
+            var clone = (HostConnection)MemberwiseClone();
+            clone.Variables = new Dictionary<string, string>(Variables, StringComparer.OrdinalIgnoreCase);
+            clone.HostKeyAlgorithms = HostKeyAlgorithms?.ToArray();
+            clone.Ciphers = Ciphers?.ToArray();
+            clone.OriginalHost = EventHost;
+            return clone;
+        }
         public string? Username { get; set; }
         public string? Password { get; set; }
         public Dictionary<string, string> Variables { get; set; } = new();
@@ -48,6 +66,7 @@ namespace SSH_Helper.Models
             if (parts.Length > 1 && int.TryParse(parts[1], out int port) && port > 0 && port <= 65535)
             {
                 result.Port = port;
+                result.HasEndpointPort = true;
             }
 
             return result;
@@ -72,9 +91,9 @@ namespace SSH_Helper.Models
         {
             if (config == null) return;
 
-            // Port: Only use config if grid has default (22)
-            if (Port == 22 && config.Port.HasValue)
-                Port = config.Port.Value;
+            // Explicit 22 and pending discovery policies must not be replaced by config.
+            if (!HasExplicitPort && PortPolicy == null && config.Port.HasValue)
+                _port = config.Port.Value;
 
             // Username: Only use config if grid is empty
             if (string.IsNullOrEmpty(Username) && !string.IsNullOrEmpty(config.User))

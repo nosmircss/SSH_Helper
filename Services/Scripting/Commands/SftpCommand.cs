@@ -12,10 +12,10 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     public class SftpCommand : IScriptCommand
     {
-        public Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
+        public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
         {
             if (step.Sftp == null)
-                return Task.FromResult(CommandResult.Fail("Sftp command has no options"));
+                return CommandResult.Fail("Sftp command has no options");
 
             var options = step.Sftp;
             var into = options.Into;
@@ -23,14 +23,14 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             var action = context.SubstituteVariables(options.Action ?? string.Empty).Trim().ToLowerInvariant();
             if (action != "upload" && action != "download")
-                return Task.FromResult(ApplyOnError(step, "Sftp requires 'action' to be upload or download"));
+                return ApplyOnError(step, "Sftp requires 'action' to be upload or download");
 
             var localPath = ResolveLocalPath(context, options.LocalPath);
             var remotePath = context.SubstituteVariables(options.RemotePath ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(localPath))
-                return Task.FromResult(ApplyOnError(step, "Sftp requires 'local_path'"));
+                return ApplyOnError(step, "Sftp requires 'local_path'");
             if (string.IsNullOrWhiteSpace(remotePath))
-                return Task.FromResult(ApplyOnError(step, "Sftp requires 'remote_path'"));
+                return ApplyOnError(step, "Sftp requires 'remote_path'");
 
             var timeoutSeconds = options.Timeout > 0 ? options.Timeout : 120;
 
@@ -38,7 +38,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 if (!options.Overwrite && File.Exists(localPath))
                 {
-                    return Task.FromResult(ApplyOnError(step, $"Sftp download destination already exists: {localPath}"));
+                    return ApplyOnError(step, $"Sftp download destination already exists: {localPath}");
                 }
 
                 var localDir = Path.GetDirectoryName(localPath);
@@ -48,20 +48,20 @@ namespace SSH_Helper.Services.Scripting.Commands
             else
             {
                 if (!File.Exists(localPath))
-                    return Task.FromResult(ApplyOnError(step, $"Sftp upload source not found: {localPath}"));
+                    return ApplyOnError(step, $"Sftp upload source not found: {localPath}");
             }
-
-            ResolveEndpoint(options, context, out var host, out var port, out var username, out var password);
-            if (string.IsNullOrWhiteSpace(host))
-                return Task.FromResult(ApplyOnError(step, "Sftp requires a host (or Host_IP in current context)"));
-            if (string.IsNullOrWhiteSpace(username))
-                return Task.FromResult(ApplyOnError(step, "Sftp requires username (or username in current context)"));
-            if (string.IsNullOrWhiteSpace(password))
-                return Task.FromResult(ApplyOnError(step, "Sftp requires password (or password in current context)"));
 
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var (host, port, username, password) = await ResolveEndpointAsync(
+                    options, context, context.PortResolver, cancellationToken);
+                if (string.IsNullOrWhiteSpace(host))
+                    return ApplyOnError(step, "Sftp requires a host (or Host_IP in current context)");
+                if (string.IsNullOrWhiteSpace(username))
+                    return ApplyOnError(step, "Sftp requires username (or username in current context)");
+                if (string.IsNullOrWhiteSpace(password))
+                    return ApplyOnError(step, "Sftp requires password (or password in current context)");
 
                 using var sftp = new SftpClient(host, port, username, password)
                 {
@@ -73,7 +73,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
                 if (action == "upload" && !options.Overwrite && sftp.Exists(remotePath))
                 {
-                    return Task.FromResult(ApplyOnError(step, $"Sftp upload destination already exists: {remotePath}"));
+                    return ApplyOnError(step, $"Sftp upload destination already exists: {remotePath}");
                 }
 
                 if (action == "upload")
@@ -94,11 +94,12 @@ namespace SSH_Helper.Services.Scripting.Commands
                     context.EmitOutput($"Sftp: downloaded {bytes} bytes from {host}:{port} ({remotePath})", ScriptOutputType.Debug);
                 }
 
-                return Task.FromResult(CommandResult.Ok());
+                return CommandResult.Ok();
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
-                return Task.FromResult(ApplyOnError(step, $"Sftp error: {ex.Message}"));
+                return ApplyOnError(step, $"Sftp error: {ex.Message}");
             }
         }
 
@@ -108,32 +109,38 @@ namespace SSH_Helper.Services.Scripting.Commands
             return Environment.ExpandEnvironmentVariables(substituted).Trim();
         }
 
-        private static void ResolveEndpoint(
+        internal static async Task<(string Host, int Port, string Username, string Password)> ResolveEndpointAsync(
             SftpOptions options,
             ScriptContext context,
-            out string host,
-            out int port,
-            out string username,
-            out string password)
+            ConnectionPortResolver resolver,
+            CancellationToken cancellationToken)
         {
             var rawHost = context.SubstituteVariables(options.Host ?? string.Empty).Trim();
+            var useCurrentPolicy = string.IsNullOrWhiteSpace(rawHost) && !options.Port.HasValue &&
+                context.CurrentHost != null;
+            if (useCurrentPolicy)
+            {
+                var effective = await context.ResolveCurrentHostAsync(resolver, cancellationToken);
+                rawHost = effective.IpAddress;
+            }
             if (string.IsNullOrWhiteSpace(rawHost))
-                rawHost = context.GetVariableString("Host_IP");
+                rawHost = context.CurrentHost?.IpAddress ?? context.GetVariableString("Host_IP");
 
-            host = rawHost;
-            port = options.Port ?? 0;
+            var host = rawHost;
+            var port = options.Port ?? (useCurrentPolicy ? context.CurrentHost!.Port : 0);
             ParseHostWithOptionalPort(rawHost, ref host, ref port);
 
             if (port <= 0)
                 port = 22;
 
-            username = context.SubstituteVariables(options.Username ?? string.Empty).Trim();
+            var username = context.SubstituteVariables(options.Username ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(username))
                 username = context.GetVariableString("username").Trim();
 
-            password = context.SubstituteVariables(options.Password ?? string.Empty).Trim();
+            var password = context.SubstituteVariables(options.Password ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(password))
                 password = context.GetVariableString("password").Trim();
+            return (host, port, username, password);
         }
 
         private static void ParseHostWithOptionalPort(string hostValue, ref string host, ref int port)
