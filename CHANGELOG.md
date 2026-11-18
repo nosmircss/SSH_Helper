@@ -1,5 +1,123 @@
 # Changelog
 
+## Changes Since `557691c` (0.51.24)
+
+This release adds **automatic SSH port discovery** from environment variables and host-grid columns, extends the YAML **`portcheck`** command with ordered candidates and unauthenticated SSH handshakes, and carries the selected endpoint through manual runs, scheduled jobs, connection tests, interactive terminals, and current-host SFTP. Flow Canvas exposes the same candidate settings without replacing the saved policy with a discovered port. Application exit also honors an accepted close request when WinForms control validation has already marked the request as cancelled.
+
+### Automatic SSH Port Discovery
+
+The existing `port` variable accepts either a **fixed scalar** or an **ordered comma-separated list**. Setting environment variable `port=22,222,2222` and leaving the row's `port` cell blank checks those candidates in order and selects the first qualifying endpoint. A scalar never probes: an existing row containing `22` remains fixed to port 22 until that cell is cleared.
+
+`Services/ConnectionPortPolicyService.cs` captures the selected policy in the new `Models/ConnectionPortPolicy.cs` model; `ConnectionPortResolver` validates and resolves it only when a connection is needed.
+
+| Priority | Source | Behavior |
+|----------|--------|----------|
+| 1 | Preconnect `_ssh_port` | Overrides the policy with one validated port for this run |
+| 2 | Explicit `Host_IP:port` or programmatic port | Remains fixed, including explicit port 22 |
+| 3 | Nonblank row `port` | Supplies a fixed port or replaces the environment candidate list |
+| 4 | Environment `port` | Supplies the policy when the row cell is blank or whitespace |
+| 5 | SSH-config port | Applies when SSH config is enabled and no higher-priority port is supplied |
+| 6 | Default | Uses fixed port 22 when no other source supplies a port |
+
+Discovery settings independently inherit environment values when their corresponding row cells are blank:
+
+| Setting | Default | Accepted values |
+|---------|---------|-----------------|
+| `port` | SSH-config port or fixed 22 | One integer or an ordered comma-separated list; every port must be in `1..65535` |
+| `port_check` | `ssh` | `ssh` for version exchange and cryptographic negotiation without authentication; `tcp` for a socket connection |
+| `port_check_timeout` | 2 seconds per candidate | Integer seconds from 1 through 2147483 |
+
+- **Validation before probing** — `InputValidator.TryParsePortCandidates` rejects empty tokens, non-integers, and out-of-range values before the first network request. Candidate order and duplicates are preserved. Discovery-only mode and timeout settings are validated for lists, not fixed ports.
+- **Bounded SSH handshakes** — `Services/ConnectionPortProbe.cs` shares one deadline across a candidate's SSH algorithm fallback attempts. Explicit host-key algorithm preferences remain authoritative; compatibility fallbacks apply to recognized algorithm failures when those preferences are absent.
+- **Timeout versus cancellation** — a timed-out candidate advances to the next listed port; cancelling the run stops discovery. Rebex disposal exceptions caused by an interrupted handshake are normalized to cancellation so the candidate deadline produces a timeout result rather than aborting the list.
+- **Explicit exhaustion** — failure reports the attempted ports and their diagnostics. Discovery never appends an implicit port 22, and an authentication or connection failure after endpoint selection does not resume the candidate search.
+- **Debug-only progress** — candidate outcomes and selected-endpoint messages appear only when application debug mode or the script's `debug: true` setting enables them. Normal output remains quiet during discovery; failures remain visible.
+
+### Scripting: Candidate Ports, SSH Checks, and Preconnect Overrides
+
+The existing `portcheck` command gains **`ports`** and **`mode`** options. Its defaults remain distinct from automatic discovery: **TCP mode**, **port 22**, and **5 seconds per candidate**.
+
+```yaml
+---
+preconnect:
+  - portcheck:
+      host: "${Host_IP}"
+      ports: [22, 222, 2222]
+      mode: ssh
+      timeout: 5
+      into: discovered
+  - set: _ssh_port = discovered_port
+steps:
+  - send: hostname
+```
+
+- **Candidate sources** — `ports` accepts a YAML list, a runtime list variable, or comma-separated text. Bare variable names, `${candidate_ports}`, and `{{candidate_ports}}` references are supported. `port` and `ports` are mutually exclusive.
+- **Captures** — `into: discovered` retains `${discovered}` (`open`, `closed`, or `timeout`) and `${discovered_latency}`, and adds `${discovered_port}` containing the selected port or an empty string on failure.
+- **Validation and errors** — the parser validates candidate shapes, literal port ranges, mode, timeout, and conflicting options. Runtime values are validated before probing. Exhaustion produces a step failure with per-port diagnostics; `on_error: continue` remains the explicit way to suppress that failure.
+- **Preconnect ordering** — `preconnect` sees the original raw `${port}` policy before automatic selection. `_ssh_port` must resolve to one integer in `1..65535`; a valid override bypasses lower-priority policies, including malformed lists, while an invalid override fails explicitly.
+- **Editor integration** — `ScriptDependencyAnalyzer` tracks candidate-source inputs and the derived `_port` capture. `ScriptAutocompleteProvider` recognizes `_port` and `_latency` capture suffixes.
+
+SSH mode uses Rebex to complete an unauthenticated handshake, not merely read a server banner. It requires the same Rebex license as ordinary SSH sessions; success does not establish that credentials authenticate or verify server identity.
+
+### Shared Runtime Endpoint and Credential Identity
+
+- **Manual runs and connection tests** — `SshExecutionService` resolves the policy before creating pooled or standalone execution transports. `TestConnectionAsync` resolves discovery first, then performs its existing lightweight TCP connection test against the selected candidate.
+- **Scheduled jobs** — `JobExecutionService.BuildHostConnections` captures active-environment variables when building the run's hosts and applies the same row/environment/SSH-config precedence. Later environment edits do not change that captured policy or rewrite the stored job rows.
+- **Interactive terminals** — separate terminal and capture sessions resolve the current host before creating their SSH resources. Shared-session mode uses its existing shell rather than starting discovery.
+- **Lazy current-host SFTP** — an SFTP step without explicit `host` or `port` resolves the current policy on demand and reuses an already-selected endpoint. Explicit SFTP endpoints remain independent of current-host discovery.
+- **One selection per run context** — `ScriptContext.ResolveCurrentHostAsync` shares a lazy resolution task across parallel operations and subroutine scopes. Its failure or cancellation is shared within that run; a waiting caller can cancel its own wait without cancelling the owner operation. New runs start selection afresh.
+- **Runtime variables without source mutation** — after selection, `${port}`, `{{port}}`, variable snapshots, and child scopes expose the actual selected port. Run clones preserve the original host identity for output/progress events while leaving saved rows, environment variables, and job definitions unchanged.
+- **Credential compatibility** — `ConnectionPortPolicyService.CaptureLegacyCredentialIdentity` preserves existing Windows Credential Manager target keys rather than re-keying passwords by the discovered winner.
+- **No persistent winner cache** — each new connection intent starts with the first candidate, even with a warm connection pool; pooling applies only after endpoint selection. Local-only scripts do not automatically probe.
+
+### Flow Canvas and Host-Grid Guidance
+
+- **Raw policy in the Host Bar** — `FlowCanvas/src/panels/HostBar.tsx` displays the captured scalar/list policy from `variables.port` instead of misleadingly showing the compatibility numeric port. Core variable names are suppressed case-insensitively so mixed-case port columns do not produce duplicate chips.
+- **Side-effect-free preview** — `Form1.BuildHostPayload` captures the effective policy without probing or retrieving credentials. Host-grid edits refresh the canvas target and show a nonblocking advisory for invalid policies, allowing preconnect to supply an override.
+- **Port Check block properties** — the block gains **Candidate Ports** and **Check Mode** fields. Supplying candidates hides and removes the scalar port; clearing candidates restores port 22.
+- **Bridge round-trip** — `FlowCanvasBridge` preserves YAML candidate arrays and runtime source expressions during import and forced graph export, and removes the mutually exclusive scalar/list option when the other is edited.
+- **Inline help** — host-grid tooltips, `EnvironmentDialog`, and `JobEditorDialog` explain fixed ports, ordered candidates, blank-cell inheritance, probe mode, and per-candidate timeout.
+
+### Application Exit
+
+**Confirmed exit overrides stale validation cancellation** — `Form1_FormClosing` explicitly assigns `FormClosingEventArgs.Cancel` from the exit workflow instead of only setting it when exit is rejected. A control-validation cancellation no longer keeps the main window open after an accepted exit, including when the CSV is already saved or File > Exit has already confirmed the workflow.
+
+The CSV prompt retains its intended choices: **Yes** saves before closing, **No** closes without saving the CSV, and **Cancel** keeps the app open. Pending preset changes remain a separate confirmation.
+
+### Dependency Changes
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| SSH.NET | 2024.1.0 -> 2026.0.1 | Updates the SFTP backend |
+
+**SFTP compatibility** — legacy DSA (`ssh-dss`) keys are not supported; SFTP servers must offer another supported host key, such as Ed25519, ECDSA, or RSA. Rebex-backed SSH shell and terminal connections remain separate.
+
+**Build option** — `SSH_Helper.csproj` adds `SkipRebexKeyCopy=true` to suppress copying a local `rebex.key` into build output. Default key-copy behavior remains unchanged.
+
+### Test Coverage
+
+**New C# test classes (`SSH_Helper.Tests/`):**
+
+| Area | Test classes | Coverage |
+|------|--------------|----------|
+| Policy and resolution | `Services/ConnectionPortPolicyTests.cs`, `Services/ConnectionPortResolverTests.cs` | Precedence, explicit port 22, independent inheritance, validation, ordered selection, timeout continuation, cancellation, and source immutability |
+| Execution and connection tests | `Services/SshExecutionServicePortDiscoveryTests.cs`, `Services/ConnectionPortTestConnectionTests.cs` | Pooled/standalone execution, selected transport endpoints, original event identities, preconnect overrides, debug-only output, and cancellation |
+| Interactive terminals | `Services/InteractiveTerminalPortDiscoveryTests.cs` | Resolution before resource creation, shared-session behavior, active selections, and debug-only messages |
+| SSH probes | `Scripting/PortcheckProbeTests.cs` | Handshake-only operation, disposal, observed workers, shared fallback deadlines, explicit algorithms, and configuration-error propagation |
+| SFTP and shared state | `Scripting/SftpEndpointTests.cs` | Lazy current-host resolution, explicit endpoints, parallel callers, subroutine scope visibility, shared failure/cancellation, and independent waiter cancellation |
+| Host UI | `UI/ConnectionPortHostBuilderTests.cs`, `UI/ConnectionPortPreviewTests.cs` | Credential-key compatibility, preview purity, policy precedence, and unchanged grid/environment values |
+| Exit workflow | `UI/Form1ExitWorkflowTests.cs` | Actual Yes/No/Cancel prompt buttons, saved CSVs, File > Exit, validation cancellation, and whether a CSV is written |
+
+Existing `NetworkCommandTests`, `NetworkStepParserTests`, `ScriptDependencyAnalyzerTests`, `FlowCanvasBridgeTests`, `JobExecutionServiceTests`, and `SshExecutionServicePreconnectTests` gain coverage for candidate lists, captures, parser errors, YAML round-trips, environment snapshots, and preconnect endpoint overrides.
+
+**Flow Canvas (vitest)** — new `panels/__tests__/HostBar.test.tsx` covers raw policy display, legacy scalar payloads, no-target guidance, and case-insensitive columns. `graphSlice.addConnectDelete.test.ts` covers mutually exclusive candidate/scalar properties and restoring the default port.
+
+### Documentation
+
+`README.md` documents automatic port discovery, precedence examples, runtime-only selection, debug output, and CSV exit choices. `SCRIPTING.md` distinguishes automatic discovery defaults from YAML `portcheck`, documents `_ssh_port`, candidate sources and captures, and records the SFTP DSA compatibility limitation. `docs/plans/2026-11-18-connection-port-discovery.md` records the feature's implementation plan.
+
+---
+
 ## Changes Since `52c0ee4` (0.51.23)
 
 This release lands three pillars and a hardening pass. The Flow Canvas gains a **Run Output console** — the main form's output stream mirrored into a tabbed bottom dock and, optionally, a **detachable OS window** you can drag to a second monitor. The scripting engine and canvas together gain a **loop iteration stepper**: every `foreach`/`while`/`repeat` iteration is recorded with its own per-block status, durations, output, and an end-of-iteration variable snapshot, and the canvas can replay any iteration after the run. The SSH shell session's command-read loop was made unit-testable and fixed for prompt-redraw misalignment. Around them: display settings became continuous sliders with zoom-aware canvas chrome, per-block output attribution was corrected for container steps, and a cluster of branch-membership/step-path integrity bugs was fixed. As before, every canvas change keeps the preset-builder invariant: **nothing new is serialized into the exported YAML script** — view state travels via `WindowState` or `CanvasLayoutData` only.
