@@ -14,7 +14,8 @@ permissions:
 
 jobs:
   flowcanvas-browser-tests:
-    runs-on: ubuntu-latest
+    # Playwright 1.60.0 does not support Ubuntu 26.04 from ubuntu-latest.
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout
